@@ -1,5 +1,4 @@
 # planner-dayflex
-# planner-dayflex
 
 `planner-dayflex` is a forgiving daily planner for people whose days contain
 both immovable commitments and work that has to flex around real life. Its
