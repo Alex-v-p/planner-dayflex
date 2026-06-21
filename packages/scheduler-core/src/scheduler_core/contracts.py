@@ -285,10 +285,12 @@ class SchedulerConfiguration:
         for field_name, value, minimum in (
             ("buffer_minutes", self.buffer_minutes, 0),
             ("minimum_free_time_minutes", self.minimum_free_time_minutes, 1),
-            ("minimum_segment_minutes", self.minimum_segment_minutes, 1),
+            ("minimum_segment_minutes", self.minimum_segment_minutes, 15),
             ("maximum_task_segments", self.maximum_task_segments, 1),
         ):
             _require_integer(value, field_name, minimum)
+        if self.maximum_task_segments > 3:
+            raise SchedulerValidationError("maximum_task_segments must be at most 3")
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +303,13 @@ class ScheduleWarning:
     def __post_init__(self) -> None:
         if not isinstance(self.code, WarningCode):
             raise SchedulerValidationError("warning code must be a WarningCode")
+        if not isinstance(self.details, Mapping) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in self.details.items()
+        ):
+            raise SchedulerValidationError(
+                "warning details must map strings to strings"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,6 +464,13 @@ class ScheduleResult:
         ):
             raise SchedulerValidationError(
                 "decisions must contain ScheduleDecision values"
+            )
+        if not isinstance(self.details, Mapping) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in self.details.items()
+        ):
+            raise SchedulerValidationError(
+                "decision details must map strings to strings"
             )
         if not all(isinstance(warning, ScheduleWarning) for warning in self.warnings):
             raise SchedulerValidationError(

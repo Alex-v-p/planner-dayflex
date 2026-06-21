@@ -125,7 +125,9 @@ def test_bad_split_configuration_is_rejected() -> None:
     with pytest.raises(SchedulerValidationError, match="minimum_segment_minutes"):
         SchedulerConfiguration(minimum_segment_minutes=0)
     with pytest.raises(SchedulerValidationError, match="maximum_task_segments"):
-        SchedulerConfiguration(maximum_task_segments=0)
+        SchedulerConfiguration(maximum_task_segments=4)
+    with pytest.raises(SchedulerValidationError, match="minimum_segment_minutes"):
+        SchedulerConfiguration(minimum_segment_minutes=14)
 
 
 def test_fixed_event_overlap_is_invalid_but_interruption_overlap_warns() -> None:
