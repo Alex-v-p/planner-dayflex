@@ -16,6 +16,7 @@ from scheduler_core import (
     ScheduleItemKind,
     ScheduleRequest,
     ScheduleResult,
+    ScheduleWarning,
     SchedulerConfiguration,
     SchedulerValidationError,
     TimeInterval,
@@ -166,6 +167,11 @@ def test_raw_zoneinfo_and_cumulative_progress_are_rejected() -> None:
             datetime(2026, 3, 29, 2, 30, tzinfo=zone),
             datetime(2026, 3, 29, 4, tzinfo=zone),
         )
+    with pytest.raises(SchedulerValidationError, match="ambiguous"):
+        TimeInterval(
+            datetime(2026, 10, 25, 2, 30, tzinfo=zone),
+            datetime(2026, 10, 25, 3, 30, tzinfo=zone),
+        )
     with pytest.raises(SchedulerValidationError, match="must not exceed"):
         ScheduleRequest(
             PlanningDay(DAY, ZONE),
@@ -182,3 +188,16 @@ def test_repeated_hour_intervals_use_explicit_offsets() -> None:
     first = local_datetime(date(2026, 10, 25), time(2, 30), ZONE, fold=0)
     second = local_datetime(date(2026, 10, 25), time(2), ZONE, fold=1)
     assert TimeInterval(first, second).overlaps(TimeInterval(first, second))
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: ScheduleWarning(WarningCode.LOCKED_TIME_OVERLAP_MERGED, {"count": 1}),
+        lambda: ScheduleDecision(DecisionReasonCode.DESIGNATED_FREE_TIME, details=None),
+    ],
+)
+def test_structured_details_require_string_mappings(factory) -> None:
+    """Structured reasons and warnings reject non-string detail values."""
+    with pytest.raises(SchedulerValidationError, match="details"):
+        factory()
