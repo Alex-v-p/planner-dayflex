@@ -134,12 +134,14 @@ class TimeInterval:
     def __post_init__(self) -> None:
         _require_aware_datetime(self.start, "start")
         _require_aware_datetime(self.end, "end")
-        if self.end <= self.start:
+        if self.end.astimezone(timezone.utc) <= self.start.astimezone(timezone.utc):
             raise SchedulerValidationError("interval end must be after start")
 
     def overlaps(self, other: TimeInterval) -> bool:
         """Return whether two half-open intervals share any time."""
-        return self.start < other.end and other.start < self.end
+        return self.start.astimezone(timezone.utc) < other.end.astimezone(
+            timezone.utc
+        ) and other.start.astimezone(timezone.utc) < self.end.astimezone(timezone.utc)
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,10 +336,18 @@ class ScheduleRequest:
                 if event.interval.overlaps(other_event.interval):
                     raise SchedulerValidationError("fixed events must not overlap")
         task_ids = {task.id for task in self.tasks}
+        completed_minutes = {task_id: 0 for task_id in task_ids}
         for progress in self.task_progress:
             if progress.task_id not in task_ids:
                 raise SchedulerValidationError(
                     "task progress must reference a task in the request"
+                )
+            completed_minutes[progress.task_id] += progress.completed_minutes
+        task_by_id = {task.id: task for task in self.tasks}
+        for task_id, total in completed_minutes.items():
+            if total > task_by_id[task_id].estimated_minutes:
+                raise SchedulerValidationError(
+                    "task progress must not exceed the task estimate"
                 )
 
     @property

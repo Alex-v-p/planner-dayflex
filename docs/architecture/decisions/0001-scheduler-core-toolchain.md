@@ -25,8 +25,9 @@ dependency.
 | Formatter and linter | Ruff |
 | Test runner | pytest |
 
-The package has no runtime dependencies. Setuptools, Ruff, and pytest are
-build or development dependencies only. Python 3.13 is pinned in
+The package uses `tzdata` at runtime so IANA zones and daylight-saving validation
+work consistently on Windows and CI. Setuptools, Ruff, and pytest are build or
+development dependencies only. Python 3.13 is pinned in
 `.python-version`, constrained by package metadata, and selected explicitly in
 CI.
 
