@@ -58,6 +58,25 @@ def _require_aware_datetime(value: datetime, field_name: str) -> None:
         raise SchedulerValidationError(
             f"{field_name} must be a timezone-aware datetime"
         )
+    if isinstance(value.tzinfo, ZoneInfo):
+        local_value = value.replace(tzinfo=None)
+        candidates = [
+            local_value.replace(tzinfo=value.tzinfo, fold=fold) for fold in (0, 1)
+        ]
+        valid = [
+            candidate
+            for candidate in candidates
+            if candidate.astimezone(timezone.utc)
+            .astimezone(value.tzinfo)
+            .replace(tzinfo=None)
+            == local_value
+        ]
+        if not valid:
+            raise SchedulerValidationError(f"{field_name} is a nonexistent local time")
+        if len(valid) == 2 and valid[0].utcoffset() != valid[1].utcoffset():
+            raise SchedulerValidationError(
+                f"{field_name} is ambiguous; provide an explicit UTC offset"
+            )
 
 
 def _require_integer(value: int, field_name: str, minimum: int) -> None:
@@ -120,8 +139,10 @@ def local_datetime(
             raise SchedulerValidationError(
                 "local time is ambiguous; an explicit fold is required"
             )
-        return valid_candidates[fold]
-    return valid_candidates[0]
+        candidate = valid_candidates[fold]
+    else:
+        candidate = valid_candidates[0]
+    return candidate.astimezone(timezone(candidate.utcoffset()))
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,7 @@
 """Tests for scheduler-core's framework-free contracts and validation."""
 
-from datetime import date, time
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -19,6 +20,7 @@ from scheduler_core import (
     SchedulerValidationError,
     TimeInterval,
     WarningCode,
+    TaskProgress,
     local_datetime,
 )
 
@@ -152,3 +154,29 @@ def test_fixed_event_overlap_is_invalid_but_interruption_overlap_warns() -> None
     )
 
     assert request.warnings[0].code is WarningCode.LOCKED_TIME_OVERLAP_MERGED
+
+
+def test_raw_zoneinfo_and_cumulative_progress_are_rejected() -> None:
+    """Public contracts enforce DST normalization and task duration limits."""
+    zone = ZoneInfo(ZONE)
+    with pytest.raises(SchedulerValidationError, match="nonexistent"):
+        TimeInterval(
+            datetime(2026, 3, 29, 2, 30, tzinfo=zone),
+            datetime(2026, 3, 29, 4, tzinfo=zone),
+        )
+    with pytest.raises(SchedulerValidationError, match="must not exceed"):
+        ScheduleRequest(
+            PlanningDay(DAY, ZONE),
+            at(8),
+            (),
+            (),
+            (task("study"),),
+            (TaskProgress("study", 45, at(9)), TaskProgress("study", 46, at(10))),
+        )
+
+
+def test_repeated_hour_intervals_use_explicit_offsets() -> None:
+    """UTC comparison preserves order across a DST fall-back."""
+    first = local_datetime(date(2026, 10, 25), time(2, 30), ZONE, fold=0)
+    second = local_datetime(date(2026, 10, 25), time(2), ZONE, fold=1)
+    assert TimeInterval(first, second).overlaps(TimeInterval(first, second))
