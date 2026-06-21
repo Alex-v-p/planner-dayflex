@@ -439,6 +439,13 @@ class ScheduleDecision:
     def __post_init__(self) -> None:
         if not isinstance(self.reason_code, DecisionReasonCode):
             raise SchedulerValidationError("reason_code must be a DecisionReasonCode")
+        if not isinstance(self.details, Mapping) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in self.details.items()
+        ):
+            raise SchedulerValidationError(
+                "decision details must map strings to strings"
+            )
         if self.task_id is not None:
             _require_non_empty_string(self.task_id, "task_id")
 
@@ -464,13 +471,6 @@ class ScheduleResult:
         ):
             raise SchedulerValidationError(
                 "decisions must contain ScheduleDecision values"
-            )
-        if not isinstance(self.details, Mapping) or not all(
-            isinstance(key, str) and isinstance(value, str)
-            for key, value in self.details.items()
-        ):
-            raise SchedulerValidationError(
-                "decision details must map strings to strings"
             )
         if not all(isinstance(warning, ScheduleWarning) for warning in self.warnings):
             raise SchedulerValidationError(
