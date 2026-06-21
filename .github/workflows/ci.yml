@@ -1,4 +1,4 @@
-name: CI
+name: Scheduler core CI
 
 on:
   pull_request:
@@ -10,18 +10,33 @@ permissions:
   contents: read
 
 jobs:
-  repository-check:
-    name: Repository configuration
+  scheduler-core-quality:
+    name: Scheduler core quality
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: packages/scheduler-core
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Confirm repository scaffold
-        run: |
-          test -f AGENTS.md
-          test -f docs/product/vision.md
-          test -f docs/architecture/overview.md
-          test -f .codex/config.toml
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
-      # Add format, lint, test, and build commands here after selecting the stack.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install scheduler-core
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest

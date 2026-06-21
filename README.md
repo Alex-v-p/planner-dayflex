@@ -5,9 +5,10 @@ both immovable commitments and work that has to flex around real life. Its
 central job is to help someone recover a useful plan after an interruption,
 not to punish them for having one.
 
-Project implementation is intentionally not initialized yet. The product and
-architecture direction is documented before any application folders or
-dependencies are introduced.
+Application services and the browser experience are intentionally not
+initialized yet. The first implementation increment is the pure
+[`scheduler-core`](packages/scheduler-core/README.md) package; its deterministic
+rules will grow before any service or infrastructure is introduced.
 
 ## Product direction
 
@@ -62,5 +63,6 @@ Release numbering and the planned automation work are documented in
 [the versioning policy](docs/architecture/versioning.md) and the queued
 [release automation ticket](docs/tickets/TKT-026-release-versioning-and-cd.md).
 
-The CI and deployment workflows are safe placeholders. Replace their marked
-commands only after choosing the project stack and hosting platform.
+The scheduler-core CI workflow runs its documented format, lint, and test
+commands. Deployment remains a safe placeholder until a hosting platform is
+chosen.
