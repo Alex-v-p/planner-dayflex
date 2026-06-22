@@ -9,12 +9,9 @@ Closes #ISSUE_NUMBER, or name the durable `TKT-xxx` record.
 
 ## Acceptance criteria
 
-State the satisfied outcomes as plain assertions. Use short, normal bullets
-when helpful; never use checkboxes or classification fields as tasks.
-
-## Screenshots
-
-Attach before/after screenshots for UI changes, or state `Not applicable`.
+List each criterion as one checkbox item, for example `- [x] Criterion met`.
+Use this checklist only for acceptance criteria; all other sections use prose
+or normal bullets.
 
 ## Validation
 
