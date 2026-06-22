@@ -206,6 +206,38 @@ def test_no_fit_on_its_due_date_returns_the_deadline_reason() -> None:
     ] == [DecisionReasonCode.INSUFFICIENT_TIME_BEFORE_DEADLINE]
 
 
+def test_free_time_threshold_excludes_29_minutes_and_includes_30() -> None:
+    """Only gaps meeting the configured threshold become designated free time."""
+    configuration = SchedulerConfiguration(
+        day_end=time(9),
+        buffer_minutes=0,
+        minimum_free_time_minutes=30,
+    )
+    twenty_nine_minute_gap = schedule(
+        request(
+            tasks=(task("nearly-free", 31, 3),),
+            configuration=configuration,
+        )
+    )
+    thirty_minute_gap = schedule(
+        request(
+            tasks=(task("exactly-free", 30, 3),),
+            configuration=configuration,
+        )
+    )
+
+    assert not [
+        item
+        for item in twenty_nine_minute_gap.items
+        if item.kind is ScheduleItemKind.DESIGNATED_FREE_TIME
+    ]
+    assert [
+        item.interval
+        for item in thirty_minute_gap.items
+        if item.kind is ScheduleItemKind.DESIGNATED_FREE_TIME
+    ] == [interval(8, 30, 9, 0)]
+
+
 def test_current_time_and_earliest_start_bound_new_work() -> None:
     """New tasks respect both the current instant and an individual earliest start."""
     result = schedule(
