@@ -1,7 +1,7 @@
-# TKT-022: Add optional AI schedule explanations
+# TKT-023: Add optional AI schedule explanations
 
 **Status:** Planned
-**Depends on:** TKT-017, TKT-021
+**Depends on:** TKT-018, TKT-022
 
 ## Goal
 
@@ -39,6 +39,12 @@ grounded in the actual schedule result.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+AI provider integration in the existing API service: explanation calls remain
+behind an API-owned adapter and typed contract. It adds no standalone AI
+service, model container, or Compose topology.
 
 ## Risk level
 

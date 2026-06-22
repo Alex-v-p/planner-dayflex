@@ -48,13 +48,38 @@ returned to the specialist with the right context:
 | Architecture, data boundary, auth, authorization, or security design needs correction | Architect |
 | Implementation behavior is incorrect | Implementer |
 | Test coverage or assertion is missing/incorrect | Tester |
-| Release, migration, configuration, or post-deploy concern | Release manager |
+| Migration implementation, configuration, infrastructure, or post-deploy defect | Implementer |
+| Release readiness, release notes, deployment notes, or migration/rollback planning | Release manager |
 
+The release manager assesses delivery concerns, and the orchestrator routes delivery changes to the implementer.
 The repair owner addresses only the finding and ticket scope. The orchestrator
 runs the affected checks, commits and pushes the repair, then asks the original
 reporter to recheck the updated diff. The loop continues until P0/P1 findings
-are absent. If a finding survives two repair cycles or needs a scope change, the
+are absent. A single repair or a clean intermediate check is never a terminal
+condition: the orchestrator continues the ticket through final validation, PR
+preparation, and all remaining review cycles without waiting for another prompt.
+If a finding survives two repair cycles or needs a scope change, the
 orchestrator pauses for a human decision.
+
+## Pull-request description
+
+Use `.github/pull_request_template.md`. A PR description is a concise report,
+not a generic task checklist: write plain statements for the summary,
+acceptance criteria, validation, CI changes, risk level, data-model impact, and
+review outcome. Checkboxes belong only to genuine actions someone still needs
+to complete, never to facts such as a risk classification, workflow role, or
+branch target.
+
+## Service and container delivery
+
+When a ticket introduces or changes a separately runnable service, its review
+and PR description must identify the service owner, external and internal
+contracts, configuration/secret source, health behavior, and the reason a
+process boundary is useful. For Docker or Compose changes, run the applicable
+configuration, image-build, and service health/connection checks before review;
+add the practical version to CI with the ticket or explain why it cannot run
+there. Pure packages do not need a container merely because future services may
+consume them.
 
 ## GitHub protection
 

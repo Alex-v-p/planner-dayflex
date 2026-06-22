@@ -1,7 +1,7 @@
-# TKT-026: Release versioning and CD automation
+# TKT-027: Release versioning and CD automation
 
 **Status:** Planned
-**Depends on:** TKT-025
+**Depends on:** TKT-026
 
 ## Goal
 
@@ -39,6 +39,11 @@ the version tag and deployment path.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+Release verification: verifies release and deployment behavior for existing
+services and images. It creates no new runnable service or topology.
 
 ## Risk level
 

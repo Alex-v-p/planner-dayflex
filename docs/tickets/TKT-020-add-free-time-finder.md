@@ -1,7 +1,7 @@
-# TKT-019: Add the free-time finder
+# TKT-020: Add the free-time finder
 
 **Status:** Planned
-**Depends on:** TKT-010, TKT-018
+**Depends on:** TKT-011, TKT-019
 
 ## Goal
 
@@ -38,6 +38,12 @@ I have already generated.
 ## Data-model impact
 
 None; queries existing schedule-item/free-time data.
+
+## Service and container impact
+
+Browser/API only: adds an API query and browser results over existing
+scheduler-designated free time. It adds no new runnable service, Docker image,
+or Compose topology.
 
 ## Risk level
 

@@ -61,7 +61,7 @@ The intended application layout is described in the flexible
 
 Release numbering and the planned automation work are documented in
 [the versioning policy](docs/architecture/versioning.md) and the queued
-[release automation ticket](docs/tickets/TKT-026-release-versioning-and-cd.md).
+[release automation ticket](docs/tickets/TKT-027-release-versioning-and-cd.md).
 
 The scheduler-core CI workflow runs its documented format, lint, and test
 commands. Deployment remains a safe placeholder until a hosting platform is

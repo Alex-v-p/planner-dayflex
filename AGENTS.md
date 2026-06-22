@@ -14,6 +14,12 @@ The workflow is:
 6. Ticket pull requests merge into `develop`; a human-approved release pull request moves `develop` into `main`.
 7. Deployment runs from `main` once deployment has been configured.
 
+The orchestrator owns a ticket from planning through PR preparation. It must
+continue the repair, validation, commit, push, and re-review loop after every
+finding; applying one fix is a checkpoint, not a reason to stop. It may pause
+only for a human-only action, a decision that materially changes ticket scope,
+or an external blocker it cannot safely resolve.
+
 ## Product and architecture context
 
 `planner-dayflex` is a daily planner whose core value is recovery after real
@@ -62,6 +68,13 @@ when a ticket needs new code. It provides stable ownership boundaries without
 requiring empty scaffolding. Any intentional exception must be explained in the
 ticket plan and reviewed by the architect.
 
+Preserve service boundaries and maintainability throughout the MVP. Add a
+separate service only when it owns a concrete responsibility and stable
+contract; do not turn a pure package or an in-process feature into a networked
+service without a ticketed reason. Keep business rules in their owning domain,
+communicate across service boundaries through explicit contracts, and do not
+bypass an owning service to reach its data store, queue, or model runtime.
+
 ## Core rule
 
 Do not implement vague requests directly.
@@ -70,6 +83,42 @@ Every code change must be connected to one ticket from either:
 
 - a GitHub Issue
 - `docs/tickets/TKT-xxx-name.md`
+
+## Implementation delegation
+
+The orchestrator coordinates work; it is not the ticket implementer. After the
+plan is approved, `implementer` owns the complete initial delivery: source
+code, configuration, infrastructure definitions, documentation, baseline
+tests, and CI changes. `tester` independently owns test-only coverage,
+fixtures, and test-only CI wiring. A P0/P1 behavior or deliverable defect returns
+to `implementer`; a missing or inadequate test-only check returns to `tester`.
+The orchestrator must not edit an implementation deliverable itself merely
+because it has the ability to do so.
+
+The only exception is when the current environment has no subagent capability
+available. In that case, the orchestrator may make the minimum necessary
+in-scope changes directly, but must record the unavailable capability and the
+exception in the ticket plan and PR summary. Availability, convenience, or a
+small documentation/configuration change are not exceptions.
+
+## Service and container expectations
+
+- Every ticket must state its service-boundary and container impact, including
+  `None` when it changes only a pure package or documentation.
+- A ticket that introduces an independently runnable service, durable store,
+  queue, reverse proxy, or multi-service connection must explain the owner,
+  public and internal interfaces, configuration and secret handling, health
+  behavior, and Docker/Compose impact before implementation.
+- Keep a service's image definition alongside that service when it exists; keep
+  shared local topology and Compose material under `infra/`. Compose must not
+  expose internal stores or internal-only services to the browser by default.
+- Container work needs proportionate verification: validate the Compose
+  configuration, build changed images, and run health/connection smoke checks
+  for affected services. Add practical checks to CI in the same ticket, or
+  record the specific reason they cannot run there.
+- Do not add Docker files merely to satisfy process. Pure libraries, including
+  `packages/scheduler-core`, stay directly testable without a container until a
+  scoped ticket establishes a real runtime boundary.
 
 ## Human-only actions
 
@@ -99,8 +148,12 @@ For each ticket:
    migration, backfill, and rollback implications.
 4. Create or confirm a `tkt-ISSUE_NUMBER-short-title` working branch from
    `develop`.
-5. Implement the smallest complete change.
-6. Add or update tests and run relevant checks.
+5. Delegate the complete initial delivery to `implementer`, including source,
+   configuration, infrastructure, documentation, baseline tests, and CI. Use a
+   direct implementation exception only as documented in
+   [Implementation delegation](#implementation-delegation).
+6. Delegate any test-only coverage, fixtures, or test-only CI wiring to
+   `tester`, then run relevant checks.
    When a ticket introduces a new runnable test, lint, build, contract, or
    migration check, update CI in the same ticket so the check runs on pull
    requests when practical.
@@ -109,9 +162,12 @@ For each ticket:
    secrets, force-push, or combine unrelated work.
 8. Ask a reviewer agent to inspect the diff against `develop`.
 9. Route P0/P1 findings back to the specialist best able to resolve them, then
-   re-check, commit, push, and review again. Do not merely report a blocking
-   finding as complete.
-10. Prepare a PR summary and open or update a PR targeting `develop`.
+   re-check, commit, push, and review again. The orchestrator must carry on
+   through every repair cycle until no P0/P1 findings remain; it must not return
+   control after the first fixed finding or a partial milestone. Do not merely
+   report a blocking finding as complete.
+10. Prepare the prose-first PR summary using `.github/pull_request_template.md`
+    and open or update a PR targeting `develop`.
 
 ## Definition of done
 
@@ -142,8 +198,10 @@ A ticket is done only when:
 - When a tester or reviewer finds a P0/P1 issue, the orchestrator classifies it
   before re-delegating: requirements ambiguity goes to `product_planner`;
   design, boundary, or security risk goes to `architect`; code defects go to
-  `implementer`; missing or incorrect coverage goes to `tester`; release
-  readiness goes to `release_manager`.
+  `implementer`; behavior or deliverable defects in source, configuration,
+  infrastructure, documentation, baseline tests, or CI go to `implementer`;
+  missing or incorrect test-only coverage, fixtures, or test-only CI wiring go
+  to `tester`; release readiness goes to `release_manager`.
 - After the delegated fix, run the affected checks, commit and push the result,
   then ask the original checking agent to verify it again. Repeat until no
   P0/P1 finding remains. If the same finding survives two repair cycles, or
@@ -162,6 +220,10 @@ Treat these as P1 or higher:
 - data deletion without confirmation
 - disabled or weakened tests
 - a new testable capability that is omitted from CI without an explicit reason
+- a changed service boundary that permits direct access to an internal
+  dependency or lacks an explicit contract
+- a changed Compose/container topology without configuration validation, image
+  build coverage, or proportionate health/connection checks
 - unrelated rewrites
 - broken migrations
 - missing tests for important behavior

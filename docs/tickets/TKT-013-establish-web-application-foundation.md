@@ -1,4 +1,4 @@
-# TKT-012: Establish the web application foundation
+# TKT-013: Establish the web application foundation
 
 **Status:** Planned
 **Depends on:** TKT-001
@@ -39,6 +39,11 @@ reusable UI conventions so feature tickets do not invent their own structure.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+Browser/API only: establishes the browser client and its API boundary without a
+new runnable service, Docker image, or Compose topology.
 
 ## Risk level
 

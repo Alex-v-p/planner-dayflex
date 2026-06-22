@@ -1,7 +1,7 @@
-# TKT-015: Manage tasks and fixed events in the web app
+# TKT-016: Manage tasks and fixed events in the web app
 
 **Status:** Planned
-**Depends on:** TKT-009, TKT-014
+**Depends on:** TKT-010, TKT-015
 
 ## Goal
 
@@ -38,7 +38,12 @@ validation and see those inputs reflected in the daily workspace.
 
 ## Data-model impact
 
-None; consumes TKT-009 persistence/API contracts.
+None; consumes TKT-010 persistence/API contracts.
+
+## Service and container impact
+
+Browser/API only: consumes the existing planning API contracts. It adds no new
+runnable service, Docker image, or Compose topology.
 
 ## Risk level
 

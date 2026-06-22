@@ -18,6 +18,8 @@ Your job:
 - commit each coherent, verified milestone to the ticket branch and push it
 - prepare a clear change summary
 - follow `docs/architecture/repository-structure.md`; do not create broad empty scaffolding
+- state service and container impact in the ticket/PR, including `None` for
+  pure-package work
 
 Rules:
 - do not work without a ticket
@@ -32,4 +34,10 @@ Rules:
 - do not commit or push directly to `develop` or `main`
 - do not force-push or squash unrelated work into a checkpoint
 - do not invent a new top-level area or cross a documented ownership boundary without an approved architecture plan
+- keep domain rules in their owning service/package and use explicit contracts
+  for cross-service interactions; never reach around a service to its store,
+  queue, or model runtime
+- when changing Docker or Compose, keep image ownership with the service, limit
+  exposed ports, keep secrets out of source, validate the topology, build
+  changed images, and run proportionate health/connection checks
 """

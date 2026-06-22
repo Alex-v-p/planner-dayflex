@@ -1,61 +1,44 @@
 ## Summary
 
-What changed?
-
-## Branch target
-
-- Ticket PR: `tkt-ISSUE_NUMBER-short-title` -> `develop`
-- Release PR: `develop` -> `main`
+State what changed, why it changed, and the user or developer impact. Include
+the root cause when this is a fix.
 
 ## Ticket
 
-Closes #
+Closes #ISSUE_NUMBER, or name the durable `TKT-xxx` record.
 
 ## Acceptance criteria
 
-- [ ] Criteria completed
+List each criterion as one checkbox item, for example `- [x] Criterion met`.
+Use this checklist only for acceptance criteria; all other sections use prose
+or normal bullets.
 
-## How was this tested?
+## Validation
 
-- [ ] Automated tests
-- [ ] Manual test steps
-- [ ] Build passes
-- [ ] Reviewer agent checked this PR
+List the exact commands and their outcomes. Include manual verification where
+useful. For Docker/Compose changes, include configuration validation,
+image-build, and health/connection smoke results as applicable.
 
-## Screenshots
+## CI changes
 
-Add screenshots for UI changes.
+Explain any added or changed CI coverage, or state `None`.
 
 ## Risk level
 
-- [ ] Low
-- [ ] Medium
-- [ ] High
+State `Low`, `Medium`, or `High` followed by a concise reason.
 
 ## Data-model impact
 
-State one of the following:
+State `None`, or list the added, changed, or removed tables, fields,
+constraints, indexes, migrations, backfills, and rollback implications.
 
-- Added: tables, fields, constraints, or indexes
-- Changed: prior and new meaning/type, plus migration or backfill
-- Removed: deleted data and recovery/rollback approach
-- None
+## Service and container impact
 
-## AI workflow
+State `None`, or name the service boundary, contracts, configuration/secret
+handling, Docker/Compose and network exposure, and the checks performed.
 
-- [ ] Orchestrator used
-- [ ] Architect used
-- [ ] Implementer used
-- [ ] Tester used
-- [ ] Reviewer used
-- [ ] P0/P1 findings fixed
-- [ ] Human reviewed final diff
-- [ ] Commit checkpoints were pushed from the working branch
+## Review
 
-## Manual verification
-
-- [ ] I understand the changed files
-- [ ] I checked for unrelated changes
-- [ ] I checked for secrets
-- [ ] I checked auth/validation where relevant
-- [ ] I am comfortable merging this
+State the independent review outcome, including whether P0/P1 findings were
+reported and how they were resolved. Mention any follow-up that still needs a
+human decision.

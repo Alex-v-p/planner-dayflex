@@ -1,7 +1,7 @@
-# TKT-017: Complete work and recover from interruptions in the web app
+# TKT-018: Complete work and recover from interruptions in the web app
 
 **Status:** Planned
-**Depends on:** TKT-011, TKT-016
+**Depends on:** TKT-012, TKT-017
 
 ## Goal
 
@@ -39,7 +39,12 @@ receive a calm, clear recovery plan without losing history.
 
 ## Data-model impact
 
-None; consumes progress/interruption contracts from TKT-011.
+None; consumes progress/interruption contracts from TKT-012.
+
+## Service and container impact
+
+Browser/API only: consumes existing progress and recovery API contracts. It
+adds no new runnable service, Docker image, or Compose topology.
 
 ## Risk level
 

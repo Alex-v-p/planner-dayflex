@@ -41,6 +41,11 @@ a stable result contract before scheduling algorithms begin placing work.
 
 None; these are in-memory scheduler contracts.
 
+## Service and container impact
+
+None. This completed ticket adds in-process scheduler contracts only; no
+runnable service, Docker image, or Compose topology.
+
 ## Risk level
 
 Medium — contract mistakes would ripple into later layers.

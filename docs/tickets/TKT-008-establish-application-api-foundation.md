@@ -1,4 +1,4 @@
-# TKT-007: Establish the application API foundation
+# TKT-008: Establish the application API foundation
 
 **Status:** Planned
 **Depends on:** TKT-002
@@ -39,6 +39,12 @@ are introduced.
 ## Data-model impact
 
 Added: migration infrastructure only; no product tables.
+
+## Service and container impact
+
+Application API service: establishes the ownership boundary for the existing
+API runtime. It adds no separately deployable service, Docker image, or Compose
+topology; packaging remains deferred.
 
 ## Risk level
 

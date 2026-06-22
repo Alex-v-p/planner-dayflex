@@ -1,7 +1,7 @@
-# TKT-016: Generate and present the daily schedule
+# TKT-017: Generate and present the daily schedule
 
 **Status:** Planned
-**Depends on:** TKT-010, TKT-015
+**Depends on:** TKT-011, TKT-016
 
 ## Goal
 
@@ -40,6 +40,11 @@ free, and what did not fit.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+Browser/API only: presents persisted scheduler results through existing API
+contracts. It adds no new runnable service, Docker image, or Compose topology.
 
 ## Risk level
 

@@ -1,7 +1,7 @@
-# TKT-020: Polish MVP accessibility and end-to-end flow
+# TKT-021: Polish MVP accessibility and end-to-end flow
 
 **Status:** Planned
-**Depends on:** TKT-017, TKT-018, TKT-019
+**Depends on:** TKT-018, TKT-019, TKT-020
 
 ## Goal
 
@@ -40,6 +40,11 @@ screen or when a request fails temporarily.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+Browser/API only: verifies and improves existing browser and API flows. It adds
+no new runnable service, Docker image, or Compose topology.
 
 ## Risk level
 

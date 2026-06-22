@@ -54,3 +54,22 @@ When the proposed multi-service topology exists, add a Compose smoke check for
 health endpoints and essential internal connections. Keep model calls mocked or
 stubbed in regular CI; an optional local smoke check may validate the model
 boundary separately.
+
+## Container and topology checks
+
+Every ticket that changes Docker or Compose material must select and document
+the checks that match its scope:
+
+- Validate the rendered Compose configuration before starting services.
+- Build each changed service image from a clean context.
+- Start the affected profile or topology, wait for declared health checks, and
+  exercise essential internal connections through supported contracts.
+- Confirm the browser-facing entry point cannot directly reach internal-only
+  stores, queues, schedulers, or model runtimes.
+- Shut down the smoke environment cleanly and keep routine CI independent of a
+  live model service by using profiles, mocks, or stubs.
+
+Run the practical subset in CI in the same ticket whenever the runner can
+support it. Do not make pure unit tests depend on Docker; containers verify
+service packaging and topology, while package tests continue to prove domain
+behavior quickly.

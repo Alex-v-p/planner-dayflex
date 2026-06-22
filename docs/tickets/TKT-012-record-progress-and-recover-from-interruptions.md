@@ -1,7 +1,7 @@
-# TKT-011: Record progress and recover from interruptions
+# TKT-012: Record progress and recover from interruptions
 
 **Status:** Planned
-**Depends on:** TKT-010
+**Depends on:** TKT-011
 
 ## Goal
 
@@ -39,6 +39,12 @@ report an interruption, and immediately receive a believable revised day.
 
 Added: `task_progress` and `interruptions` tables with planning-day/task
 ownership, duration/interval validation, and snapshot references as needed.
+
+## Service and container impact
+
+Application API service: owns progress and interruption persistence and uses
+the scheduler contract for synchronous recovery. It adds no separately
+deployable service, Docker image, or Compose topology.
 
 ## Risk level
 

@@ -1,7 +1,7 @@
-# TKT-024: Build the local Compose topology
+# TKT-025: Build the local Compose topology
 
 **Status:** Planned
-**Depends on:** TKT-006, TKT-011, TKT-012, TKT-023
+**Depends on:** TKT-007, TKT-012, TKT-013, TKT-024
 
 ## Goal
 
@@ -42,6 +42,13 @@ dependencies to the browser.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+Compose topology: packages the selected existing services and their explicit
+network boundaries. Validate Compose configuration, build changed images, check
+service health and connections, verify network isolation, and add practical CI
+coverage or document why it cannot run there.
 
 ## Risk level
 
