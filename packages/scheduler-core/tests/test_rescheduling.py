@@ -232,6 +232,54 @@ def test_missed_prior_work_is_replanned_with_a_stable_current_time_reason() -> N
     ]
 
 
+def test_partial_elapsed_work_is_missed_without_an_unrelated_move_reason() -> None:
+    """A later interruption does not take credit for time already lost before now."""
+    focus = task("focus", 120, 5)
+    initial_result = schedule(request(tasks=(focus,)))
+
+    result = reschedule(
+        initial_result,
+        request(
+            current_at=at(9),
+            interruptions=(Interruption("late-delay", interval(17, 18)),),
+            tasks=(focus,),
+        ),
+    )
+
+    assert [item.interval for item in result.items if item.task_id == "focus"] == [
+        interval(9, 11)
+    ]
+    assert [
+        decision.reason_code
+        for decision in result.decisions
+        if decision.task_id == "focus"
+    ] == [
+        DecisionReasonCode.PLACED_IN_EARLIEST_VALID_WINDOW,
+        DecisionReasonCode.MISSED_BEFORE_CURRENT_TIME,
+    ]
+
+
+def test_no_fit_recovery_still_reports_elapsed_uncompleted_work() -> None:
+    """A no-fit decision does not erase the fact that planned work was missed."""
+    focus = task("focus", 120, 5)
+    configuration = SchedulerConfiguration(day_end=time(10), buffer_minutes=0)
+    initial_result = schedule(request(tasks=(focus,), configuration=configuration))
+
+    result = reschedule(
+        initial_result,
+        request(current_at=at(9), tasks=(focus,), configuration=configuration),
+    )
+
+    assert [
+        decision.reason_code
+        for decision in result.decisions
+        if decision.task_id == "focus"
+    ] == [
+        DecisionReasonCode.INSUFFICIENT_REMAINING_DAY_TIME,
+        DecisionReasonCode.MISSED_BEFORE_CURRENT_TIME,
+    ]
+
+
 def test_rescheduling_rejects_progress_recorded_after_the_current_time() -> None:
     """A future completion record cannot be used to reduce recovery work."""
     focus = task("focus", 30, 5)
@@ -243,4 +291,18 @@ def test_rescheduling_rejects_progress_recorded_after_the_current_time() -> None
     )
 
     with pytest.raises(SchedulerValidationError, match="must not be recorded"):
+        reschedule(initial_result, recovery_request)
+
+
+def test_rescheduling_rejects_progress_beyond_elapsed_scheduled_work() -> None:
+    """Recovery does not represent completion that the prior timeline cannot support."""
+    focus = task("focus", 60, 5)
+    initial_result = schedule(request(tasks=(focus,)))
+    recovery_request = request(
+        current_at=at(8, 30),
+        tasks=(focus,),
+        task_progress=(TaskProgress("focus", 60, at(8, 30)),),
+    )
+
+    with pytest.raises(SchedulerValidationError, match="elapsed scheduled"):
         reschedule(initial_result, recovery_request)

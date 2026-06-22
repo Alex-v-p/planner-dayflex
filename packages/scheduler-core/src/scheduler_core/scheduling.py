@@ -72,6 +72,13 @@ def reschedule(
         schedule_start = day_end
 
     completed_minutes = _completed_minutes(request)
+    _validate_recorded_progress_is_represented(
+        previous_result,
+        request,
+        completed_minutes,
+        day_start,
+        schedule_start,
+    )
     history = _completed_history(
         previous_result,
         request,
@@ -90,6 +97,16 @@ def reschedule(
     active_interruptions = _active_interruption_intervals(
         request, schedule_start, day_end
     )
+    interruption_free_task_intervals = (
+        _interruption_free_task_intervals(
+            request,
+            remaining_tasks,
+            schedule_start,
+            day_end,
+        )
+        if active_interruptions
+        else None
+    )
     prior_task_intervals = {
         task.id: tuple(
             interval
@@ -103,6 +120,7 @@ def reschedule(
         previous_result,
         request,
         completed_minutes,
+        day_start,
         schedule_start,
     )
 
@@ -116,6 +134,7 @@ def reschedule(
         request.warnings,
         missed_task_ids=missed_task_ids,
         prior_task_intervals=prior_task_intervals,
+        interruption_free_task_intervals=interruption_free_task_intervals,
         active_interruptions=active_interruptions,
     )
 
@@ -131,6 +150,8 @@ def _schedule_tasks(
     *,
     missed_task_ids: frozenset[str] = frozenset(),
     prior_task_intervals: Mapping[str, tuple[TimeInterval, ...]] | None = None,
+    interruption_free_task_intervals: Mapping[str, tuple[TimeInterval, ...]]
+    | None = None,
     active_interruptions: tuple[TimeInterval, ...] = (),
 ) -> ScheduleResult:
     """Place supplied tasks and derive free time using the shared daily policy."""
@@ -145,6 +166,13 @@ def _schedule_tasks(
                     task.id,
                 )
             )
+            if task.id in missed_task_ids:
+                decisions.append(
+                    ScheduleDecision(
+                        DecisionReasonCode.MISSED_BEFORE_CURRENT_TIME,
+                        task.id,
+                    )
+                )
             continue
 
         task_intervals, buffer_intervals = placement
@@ -168,15 +196,21 @@ def _schedule_tasks(
             if prior_task_intervals is None
             else prior_task_intervals.get(task.id, ())
         )
+        interruption_free_intervals = (
+            ()
+            if interruption_free_task_intervals is None
+            else interruption_free_task_intervals.get(task.id, ())
+        )
         if _moved_after_interruption(
             task_intervals,
             prior_intervals,
+            interruption_free_intervals,
             active_interruptions,
         ):
             decisions.append(
                 ScheduleDecision(DecisionReasonCode.MOVED_AFTER_INTERRUPTION, task.id)
             )
-        elif task.id in missed_task_ids:
+        if task.id in missed_task_ids:
             decisions.append(
                 ScheduleDecision(DecisionReasonCode.MISSED_BEFORE_CURRENT_TIME, task.id)
             )
@@ -238,6 +272,49 @@ def _completed_minutes(request: ScheduleRequest) -> dict[str, int]:
     return completed
 
 
+def _validate_recorded_progress_is_represented(
+    previous_result: ScheduleResult,
+    request: ScheduleRequest,
+    completed_minutes: Mapping[str, int],
+    day_start: datetime,
+    schedule_start: datetime,
+) -> None:
+    """Require completion records to fit within elapsed prior scheduled work."""
+    for task in request.tasks:
+        if completed_minutes[task.id] == 0:
+            continue
+        elapsed_minutes = _elapsed_scheduled_minutes(
+            previous_result,
+            task.id,
+            day_start,
+            schedule_start,
+        )
+        if completed_minutes[task.id] > elapsed_minutes:
+            raise SchedulerValidationError(
+                "task progress must not exceed elapsed scheduled minutes when "
+                "rescheduling"
+            )
+
+
+def _elapsed_scheduled_minutes(
+    previous_result: ScheduleResult,
+    task_id: str,
+    day_start: datetime,
+    schedule_start: datetime,
+) -> int:
+    """Return non-overlapping scheduled minutes that elapsed by recovery time."""
+    elapsed_intervals = _merge_intervals(
+        interval
+        for item in _prior_task_items(previous_result, task_id)
+        if (interval := _clip_to_day(item.interval, day_start, schedule_start))
+        is not None
+    )
+    return sum(
+        _duration_minutes(interval.start, interval.end)
+        for interval in elapsed_intervals
+    )
+
+
 def _completed_history(
     previous_result: ScheduleResult,
     request: ScheduleRequest,
@@ -287,16 +364,48 @@ def _active_interruption_intervals(
     )
 
 
+def _interruption_free_task_intervals(
+    request: ScheduleRequest,
+    tasks: tuple[FlexibleTask, ...],
+    schedule_start: datetime,
+    day_end: datetime,
+) -> Mapping[str, tuple[TimeInterval, ...]]:
+    """Schedule the same recovery state without interruption locks for attribution."""
+    interruption_free_request = replace(request, interruptions=())
+    locked_intervals = _locked_intervals(
+        interruption_free_request, schedule_start, day_end
+    )
+    baseline = _schedule_tasks(
+        interruption_free_request,
+        tasks,
+        schedule_start,
+        day_end,
+        list(locked_intervals),
+        _locked_items(interruption_free_request, schedule_start, day_end),
+        interruption_free_request.warnings,
+    )
+    return {
+        task.id: tuple(
+            item.interval
+            for item in baseline.items
+            if item.kind is ScheduleItemKind.TASK and item.task_id == task.id
+        )
+        for task in tasks
+    }
+
+
 def _moved_after_interruption(
     revised_intervals: tuple[TimeInterval, ...],
     prior_intervals: tuple[TimeInterval, ...],
+    interruption_free_intervals: tuple[TimeInterval, ...],
     active_interruptions: tuple[TimeInterval, ...],
 ) -> bool:
-    """Report a changed remaining placement when an interruption triggered recovery."""
+    """Report changed work only when an interruption caused the move."""
     return bool(
         active_interruptions
         and prior_intervals
         and revised_intervals != prior_intervals
+        and revised_intervals != interruption_free_intervals
     )
 
 
@@ -304,21 +413,28 @@ def _missed_task_ids(
     previous_result: ScheduleResult,
     request: ScheduleRequest,
     completed_minutes: dict[str, int],
+    day_start: datetime,
     schedule_start: datetime,
 ) -> frozenset[str]:
-    """Find unfinished prior tasks whose every planned portion is already past."""
+    """Find unfinished scheduled work that elapsed without recorded completion."""
     task_by_id = {task.id: task for task in request.tasks}
     missed: set[str] = set()
     for task_id, task in task_by_id.items():
-        prior_items = _prior_task_items(previous_result, task_id)
-        if (
-            completed_minutes[task_id] < task.estimated_minutes
-            and prior_items
-            and all(
-                _at_or_before(item.interval.end, schedule_start) for item in prior_items
+        if completed_minutes[task_id] >= task.estimated_minutes:
+            continue
+        remaining_completed = completed_minutes[task_id]
+        for item in _prior_task_items(previous_result, task_id):
+            elapsed_portion = _clip_to_day(item.interval, day_start, schedule_start)
+            if elapsed_portion is None:
+                continue
+            elapsed_minutes = _duration_minutes(
+                elapsed_portion.start, elapsed_portion.end
             )
-        ):
-            missed.add(task_id)
+            completed_in_portion = min(remaining_completed, elapsed_minutes)
+            remaining_completed -= completed_in_portion
+            if completed_in_portion < elapsed_minutes:
+                missed.add(task_id)
+                break
     return frozenset(missed)
 
 
