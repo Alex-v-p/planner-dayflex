@@ -18,6 +18,13 @@ a scoped ticket, an updated reference scenario, and matching tests.
 | Splitting | A task may be split only when explicitly allowed. Each segment must be at least 15 minutes, and a task has at most three segments in one planning day. |
 | Free time | Return remaining windows of at least 30 minutes as designated free time. Smaller gaps are neither scheduled work nor a promoted free-time result. |
 
+Task order is the deterministic **selection order**, not a promise about where a
+task appears in the chronological timeline. After choosing a task, the
+scheduler scans all currently available windows from earliest to latest for its
+first valid whole placement. A lower-priority task can therefore appear earlier
+when a higher-priority task cannot fit in that earlier gap. Results are always
+returned in chronological order.
+
 ## Stable reason codes
 
 The scheduler returns facts, not only prose. The first contract uses these

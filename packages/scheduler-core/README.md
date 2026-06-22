@@ -3,6 +3,14 @@
 The pure, deterministic scheduling core for `planner-dayflex`. It deliberately
 contains no web, database, queue, or AI dependencies.
 
+## Public API
+
+Build a validated `ScheduleRequest` from the framework-free contracts, then
+call `schedule(request)`. The result contains the chronological plan items,
+task-level structured placement or no-fit decisions, and valid input warnings.
+Priority determines the order in which tasks are considered; each selected task
+still uses the earliest remaining timeline window.
+
 ## Toolchain
 
 This package uses Python 3.13 and [uv](https://docs.astral.sh/uv/) for package
