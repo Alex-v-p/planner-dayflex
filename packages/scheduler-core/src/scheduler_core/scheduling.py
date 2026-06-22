@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from itertools import combinations
@@ -87,13 +87,18 @@ def reschedule(
         if completed_minutes[task.id] < task.estimated_minutes
     )
     locked_intervals = _locked_intervals(request, schedule_start, day_end)
-    moved_task_ids = _interruption_affected_task_ids(
-        previous_result,
-        request,
-        completed_minutes,
-        schedule_start,
-        day_end,
+    active_interruptions = _active_interruption_intervals(
+        request, schedule_start, day_end
     )
+    prior_task_intervals = {
+        task.id: tuple(
+            interval
+            for item in _prior_task_items(previous_result, task.id)
+            if (interval := _clip_to_day(item.interval, schedule_start, day_end))
+            is not None
+        )
+        for task in request.tasks
+    }
     missed_task_ids = _missed_task_ids(
         previous_result,
         request,
@@ -109,8 +114,9 @@ def reschedule(
         list(locked_intervals),
         [*history, *_locked_items(request, schedule_start, day_end)],
         request.warnings,
-        moved_task_ids=moved_task_ids,
         missed_task_ids=missed_task_ids,
+        prior_task_intervals=prior_task_intervals,
+        active_interruptions=active_interruptions,
     )
 
 
@@ -123,8 +129,9 @@ def _schedule_tasks(
     items: list[ScheduleItem],
     warnings: tuple,
     *,
-    moved_task_ids: frozenset[str] = frozenset(),
     missed_task_ids: frozenset[str] = frozenset(),
+    prior_task_intervals: Mapping[str, tuple[TimeInterval, ...]] | None = None,
+    active_interruptions: tuple[TimeInterval, ...] = (),
 ) -> ScheduleResult:
     """Place supplied tasks and derive free time using the shared daily policy."""
     decisions: list[ScheduleDecision] = []
@@ -156,7 +163,16 @@ def _schedule_tasks(
                 DecisionReasonCode.PLACED_IN_EARLIEST_VALID_WINDOW, task.id
             )
         )
-        if task.id in moved_task_ids:
+        prior_intervals = (
+            ()
+            if prior_task_intervals is None
+            else prior_task_intervals.get(task.id, ())
+        )
+        if _moved_after_interruption(
+            task_intervals,
+            prior_intervals,
+            active_interruptions,
+        ):
             decisions.append(
                 ScheduleDecision(DecisionReasonCode.MOVED_AFTER_INTERRUPTION, task.id)
             )
@@ -259,32 +275,28 @@ def _completed_history(
     return history
 
 
-def _interruption_affected_task_ids(
-    previous_result: ScheduleResult,
-    request: ScheduleRequest,
-    completed_minutes: dict[str, int],
-    schedule_start: datetime,
-    day_end: datetime,
-) -> frozenset[str]:
-    """Find still-open tasks whose prior planned work is now interruption-locked."""
-    active_interruptions = tuple(
+def _active_interruption_intervals(
+    request: ScheduleRequest, schedule_start: datetime, day_end: datetime
+) -> tuple[TimeInterval, ...]:
+    """Return interruption locks that constrain the remaining-day calculation."""
+    return tuple(
         interval
         for interruption in request.interruptions
         if (interval := _clip_to_day(interruption.interval, schedule_start, day_end))
         is not None
     )
-    if not active_interruptions:
-        return frozenset()
-    task_by_id = {task.id: task for task in request.tasks}
-    return frozenset(
-        task_id
-        for task_id, task in task_by_id.items()
-        if completed_minutes[task_id] < task.estimated_minutes
-        and any(
-            item.interval.overlaps(interruption)
-            for item in _prior_task_items(previous_result, task_id)
-            for interruption in active_interruptions
-        )
+
+
+def _moved_after_interruption(
+    revised_intervals: tuple[TimeInterval, ...],
+    prior_intervals: tuple[TimeInterval, ...],
+    active_interruptions: tuple[TimeInterval, ...],
+) -> bool:
+    """Report a changed remaining placement when an interruption triggered recovery."""
+    return bool(
+        active_interruptions
+        and prior_intervals
+        and revised_intervals != prior_intervals
     )
 
 
