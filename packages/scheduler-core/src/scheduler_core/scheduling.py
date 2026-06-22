@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from itertools import combinations
 
@@ -14,6 +15,7 @@ from .contracts import (
     ScheduleItemKind,
     ScheduleRequest,
     ScheduleResult,
+    SchedulerValidationError,
     TimeInterval,
 )
 
@@ -26,9 +28,9 @@ def schedule(request: ScheduleRequest) -> ScheduleResult:
     a lower-priority task can appear earlier in the resulting timeline when a
     higher-priority task does not fit there.
 
-    Interruptions are treated as locked time in this initial scheduler. The
-    function does not preserve history or perform interruption-aware replanning;
-    those concerns belong to the later recovery workflow.
+    Interruptions are treated as locked time. Use :func:`reschedule` when an
+    existing plan and recorded completion need to be reconsidered after an
+    interruption.
     """
     day_start, day_end = _day_bounds(request)
     schedule_start = _later_of(day_start, request.current_at)
@@ -36,11 +38,98 @@ def schedule(request: ScheduleRequest) -> ScheduleResult:
         schedule_start = day_end
 
     locked_intervals = _locked_intervals(request, day_start, day_end)
-    occupied = list(locked_intervals)
-    items = _locked_items(request, day_start, day_end)
+    return _schedule_tasks(
+        request,
+        request.tasks,
+        schedule_start,
+        day_end,
+        list(locked_intervals),
+        _locked_items(request, day_start, day_end),
+        request.warnings,
+    )
+
+
+def reschedule(
+    previous_result: ScheduleResult, request: ScheduleRequest
+) -> ScheduleResult:
+    """Replan unfinished work while retaining completed work as history.
+
+    ``previous_result`` is the immutable result being revised. ``request``
+    supplies the current time, full task list, recorded task progress, and the
+    current fixed-event and interruption locks. Completed minutes are applied
+    chronologically to a task's prior scheduled portions before ``current_at``.
+    Completed task portions remain in the revised timeline as history and are
+    never scheduled again.
+
+    The revised result contains only that history and the remaining-day plan.
+    Fixed events and interruptions before the current scheduling point are not
+    repeated. Inputs are never modified.
+    """
+    _validate_rescheduling_inputs(previous_result, request)
+    day_start, day_end = _day_bounds(request)
+    schedule_start = _later_of(day_start, request.current_at)
+    if _at_or_after(schedule_start, day_end):
+        schedule_start = day_end
+
+    completed_minutes = _completed_minutes(request)
+    history = _completed_history(
+        previous_result,
+        request,
+        completed_minutes,
+        day_start,
+        schedule_start,
+    )
+    remaining_tasks = tuple(
+        replace(
+            task, estimated_minutes=task.estimated_minutes - completed_minutes[task.id]
+        )
+        for task in request.tasks
+        if completed_minutes[task.id] < task.estimated_minutes
+    )
+    locked_intervals = _locked_intervals(request, schedule_start, day_end)
+    moved_task_ids = _interruption_affected_task_ids(
+        previous_result,
+        request,
+        completed_minutes,
+        schedule_start,
+        day_end,
+    )
+    missed_task_ids = _missed_task_ids(
+        previous_result,
+        request,
+        completed_minutes,
+        schedule_start,
+    )
+
+    return _schedule_tasks(
+        request,
+        remaining_tasks,
+        schedule_start,
+        day_end,
+        list(locked_intervals),
+        [*history, *_locked_items(request, schedule_start, day_end)],
+        request.warnings,
+        moved_task_ids=moved_task_ids,
+        missed_task_ids=missed_task_ids,
+    )
+
+
+def _schedule_tasks(
+    request: ScheduleRequest,
+    tasks: tuple[FlexibleTask, ...],
+    schedule_start: datetime,
+    day_end: datetime,
+    occupied: list[TimeInterval],
+    items: list[ScheduleItem],
+    warnings: tuple,
+    *,
+    moved_task_ids: frozenset[str] = frozenset(),
+    missed_task_ids: frozenset[str] = frozenset(),
+) -> ScheduleResult:
+    """Place supplied tasks and derive free time using the shared daily policy."""
     decisions: list[ScheduleDecision] = []
 
-    for task in sorted(request.tasks, key=_task_selection_key):
+    for task in sorted(tasks, key=_task_selection_key):
         placement = _place_task(task, request, schedule_start, day_end, occupied)
         if placement is None:
             decisions.append(
@@ -67,6 +156,14 @@ def schedule(request: ScheduleRequest) -> ScheduleResult:
                 DecisionReasonCode.PLACED_IN_EARLIEST_VALID_WINDOW, task.id
             )
         )
+        if task.id in moved_task_ids:
+            decisions.append(
+                ScheduleDecision(DecisionReasonCode.MOVED_AFTER_INTERRUPTION, task.id)
+            )
+        elif task.id in missed_task_ids:
+            decisions.append(
+                ScheduleDecision(DecisionReasonCode.MISSED_BEFORE_CURRENT_TIME, task.id)
+            )
         if len(task_intervals) > 1:
             decisions.append(
                 ScheduleDecision(
@@ -96,7 +193,136 @@ def schedule(request: ScheduleRequest) -> ScheduleResult:
     return ScheduleResult(
         items=tuple(sorted(items, key=_item_timeline_key)),
         decisions=tuple(decisions),
-        warnings=request.warnings,
+        warnings=warnings,
+    )
+
+
+def _validate_rescheduling_inputs(
+    previous_result: ScheduleResult, request: ScheduleRequest
+) -> None:
+    """Reject recovery inputs that cannot truthfully describe work completed now."""
+    if not isinstance(previous_result, ScheduleResult):
+        raise SchedulerValidationError("previous_result must be a ScheduleResult")
+    if not isinstance(request, ScheduleRequest):
+        raise SchedulerValidationError("request must be a ScheduleRequest")
+    if any(
+        _before(request.current_at, progress.recorded_at)
+        for progress in request.task_progress
+    ):
+        raise SchedulerValidationError(
+            "task progress must not be recorded after current_at when rescheduling"
+        )
+
+
+def _completed_minutes(request: ScheduleRequest) -> dict[str, int]:
+    """Total immutable completion records by task identifier."""
+    completed = {task.id: 0 for task in request.tasks}
+    for progress in request.task_progress:
+        completed[progress.task_id] += progress.completed_minutes
+    return completed
+
+
+def _completed_history(
+    previous_result: ScheduleResult,
+    request: ScheduleRequest,
+    completed_minutes: dict[str, int],
+    day_start: datetime,
+    schedule_start: datetime,
+) -> list[ScheduleItem]:
+    """Keep recorded completed portions from the prior plan as task history."""
+    task_by_id = {task.id: task for task in request.tasks}
+    history: list[ScheduleItem] = []
+    for task_id, task in task_by_id.items():
+        completed = completed_minutes[task_id]
+        if completed == 0:
+            continue
+        remaining_to_preserve = completed
+        for item in _prior_task_items(previous_result, task_id):
+            prior_portion = _clip_to_day(item.interval, day_start, schedule_start)
+            if prior_portion is None or remaining_to_preserve == 0:
+                continue
+            preserved_minutes = min(
+                remaining_to_preserve,
+                _duration_minutes(prior_portion.start, prior_portion.end),
+            )
+            history.append(
+                ScheduleItem(
+                    ScheduleItemKind.TASK,
+                    TimeInterval(
+                        prior_portion.start,
+                        _add_minutes(prior_portion.start, preserved_minutes),
+                    ),
+                    task_id,
+                )
+            )
+            remaining_to_preserve -= preserved_minutes
+    return history
+
+
+def _interruption_affected_task_ids(
+    previous_result: ScheduleResult,
+    request: ScheduleRequest,
+    completed_minutes: dict[str, int],
+    schedule_start: datetime,
+    day_end: datetime,
+) -> frozenset[str]:
+    """Find still-open tasks whose prior planned work is now interruption-locked."""
+    active_interruptions = tuple(
+        interval
+        for interruption in request.interruptions
+        if (interval := _clip_to_day(interruption.interval, schedule_start, day_end))
+        is not None
+    )
+    if not active_interruptions:
+        return frozenset()
+    task_by_id = {task.id: task for task in request.tasks}
+    return frozenset(
+        task_id
+        for task_id, task in task_by_id.items()
+        if completed_minutes[task_id] < task.estimated_minutes
+        and any(
+            item.interval.overlaps(interruption)
+            for item in _prior_task_items(previous_result, task_id)
+            for interruption in active_interruptions
+        )
+    )
+
+
+def _missed_task_ids(
+    previous_result: ScheduleResult,
+    request: ScheduleRequest,
+    completed_minutes: dict[str, int],
+    schedule_start: datetime,
+) -> frozenset[str]:
+    """Find unfinished prior tasks whose every planned portion is already past."""
+    task_by_id = {task.id: task for task in request.tasks}
+    missed: set[str] = set()
+    for task_id, task in task_by_id.items():
+        prior_items = _prior_task_items(previous_result, task_id)
+        if (
+            completed_minutes[task_id] < task.estimated_minutes
+            and prior_items
+            and all(
+                _at_or_before(item.interval.end, schedule_start) for item in prior_items
+            )
+        ):
+            missed.add(task_id)
+    return frozenset(missed)
+
+
+def _prior_task_items(
+    previous_result: ScheduleResult, task_id: str
+) -> tuple[ScheduleItem, ...]:
+    """Return one task's prior scheduled items in chronological order."""
+    return tuple(
+        sorted(
+            (
+                item
+                for item in previous_result.items
+                if item.kind is ScheduleItemKind.TASK and item.task_id == task_id
+            ),
+            key=_item_timeline_key,
+        )
     )
 
 
