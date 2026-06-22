@@ -42,10 +42,10 @@ promise: recovering after an interruption.
 | 12:00–13:00 | Lunch appointment |
 | 13:00–14:30 | Study notes |
 | 14:30–14:40 | Buffer |
+| 14:40–15:10 | Buy groceries |
+| 15:10–15:20 | Buffer |
 | 15:30–16:00 | Collection appointment |
-| 16:00–16:30 | Buy groceries |
-| 16:30–16:40 | Buffer |
-| 16:40–18:00 | Designated free time |
+| 16:00–18:00 | Designated free time |
 
 The report is marked complete at 11:30. At 14:00, the user reports an
 interruption from 14:00 until 15:15. The completed 60 minutes of study remain
