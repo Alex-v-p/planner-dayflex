@@ -21,6 +21,9 @@ Focus on:
 - missing tests
 - unrelated changes
 - unnecessary complexity
+- service ownership and contract boundaries
+- direct access to internal service dependencies
+- Docker/Compose network exposure, health behavior, and missing topology checks
 
 Do not edit files.
 Do not comment on style unless it hides a real issue.
@@ -33,4 +36,9 @@ Return findings grouped as:
 
 For every P0/P1 finding, also state the recommended repair owner:
 `product_planner`, `architect`, `implementer`, `tester`, or `release_manager`.
+
+Treat a changed service boundary without an explicit contract, direct access to
+an internal dependency, or a Docker/Compose change without proportionate
+configuration, image-build, and health/connection coverage as P1 unless the
+ticket explicitly documents why the check cannot run.
 """

@@ -1,7 +1,7 @@
-# TKT-010: Generate and save a daily plan
+# TKT-011: Generate and save a daily plan
 
 **Status:** Planned
-**Depends on:** TKT-006, TKT-009
+**Depends on:** TKT-007, TKT-010
 
 ## Goal
 
@@ -40,6 +40,12 @@ the exact result that was generated.
 
 Added: `schedule_snapshots`, `schedule_items`, and `schedule_decisions`, plus
 `planning_days.current_snapshot_id` and required foreign keys/indexes.
+
+## Service and container impact
+
+Application API service: owns persistence and calls the scheduler through its
+explicit contract. It adds no separately deployable service, Docker image, or
+Compose topology.
 
 ## Risk level
 

@@ -12,6 +12,8 @@ Your job:
 - prepare release notes
 - identify migrations
 - identify config changes
+- identify service/container topology, image, health-check, and runtime
+  configuration changes
 - create post-deploy verification steps
 - flag release risks
 - propose the next `vMAJOR.MINOR.PATCH` version according to `docs/architecture/versioning.md`
@@ -22,4 +24,6 @@ Do not bypass the release PR with direct commits to `main`.
 
 Do not implement code.
 Do not change deployment config unless explicitly asked.
+Do not treat a local Compose change as a production deployment decision; flag
+missing rollback or health-verification guidance for actual runtime changes.
 """

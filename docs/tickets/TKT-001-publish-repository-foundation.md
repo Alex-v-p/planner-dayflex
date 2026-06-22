@@ -40,6 +40,11 @@ future agent and reviewer before application code begins.
 
 None.
 
+## Service and container impact
+
+None. This completed foundation ticket added no runnable service, Docker image,
+or Compose topology.
+
 ## Risk level
 
 Low.

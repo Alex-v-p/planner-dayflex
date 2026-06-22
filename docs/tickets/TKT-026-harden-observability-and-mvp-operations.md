@@ -1,7 +1,7 @@
-# TKT-025: Harden observability and MVP operations
+# TKT-026: Harden observability and MVP operations
 
 **Status:** Planned
-**Depends on:** TKT-020, TKT-024
+**Depends on:** TKT-021, TKT-025
 
 ## Goal
 
@@ -41,6 +41,12 @@ planning request across services, and reproduce the core flow locally.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+Operations verification: adds observability and health/readiness checks for
+existing services and Compose dependencies where enabled. It creates no new
+runnable service or topology.
 
 ## Risk level
 

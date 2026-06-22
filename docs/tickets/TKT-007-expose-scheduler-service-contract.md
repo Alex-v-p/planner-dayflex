@@ -1,7 +1,7 @@
-# TKT-006: Expose the scheduler service contract
+# TKT-007: Expose the scheduler service contract
 
 **Status:** Planned
-**Depends on:** TKT-005
+**Depends on:** TKT-006
 
 ## Goal
 
@@ -38,6 +38,13 @@ reschedules from the deterministic engine.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+Scheduler service contract: this ticket defines the scheduler-owned HTTP
+boundary and explicit contracts around the pure core package. Container
+packaging and Compose topology are deferred; it adds no Docker image or Compose
+service.
 
 ## Risk level
 

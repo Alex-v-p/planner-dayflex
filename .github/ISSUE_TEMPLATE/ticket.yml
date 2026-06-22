@@ -71,3 +71,17 @@ body:
         Migration/backfill/rollback:
     validations:
       required: true
+
+  - type: textarea
+    id: service_container_impact
+    attributes:
+      label: Service and container impact
+      description: State "None" for pure-package or documentation work. Otherwise name the affected service owner and boundary, contracts, configuration/secret handling, Docker/Compose/network exposure, and validation needed.
+      placeholder: |
+        Service boundary:
+        Why a separate process is needed:
+        Docker/Compose/network impact:
+        Configuration and secret source:
+        Required validation and CI coverage:
+    validations:
+      required: true

@@ -1,4 +1,4 @@
-# TKT-004: Build deterministic daily scheduling
+# TKT-005: Build deterministic daily scheduling
 
 **Status:** Planned
 **Depends on:** TKT-003
@@ -39,6 +39,11 @@ which work fit and which work did not.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+None. This remains an in-process, pure scheduler-core capability; it adds no
+independently runnable service, Docker image, or Compose topology.
 
 ## Risk level
 

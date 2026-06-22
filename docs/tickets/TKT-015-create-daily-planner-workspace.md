@@ -1,7 +1,7 @@
-# TKT-014: Create the daily planner workspace
+# TKT-015: Create the daily planner workspace
 
 **Status:** Planned
-**Depends on:** TKT-010, TKT-012, TKT-013
+**Depends on:** TKT-011, TKT-013, TKT-014
 
 ## Goal
 
@@ -38,6 +38,11 @@ have inputs, a generated plan, or work still to do.
 ## Data-model impact
 
 None.
+
+## Service and container impact
+
+Browser/API only: adds a browser workspace over existing API contracts. It adds
+no new runnable service, Docker image, or Compose topology.
 
 ## Risk level
 

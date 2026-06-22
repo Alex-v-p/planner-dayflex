@@ -86,6 +86,22 @@ Dependencies should point inward: interfaces call application code, application
 uses domain rules, and infrastructure implements application ports. The domain
 layer must not import framework or infrastructure code.
 
+## Service and container ownership
+
+An independently runnable service owns one cohesive capability and its public
+and internal contracts. Do not create a service solely to make the repository
+look distributed; preserve a pure package or in-process boundary until a
+separate process has a concrete product or operational benefit.
+
+When a service is containerized, place its `Dockerfile` and `.dockerignore`
+beside that service so its build context and runtime are owned together. Keep
+shared local topology in `infra/compose.yml` and related helpers in
+`infra/docker/`. Compose should expose only the web/API entry point to the
+browser, use explicit internal networks for dependencies, and supply secrets
+and environment-specific configuration at runtime. The ticket that adds or
+changes this material must also add proportionate configuration, image-build,
+and health/connection checks.
+
 ## Web layout
 
 Once the browser application is introduced, prefer a feature-oriented layout:

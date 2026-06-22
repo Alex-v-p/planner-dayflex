@@ -1,7 +1,7 @@
-# TKT-009: Persist planning inputs and preferences
+# TKT-010: Persist planning inputs and preferences
 
 **Status:** Planned
-**Depends on:** TKT-008
+**Depends on:** TKT-009
 
 ## Goal
 
@@ -41,6 +41,12 @@ know that another user cannot see or alter them.
 
 Added: `user_preferences`, `planning_days`, `tasks`, and `fixed_events` tables
 with user/day ownership, interval checks, and relevant indexes.
+
+## Service and container impact
+
+Application API service: adds persisted planning inputs within the existing API
+ownership boundary. It adds no separately deployable service, Docker image, or
+Compose topology.
 
 ## Risk level
 

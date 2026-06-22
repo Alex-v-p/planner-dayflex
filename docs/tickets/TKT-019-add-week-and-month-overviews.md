@@ -1,7 +1,7 @@
-# TKT-018: Add week and month overviews
+# TKT-019: Add week and month overviews
 
 **Status:** Planned
-**Depends on:** TKT-010, TKT-014
+**Depends on:** TKT-011, TKT-015
 
 ## Goal
 
@@ -37,6 +37,11 @@ interruptions, deferred work, and free time before opening a specific day.
 ## Data-model impact
 
 None; adds queries/DTOs over existing planning and snapshot data.
+
+## Service and container impact
+
+Browser/API only: adds API queries and browser summaries over existing saved
+daily data. It adds no new runnable service, Docker image, or Compose topology.
 
 ## Risk level
 

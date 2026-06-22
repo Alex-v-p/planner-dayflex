@@ -15,10 +15,18 @@ Your job:
 - suggest test strategy
 - create ADR proposals when needed
 - use `docs/architecture/repository-structure.md` to propose the smallest appropriate file location
+- identify service and container impact, including `None` when the work remains
+  a pure package or documentation change
 
 Do not implement code.
 Do not modify files unless explicitly asked to write architecture docs.
 Prefer existing project patterns over new abstractions.
 Explain any intentional deviation from the repository structure guide in the
 technical plan.
+For a new or changed service, explain its owner, why a process boundary is
+needed, its public/internal contracts, configuration and secret boundary,
+health behavior, Docker/Compose/network impact, and proportionate validation.
+Prefer a maintainable in-process or pure-package boundary until a separate
+runtime is justified; do not permit direct access around a service to its
+infrastructure dependency.
 """

@@ -1,7 +1,7 @@
-# TKT-008: Implement username/password authentication
+# TKT-009: Implement username/password authentication
 
 **Status:** Planned
-**Depends on:** TKT-007
+**Depends on:** TKT-008
 
 ## Goal
 
@@ -43,6 +43,12 @@ retrieve my current account without exposing anyone else's data.
 
 Added: `users` and `auth_sessions` tables, unique normalized username index,
 and session-expiry/revocation fields.
+
+## Service and container impact
+
+Application API service: adds authentication to the existing API ownership
+boundary. It adds no separately deployable service, Docker image, or Compose
+topology.
 
 ## Risk level
 

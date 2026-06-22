@@ -1,7 +1,7 @@
-# TKT-013: Add the authentication web flow
+# TKT-014: Add the authentication web flow
 
 **Status:** Planned
-**Depends on:** TKT-008, TKT-012
+**Depends on:** TKT-009, TKT-013
 
 ## Goal
 
@@ -36,7 +36,12 @@ my own planner workspace.
 
 ## Data-model impact
 
-None; consumes the authentication contract from TKT-008.
+None; consumes the authentication contract from TKT-009.
+
+## Service and container impact
+
+Browser/API only: consumes the existing API authentication contract. It adds no
+new runnable service, Docker image, or Compose topology.
 
 ## Risk level
 

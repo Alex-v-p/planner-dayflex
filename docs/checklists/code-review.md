@@ -10,4 +10,8 @@ Check:
 - [ ] Are errors handled safely?
 - [ ] Are private values/secrets absent?
 - [ ] Are tests meaningful?
+- [ ] Are service responsibilities, contracts, and ownership boundaries clear?
+- [ ] Does no caller bypass a service to access its internal dependency?
+- [ ] Do changed Docker/Compose files have configuration, image-build, and
+      proportionate health/connection coverage?
 - [ ] Is the solution maintainable?

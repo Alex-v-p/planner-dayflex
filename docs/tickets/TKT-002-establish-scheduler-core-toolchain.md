@@ -48,6 +48,11 @@ adding it as a final hardening task.
 
 None.
 
+## Service and container impact
+
+None. This completed ticket keeps scheduler-core a pure package with no
+runnable service, Docker image, or Compose topology.
+
 ## Risk level
 
 Low.

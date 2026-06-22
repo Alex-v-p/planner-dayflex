@@ -1,7 +1,7 @@
-# TKT-023: Add the non-critical background worker
+# TKT-024: Add the non-critical background worker
 
 **Status:** Planned
-**Depends on:** TKT-021, TKT-022
+**Depends on:** TKT-022, TKT-023
 
 ## Goal
 
@@ -38,6 +38,13 @@ updates immediately if background processing is delayed or unavailable.
 
 None by default; document a separate migration if durable job/audit storage is
 introduced.
+
+## Service and container impact
+
+Worker runtime: introduces a separate non-critical worker with explicit queue
+job contracts. Container packaging and local Compose topology are deferred to
+TKT-025; the worker must not become a dependency of synchronous planning or
+recovery paths.
 
 ## Risk level
 

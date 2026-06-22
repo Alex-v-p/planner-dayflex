@@ -1,7 +1,7 @@
-# TKT-021: Add optional AI input parsing
+# TKT-022: Add optional AI input parsing
 
 **Status:** Planned
-**Depends on:** TKT-011, TKT-020
+**Depends on:** TKT-012, TKT-021
 
 ## Goal
 
@@ -43,6 +43,12 @@ editable suggestions for duration, priority, timing, or interruption details.
 ## Data-model impact
 
 None; do not persist raw model conversations in the MVP.
+
+## Service and container impact
+
+AI provider integration in the existing API service: calls remain behind an
+API-owned adapter and typed contract. It adds no standalone AI service, model
+container, or Compose topology.
 
 ## Risk level
 

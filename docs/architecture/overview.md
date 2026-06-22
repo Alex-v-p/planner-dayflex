@@ -41,7 +41,9 @@ required to complete it.
 Docker Compose is the proposed local development topology once more than one
 service is justified. It should expose the web application and API through one
 browser entry point while keeping data stores, the scheduler, AI, and model
-runtime internal.
+runtime internal. A separately runnable service needs an explicit owner,
+contract, configuration boundary, and health endpoint before it earns a
+container; a pure package does not.
 
 ## Boundary rules
 
@@ -54,6 +56,18 @@ runtime internal.
 - Only the AI boundary communicates with the local model runtime.
 - PostgreSQL holds durable business data. Redis is never the source of truth.
 - Background work must be idempotent and cannot delay immediate replanning.
+
+## Service and container quality bar
+
+When a ticket introduces a runtime service, keep its domain rules, application
+use cases, transport contracts, and infrastructure adapters separate. Its
+container image must run only that service, receive configuration and secrets
+from the environment rather than source control, and expose only the ports the
+topology requires. A Compose change must declare internal versus browser-facing
+networks and include configuration validation, image-build coverage, and a
+health/essential-connection smoke check. These are operational requirements for
+real multi-service increments, not permission to scaffold every proposed
+service early.
 
 ## Code organization when implementation begins
 

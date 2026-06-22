@@ -1,7 +1,7 @@
-# TKT-005: Add interruption-aware rescheduling
+# TKT-006: Add interruption-aware rescheduling
 
 **Status:** Planned
-**Depends on:** TKT-004
+**Depends on:** TKT-005
 
 ## Goal
 
@@ -40,6 +40,11 @@ plan without having to rebuild all tasks and commitments myself.
 ## Data-model impact
 
 None; progress and interruption models remain scheduler input only.
+
+## Service and container impact
+
+None. This remains an in-process, pure scheduler-core capability; it adds no
+independently runnable service, Docker image, or Compose topology.
 
 ## Risk level
 
