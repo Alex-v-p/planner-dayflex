@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
 from fastapi.testclient import TestClient
 
 from scheduler_service.app import app
@@ -217,6 +218,45 @@ def test_schema_errors_use_a_safe_validation_envelope() -> None:
     """A missing offset never reflects request contents or framework details."""
     invalid_request = _canonical_request()
     invalid_request["current_at"] = "2026-06-22T08:00:00"
+
+    response = client.post("/v1/schedule-day", json=invalid_request)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "validation_error",
+        "details": ["The scheduler request is invalid."],
+    }
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("estimated_minutes", "45"),
+        ("priority", True),
+        ("splitting_allowed", "true"),
+        ("id", 45),
+    ],
+)
+def test_schedule_day_rejects_coerced_task_primitives(
+    field_name: str, invalid_value: object
+) -> None:
+    """Public task fields never coerce strings or booleans into core values."""
+    invalid_request = _canonical_request()
+    invalid_request["tasks"][0][field_name] = invalid_value
+
+    response = client.post("/v1/schedule-day", json=invalid_request)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "validation_error",
+        "details": ["The scheduler request is invalid."],
+    }
+
+
+def test_schedule_day_rejects_coerced_scheduler_configuration_numbers() -> None:
+    """Configuration numbers also reject booleans before they reach the core."""
+    invalid_request = _canonical_request()
+    invalid_request["configuration"] = {"buffer_minutes": True}
 
     response = client.post("/v1/schedule-day", json=invalid_request)
 

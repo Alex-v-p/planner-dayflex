@@ -6,7 +6,16 @@ import re
 from datetime import date, datetime, time
 from typing import Annotated, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    field_validator,
+)
 from scheduler_core import (
     DecisionReasonCode,
     FixedEvent,
@@ -69,7 +78,7 @@ class PlanningDayDTO(ContractModel):
     """One local planning date and its IANA time zone."""
 
     local_date: date
-    time_zone: str
+    time_zone: StrictStr
 
     def to_core(self) -> PlanningDay:
         """Map this transport planning day into the core contract."""
@@ -79,8 +88,8 @@ class PlanningDayDTO(ContractModel):
 class FixedEventDTO(ContractModel):
     """A non-movable commitment that reserves time."""
 
-    id: str
-    title: str
+    id: StrictStr
+    title: StrictStr
     interval: TimeIntervalDTO
 
     def to_core(self) -> FixedEvent:
@@ -93,7 +102,7 @@ class FixedEventDTO(ContractModel):
 class InterruptionDTO(ContractModel):
     """A reported unavailable block that reserves time."""
 
-    id: str
+    id: StrictStr
     interval: TimeIntervalDTO
 
     def to_core(self) -> Interruption:
@@ -104,14 +113,14 @@ class InterruptionDTO(ContractModel):
 class FlexibleTaskDTO(ContractModel):
     """Flexible work that the core may place or split."""
 
-    id: str
-    title: str
-    estimated_minutes: int
-    priority: int
+    id: StrictStr
+    title: StrictStr
+    estimated_minutes: StrictInt
+    priority: StrictInt
     created_at: OffsetDateTime
     due_date: date | None = None
     earliest_start_at: OffsetDateTime | None = None
-    splitting_allowed: bool = False
+    splitting_allowed: StrictBool = False
 
     def to_core(self) -> FlexibleTask:
         """Map this transport task into the core contract."""
@@ -130,8 +139,8 @@ class FlexibleTaskDTO(ContractModel):
 class TaskProgressDTO(ContractModel):
     """An immutable completed-work record used during rescheduling."""
 
-    task_id: str
-    completed_minutes: int
+    task_id: StrictStr
+    completed_minutes: StrictInt
     recorded_at: OffsetDateTime
 
     def to_core(self) -> TaskProgress:
@@ -148,10 +157,10 @@ class SchedulerConfigurationDTO(ContractModel):
 
     day_start: time = time(8, 0)
     day_end: time = time(18, 0)
-    buffer_minutes: int = 10
-    minimum_free_time_minutes: int = 30
-    minimum_segment_minutes: int = 15
-    maximum_task_segments: int = 3
+    buffer_minutes: StrictInt = 10
+    minimum_free_time_minutes: StrictInt = 30
+    minimum_segment_minutes: StrictInt = 15
+    maximum_task_segments: StrictInt = 3
 
     @field_validator("day_start", "day_end")
     @classmethod
@@ -204,7 +213,7 @@ class ScheduleItemDTO(ContractModel):
 
     kind: ScheduleItemKind
     interval: TimeIntervalDTO
-    task_id: str | None = None
+    task_id: StrictStr | None = None
 
     @classmethod
     def from_core(cls, item: ScheduleItem) -> Self:
@@ -220,8 +229,8 @@ class ScheduleDecisionDTO(ContractModel):
     """A stable machine-readable placement, deferral, or free-time fact."""
 
     reason_code: DecisionReasonCode
-    task_id: str | None = None
-    details: dict[str, str] = Field(default_factory=dict)
+    task_id: StrictStr | None = None
+    details: dict[StrictStr, StrictStr] = Field(default_factory=dict)
 
     @classmethod
     def from_core(cls, decision: ScheduleDecision) -> Self:
@@ -237,7 +246,7 @@ class ScheduleWarningDTO(ContractModel):
     """A safe, stable warning for valid but notable scheduling input."""
 
     code: WarningCode
-    details: dict[str, str] = Field(default_factory=dict)
+    details: dict[StrictStr, StrictStr] = Field(default_factory=dict)
 
     @classmethod
     def from_core(cls, warning: ScheduleWarning) -> Self:

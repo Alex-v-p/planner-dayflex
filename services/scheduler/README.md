@@ -38,6 +38,11 @@ All JSON datetimes are ISO 8601 strings with an explicit UTC offset, such as
 `2026-06-22T08:00:00+02:00` or `2026-06-22T06:00:00Z`. Naive datetimes are not
 accepted. Intervals are half-open: `[start, end)`.
 
+Primitive values are strict: identifiers, titles, IANA zones, and detail values
+are JSON strings; minute counts, priorities, and scheduler configuration counts
+are JSON integers; and `splitting_allowed` is a JSON boolean. The service does
+not coerce strings or booleans into scheduler-core values.
+
 `POST /v1/schedule-day` accepts a `ScheduleRequest` object:
 
 | Field | Shape |
