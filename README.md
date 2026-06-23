@@ -5,10 +5,14 @@ both immovable commitments and work that has to flex around real life. Its
 central job is to help someone recover a useful plan after an interruption,
 not to punish them for having one.
 
-Application services and the browser experience are intentionally not
-initialized yet. The first implementation increment is the pure
-[`scheduler-core`](packages/scheduler-core/README.md) package; its deterministic
-rules will grow before any service or infrastructure is introduced.
+The deterministic [`scheduler-core`](packages/scheduler-core/README.md), its
+thin [`scheduler service`](services/scheduler/README.md) transport boundary,
+and the [`application API`](services/api/README.md) foundation are initialized.
+The API owns future browser-facing validation, authorization, persistence, and
+orchestration; its current scope is deliberately limited to configuration,
+health, logging, database-session, migration, and test conventions. Browser
+features, product persistence, scheduler clients, AI, Docker, and Compose
+remain ticketed work.
 
 ## Product direction
 
@@ -63,6 +67,6 @@ Release numbering and the planned automation work are documented in
 [the versioning policy](docs/architecture/versioning.md) and the queued
 [release automation ticket](docs/tickets/TKT-027-release-versioning-and-cd.md).
 
-The scheduler-core CI workflow runs its documented format, lint, and test
-commands. Deployment remains a safe placeholder until a hosting platform is
-chosen.
+The scheduler-core, scheduler-service, and API-service CI jobs run their
+documented format, lint, and test commands. Deployment remains a safe
+placeholder until a hosting platform is chosen.
