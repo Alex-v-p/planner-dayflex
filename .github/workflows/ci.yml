@@ -40,3 +40,34 @@ jobs:
 
       - name: Test
         run: uv run pytest
+
+  scheduler-service-quality:
+    name: Scheduler service quality
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/scheduler
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install scheduler-service
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest
