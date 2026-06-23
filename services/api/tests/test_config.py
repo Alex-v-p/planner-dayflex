@@ -30,6 +30,20 @@ def test_invalid_database_url_is_rejected(
         Settings()
 
 
+def test_invalid_environment_value_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the documented environment names are accepted from process configuration."""
+    monkeypatch.setenv("PLANNER_API_ENVIRONMENT", "staging")
+    monkeypatch.setenv(
+        "PLANNER_API_DATABASE_URL",
+        "postgresql+psycopg://user:password@example.test:5432/planner",
+    )
+
+    with pytest.raises(ValidationError, match="environment"):
+        Settings()
+
+
 def test_non_test_configuration_requires_the_psycopg_postgresql_driver() -> None:
     """SQLite remains an explicit test-only convention, never a local fallback."""
     with pytest.raises(ValidationError, match="postgresql\\+psycopg"):
