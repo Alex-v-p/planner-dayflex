@@ -19,7 +19,7 @@ from .contracts import (
     WarningCode,
     local_datetime,
 )
-from .scheduling import schedule
+from .scheduling import reschedule, schedule
 
 __all__ = [
     "DecisionReasonCode",
@@ -39,5 +39,6 @@ __all__ = [
     "TimeInterval",
     "WarningCode",
     "local_datetime",
+    "reschedule",
     "schedule",
 ]
