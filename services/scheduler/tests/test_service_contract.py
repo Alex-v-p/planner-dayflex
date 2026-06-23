@@ -228,6 +228,21 @@ def test_schema_errors_use_a_safe_validation_envelope() -> None:
     }
 
 
+def test_malformed_json_uses_the_safe_validation_envelope() -> None:
+    """Malformed request bodies are safe client errors rather than server failures."""
+    response = client.post(
+        "/v1/schedule-day",
+        content="{not valid json",
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "validation_error",
+        "details": ["The scheduler request is invalid."],
+    }
+
+
 @pytest.mark.parametrize(
     ("field_name", "invalid_value"),
     [
@@ -288,3 +303,56 @@ def test_core_validation_errors_use_the_same_safe_envelope() -> None:
         "details": ["The scheduler request is invalid."],
     }
     assert "Private overlapping event" not in response.text
+
+
+def test_reschedule_day_core_errors_use_the_same_safe_envelope() -> None:
+    """Recovery-only core validation errors remain safe client failures."""
+    initial_response = client.post("/v1/schedule-day", json=_canonical_request())
+    assert initial_response.status_code == 200
+
+    invalid_recovery_request = _canonical_request()
+    invalid_recovery_request["current_at"] = "2026-06-22T14:00:00+02:00"
+    invalid_recovery_request["task_progress"] = [
+        {
+            "task_id": "inbox",
+            "completed_minutes": 45,
+            "recorded_at": "2026-06-22T14:01:00+02:00",
+        }
+    ]
+
+    response = client.post(
+        "/v1/reschedule-day",
+        json={
+            "previous_result": initial_response.json(),
+            "schedule_request": invalid_recovery_request,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "validation_error",
+        "details": ["The scheduler request is invalid."],
+    }
+
+
+def test_schedule_day_preserves_the_lock_overlap_warning_code() -> None:
+    """Valid overlap warnings retain the exact scheduler-core code and details."""
+    request = _canonical_request()
+    request["interruptions"] = [
+        {
+            "id": "overlap",
+            "interval": _interval(
+                "2026-06-22T09:15:00+02:00", "2026-06-22T09:30:00+02:00"
+            ),
+        }
+    ]
+
+    response = client.post("/v1/schedule-day", json=request)
+
+    assert response.status_code == 200
+    assert response.json()["warnings"] == [
+        {
+            "code": "locked_time_overlap_merged",
+            "details": {"interruption_id": "overlap", "fixed_event_id": "meeting"},
+        }
+    ]
