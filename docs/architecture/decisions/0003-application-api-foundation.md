@@ -27,12 +27,15 @@ The service owns a synchronous SQLAlchemy 2.x engine and session factory, using
 psycopg 3 for PostgreSQL. `Database.check_connection()` executes `SELECT 1` as
 the explicit database-readiness convention, while `GET /health` remains a
 dependency-free liveness endpoint. Logging is JSON with a small allowlist of
-operational fields and no settings, request, or arbitrary message values.
+operational fields and no settings, request, or arbitrary message values; it
+also replaces Uvicorn error and access handlers so request targets and query
+strings cannot leak through default access formatting.
 
-Initialize Alembic alongside the service and configure it through the same
-typed settings. There are no ORM models, metadata, product tables, revisions,
-backfills, or rollbacks in this ticket. Later data-model tickets must introduce
-those deliberately and use reviewed migrations.
+Initialize Alembic alongside the service with the standard generic revision
+template and configure it through the same typed settings. There are no ORM
+models, metadata, product tables, revisions, backfills, or rollbacks in this
+ticket. Later data-model tickets must introduce those deliberately and use
+reviewed migrations.
 
 ## Consequences
 

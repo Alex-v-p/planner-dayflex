@@ -57,15 +57,18 @@ may expose that convention as a readiness endpoint once its contract and
 deployment use are scoped.
 
 Logs are single-line JSON with only timestamp, severity, logger name, and a
-service-controlled event name. Settings, URL values, request bodies, and
-arbitrary log-message text are not emitted by the formatter.
+allowlisted service-controlled event name. The same formatter replaces the
+effective API, Uvicorn error, and Uvicorn access handlers, so access entries
+never render a request target or query string. Settings, URL values, request
+bodies, arbitrary event values, and arbitrary log-message text are not emitted
+by the formatter.
 
 ## Migrations
 
-Alembic is initialized but `alembic/versions/` has no product revision and
-there are no product tables. A later data-model ticket must add models,
-metadata, a reviewed revision, and migration tests before application data is
-stored.
+Alembic is initialized with its standard generic `script.py.mako` revision
+template, but `alembic/versions/` has no product revision and there are no
+product tables. A later data-model ticket must add models, metadata, a reviewed
+revision, and migration tests before application data is stored.
 
 To validate local migration wiring against an explicitly configured PostgreSQL
 database, set the variables shown above and run:
