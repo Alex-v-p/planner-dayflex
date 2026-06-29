@@ -3,22 +3,21 @@
 `services/api/` is the browser-facing application boundary for
 `planner-dayflex`. It will own browser DTOs, input validation, authorization,
 persistence, and orchestration when the relevant scoped tickets arrive. It
-does not contain scheduler algorithms, planner routes, user accounts, product
-models, a scheduler client, AI behavior, Docker, or Compose topology.
+does not contain scheduler algorithms, planner routes, a scheduler client, AI
+behavior, Docker, or Compose topology.
 
-TKT-008 creates only the service foundation: a FastAPI application factory,
-typed environment configuration, safe JSON logs, a synchronous SQLAlchemy
-session boundary, empty Alembic wiring, and isolated test conventions. The
-lasting dependency and boundary choice is recorded in
-[ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md).
+The current service includes the TKT-008 foundation plus TKT-009 username and
+password authentication. The lasting dependency and boundary choice is recorded
+in [ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md).
 
 ## Toolchain
 
 The service uses Python 3.13, `uv`, FastAPI, Uvicorn, SQLAlchemy 2.x, psycopg
-3, Alembic, Pydantic Settings, Ruff, and pytest. SQLAlchemy and psycopg are
-runtime dependencies because the application API owns durable persistence.
-Alembic is available to run the service's schema migrations. These dependencies
-do not create a schema or a container topology.
+3, Alembic, Pydantic Settings, Argon2id password hashing through
+`argon2-cffi`, Ruff, and pytest. SQLAlchemy and psycopg are runtime
+dependencies because the application API owns durable persistence. Alembic is
+available to run the service's schema migrations. These dependencies do not
+create a container topology.
 
 Run all commands from `services/api/`:
 
@@ -63,12 +62,48 @@ never render a request target or query string. Settings, URL values, request
 bodies, arbitrary event values, and arbitrary log-message text are not emitted
 by the formatter.
 
+## Authentication
+
+The authentication surface is intentionally small:
+
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/logout`
+- `GET /auth/me`
+
+Usernames are normalized by trimming and lowercasing, then must be 3-32
+lowercase ASCII letters, digits, `_`, or `-`. Passwords must be 12-128
+characters. Registration creates the account and immediately signs the browser
+in.
+
+Sessions use the `planner_session` cookie with `HttpOnly` and `SameSite=Lax`.
+The cookie is marked `Secure` only when `PLANNER_API_ENVIRONMENT=production`.
+The browser receives an opaque random token; the database stores only its
+SHA-256 hash in `auth_sessions.token_hash`. Session TTL is 7 days. Logout
+revokes the current session server-side and clears the cookie. The application
+also exposes a reusable authenticated-user dependency and a password-change
+session revocation helper for future protected flows.
+
+Unknown usernames and wrong passwords return the same login error. Passwords,
+session tokens, session-token hashes, and password hashes are not returned in
+API JSON and should never be logged.
+
+Failed registration and login attempts use an in-process MVP rate limiter keyed
+by client, route, and normalized username where applicable. This protects a
+single API process only; it is not shared across workers, hosts, restarts, or a
+future distributed topology. Do not treat it as a replacement for a shared
+limiter if the service is later scaled horizontally.
+
 ## Migrations
 
-Alembic is initialized with its standard generic `script.py.mako` revision
-template, but `alembic/versions/` has no product revision and there are no
-product tables. A later data-model ticket must add models, metadata, a reviewed
-revision, and migration tests before application data is stored.
+Alembic owns the API schema. TKT-009 adds:
+
+- `users`: `id`, `username`, `username_normalized`, `password_hash`,
+  `created_at`, `password_changed_at`, with a unique normalized username.
+- `auth_sessions`: `id`, `user_id`, `token_hash`, `expires_at`, `revoked_at`,
+  `created_at`, with a unique token hash and a foreign key to `users`.
+
+Backfill: none. Rollback: downgrade drops `auth_sessions` before `users`.
 
 To validate local migration wiring against an explicitly configured PostgreSQL
 database, set the variables shown above and run:
@@ -77,7 +112,7 @@ database, set the variables shown above and run:
 python -m uv run alembic upgrade head
 ```
 
-To exercise the same empty migration wiring locally against a disposable test
+To exercise the same migration wiring locally against a disposable test
 database (SQLite is test-only):
 
 ```powershell

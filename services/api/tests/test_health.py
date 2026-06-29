@@ -36,9 +36,15 @@ def test_health_is_live_without_accessing_an_unavailable_database(
     unavailable_database.check_connection.assert_not_called()
 
 
-def test_no_product_routes_exist_yet(client: TestClient) -> None:
-    """The foundation does not accidentally publish planner or account behavior."""
+def test_only_health_and_auth_routes_are_published(client: TestClient) -> None:
+    """The API publishes the scoped auth surface without planner behavior."""
     response = client.get("/openapi.json")
 
     assert response.status_code == 200
-    assert set(response.json()["paths"]) == {"/health"}
+    assert set(response.json()["paths"]) == {
+        "/auth/login",
+        "/auth/logout",
+        "/auth/me",
+        "/auth/register",
+        "/health",
+    }

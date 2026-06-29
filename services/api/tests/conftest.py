@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 import pytest
 from fastapi.testclient import TestClient
 
@@ -26,6 +29,7 @@ def settings(tmp_path: pytest.TempPathFactory) -> Settings:
 def database(settings: Settings) -> Iterator[Database]:
     """Provide and then dispose the isolated test database boundary."""
     database = Database.from_settings(settings)
+    _upgrade_database(settings)
     try:
         yield database
     finally:
@@ -37,3 +41,10 @@ def client(settings: Settings, database: Database) -> Iterator[TestClient]:
     """Exercise a configured API instance without reading normal environment values."""
     with TestClient(create_app(settings=settings, database=database)) as client:
         yield client
+
+
+def _upgrade_database(settings: Settings) -> None:
+    service_root = Path(__file__).parents[1]
+    config = Config(str(service_root / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", settings.database_url_value)
+    command.upgrade(config, "head")

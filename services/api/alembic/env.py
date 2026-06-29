@@ -8,6 +8,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from api_service.config import Settings
+from api_service.infrastructure.models import Base
 
 
 config = context.config
@@ -15,15 +16,16 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Product models do not exist in TKT-008. Future persistence tickets must set this.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
     """Configure Alembic without opening a database connection."""
-    settings = Settings()
+    database_url = (
+        config.get_main_option("sqlalchemy.url") or Settings().database_url_value
+    )
     context.configure(
-        url=settings.database_url_value,
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -34,9 +36,10 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Configure Alembic with the same sync PostgreSQL/test boundary as the API."""
-    settings = Settings()
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.database_url_value
+    configuration["sqlalchemy.url"] = (
+        configuration.get("sqlalchemy.url") or Settings().database_url_value
+    )
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
