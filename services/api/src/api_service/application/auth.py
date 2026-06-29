@@ -24,6 +24,13 @@ from api_service.domain.auth import (
 from api_service.infrastructure.models import AuthSession, User
 
 
+DUMMY_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$"
+    "BWjmPMcXtD7fXHB2giALfQ$"
+    "bAk4nu1wTZW7Uu4PsHU6Xsvs/bf4RjX1eSNSqiPhcg0"
+)
+
+
 class RegistrationError(Exception):
     """Raised when a requested account cannot be created."""
 
@@ -80,22 +87,26 @@ class AuthService:
 
     def login(self, session: Session, username: str, password: str) -> CreatedSession:
         """Verify credentials and issue a new session."""
+        normalized_lookup: str | None
         try:
-            normalized_username = normalize_username(username)
-        except InvalidUsernameError as error:
-            raise AuthenticationFailedError("Invalid username or password.") from error
+            normalized_lookup = normalize_username(username).normalized
+        except InvalidUsernameError:
+            normalized_lookup = None
 
-        user = session.scalar(
-            select(User).where(
-                User.username_normalized == normalized_username.normalized
+        user = (
+            session.scalar(
+                select(User).where(User.username_normalized == normalized_lookup)
             )
+            if normalized_lookup is not None
+            else None
         )
-        if user is None:
-            raise AuthenticationFailedError("Invalid username or password.")
+        password_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
         try:
-            self._password_hasher.verify(user.password_hash, password)
+            self._password_hasher.verify(password_hash, password)
         except VerifyMismatchError as error:
             raise AuthenticationFailedError("Invalid username or password.") from error
+        if user is None:
+            raise AuthenticationFailedError("Invalid username or password.")
 
         issued_session = self._create_session(session, user, _utc_now())
         session.commit()

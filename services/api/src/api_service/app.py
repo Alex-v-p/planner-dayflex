@@ -21,13 +21,9 @@ class HealthResponse(BaseModel):
 
 
 def redact_validation_error_inputs(error: dict[str, object]) -> dict[str, object]:
-    """Remove raw sensitive input from validation errors while keeping safe details."""
+    """Remove raw request input from validation errors while keeping safe details."""
     redacted_error = dict(error)
-    location = redacted_error.get("loc")
-    if isinstance(location, tuple | list) and any(
-        str(part).lower() == "password" for part in location
-    ):
-        redacted_error.pop("input", None)
+    redacted_error.pop("input", None)
     return redacted_error
 
 

@@ -54,6 +54,8 @@ class InProcessAuthRateLimiter:
     def record_failure(self, key: str) -> None:
         """Record one failed attempt."""
         failures = self._pruned_failures(key)
+        if not failures:
+            self._failures[key] = failures
         failures.append(_utc_now())
 
     def record_success(self, key: str) -> None:
@@ -61,10 +63,12 @@ class InProcessAuthRateLimiter:
         self._failures.pop(key, None)
 
     def _pruned_failures(self, key: str) -> deque[datetime]:
-        failures = self._failures[key]
+        failures = self._failures.get(key, deque())
         cutoff = _utc_now() - self.window
         while failures and failures[0] <= cutoff:
             failures.popleft()
+        if not failures:
+            self._failures.pop(key, None)
         return failures
 
 
