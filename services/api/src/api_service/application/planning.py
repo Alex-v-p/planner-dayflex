@@ -633,7 +633,6 @@ def _fixed_event_lookup(
 ALLOWED_SCHEDULER_ITEM_KINDS = {
     "task",
     "fixed_event",
-    "interruption",
     "buffer",
     "designated_free_time",
 }

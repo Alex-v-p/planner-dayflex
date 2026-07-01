@@ -803,6 +803,19 @@ def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
         {
             "items": [
                 {
+                    "kind": "interruption",
+                    "interval": {
+                        "start": "2026-06-22T14:00:00+02:00",
+                        "end": "2026-06-22T15:00:00+02:00",
+                    },
+                }
+            ],
+            "decisions": [],
+            "warnings": [],
+        },
+        {
+            "items": [
+                {
                     "kind": "designated_free_time",
                     "interval": {
                         "start": "2026-06-22T16:00:00+02:00",
