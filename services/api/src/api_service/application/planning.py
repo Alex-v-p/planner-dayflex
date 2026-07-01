@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
+from zoneinfo import ZoneInfo
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,9 +19,18 @@ from api_service.contracts.planning import (
     TaskUpdateRequest,
     UserPreferencesRequest,
 )
+from api_service.infrastructure.scheduler_client import (
+    ScheduleResultDTO,
+    SchedulerClient,
+    SchedulerUnavailableError,
+    SchedulerValidationFailedError,
+)
 from api_service.infrastructure.models import (
     FixedEvent,
     PlanningDay,
+    ScheduleDecision,
+    ScheduleItem,
+    ScheduleSnapshot,
     Task,
     UserPreferences,
 )
@@ -32,6 +42,14 @@ class PlanningResourceNotFoundError(Exception):
 
 class PlanningConflictError(Exception):
     """Raised when a request conflicts with existing planning inputs."""
+
+
+class SchedulerUnavailablePlanningError(Exception):
+    """Raised when the scheduler cannot produce a result right now."""
+
+
+class SchedulerRejectedPlanningInputsError(Exception):
+    """Raised when persisted inputs fail the scheduler contract."""
 
 
 @dataclass(frozen=True)
@@ -252,6 +270,84 @@ class PlanningService:
         task.updated_at = _utc_now()
         session.commit()
 
+    def generate_plan(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day_id: str,
+        scheduler_client: SchedulerClient,
+        *,
+        scheduler_version: str,
+    ) -> ScheduleSnapshot:
+        planning_day = self._get_planning_day_for_update(
+            session, user_id, planning_day_id
+        )
+        fixed_events = self._list_fixed_events_for_day(session, planning_day_id)
+        tasks = self._list_active_tasks_for_user(session, user_id)
+        preferences = session.get(UserPreferences, user_id)
+        configuration = _scheduler_configuration(preferences)
+        request = _scheduler_request(planning_day, fixed_events, tasks, configuration)
+
+        try:
+            result = scheduler_client.schedule_day(request)
+        except SchedulerValidationFailedError as error:
+            session.rollback()
+            raise SchedulerRejectedPlanningInputsError from error
+        except SchedulerUnavailableError as error:
+            session.rollback()
+            raise SchedulerUnavailablePlanningError from error
+
+        try:
+            snapshot = self._persist_schedule_snapshot(
+                session,
+                planning_day,
+                fixed_events,
+                result,
+                configuration,
+                scheduler_version,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        session.refresh(snapshot)
+        return self.get_schedule_snapshot(session, user_id, snapshot.id)
+
+    def get_latest_schedule_snapshot(
+        self, session: Session, user_id: str, planning_day_id: str
+    ) -> ScheduleSnapshot:
+        planning_day = self.get_planning_day(session, user_id, planning_day_id)
+        if planning_day.current_snapshot_id is None:
+            raise PlanningResourceNotFoundError
+        return self.get_schedule_snapshot(
+            session, user_id, planning_day.current_snapshot_id
+        )
+
+    def list_schedule_snapshots(
+        self, session: Session, user_id: str, planning_day_id: str
+    ) -> list[ScheduleSnapshot]:
+        self.get_planning_day(session, user_id, planning_day_id)
+        snapshots = list(
+            session.scalars(
+                select(ScheduleSnapshot)
+                .where(ScheduleSnapshot.planning_day_id == planning_day_id)
+                .order_by(ScheduleSnapshot.version)
+            )
+        )
+        return [_normalize_schedule_snapshot(snapshot) for snapshot in snapshots]
+
+    def get_schedule_snapshot(
+        self, session: Session, user_id: str, snapshot_id: str
+    ) -> ScheduleSnapshot:
+        snapshot = session.scalar(
+            select(ScheduleSnapshot)
+            .join(PlanningDay, ScheduleSnapshot.planning_day_id == PlanningDay.id)
+            .where(ScheduleSnapshot.id == snapshot_id, PlanningDay.user_id == user_id)
+        )
+        if snapshot is None:
+            raise PlanningResourceNotFoundError
+        return _normalize_schedule_snapshot(snapshot)
+
     def _get_fixed_event(
         self, session: Session, planning_day_id: str, fixed_event_id: str
     ) -> FixedEvent:
@@ -312,6 +408,104 @@ class PlanningService:
             if requested_start < existing_end and existing_start < requested_end:
                 raise PlanningConflictError("Fixed events must not overlap.")
 
+    def _list_fixed_events_for_day(
+        self, session: Session, planning_day_id: str
+    ) -> list[FixedEvent]:
+        return [
+            _normalize_fixed_event(fixed_event)
+            for fixed_event in session.scalars(
+                select(FixedEvent)
+                .where(FixedEvent.planning_day_id == planning_day_id)
+                .order_by(FixedEvent.start_at, FixedEvent.created_at)
+            )
+        ]
+
+    def _list_active_tasks_for_user(self, session: Session, user_id: str) -> list[Task]:
+        return [
+            _normalize_task(task)
+            for task in session.scalars(
+                select(Task)
+                .where(Task.user_id == user_id, Task.status == "active")
+                .order_by(Task.created_at, Task.id)
+            )
+        ]
+
+    def _persist_schedule_snapshot(
+        self,
+        session: Session,
+        planning_day: PlanningDay,
+        fixed_events: list[FixedEvent],
+        result: ScheduleResultDTO,
+        configuration: dict[str, object],
+        scheduler_version: str,
+    ) -> ScheduleSnapshot:
+        next_version = (
+            session.scalar(
+                select(func.max(ScheduleSnapshot.version)).where(
+                    ScheduleSnapshot.planning_day_id == planning_day.id
+                )
+            )
+            or 0
+        ) + 1
+        snapshot = ScheduleSnapshot(
+            id=str(uuid4()),
+            planning_day_id=planning_day.id,
+            version=next_version,
+            created_at=_utc_now(),
+            scheduler_version=scheduler_version,
+            configuration_json=configuration,
+        )
+        session.add(snapshot)
+        session.flush()
+        fixed_event_lookup = _fixed_event_lookup(fixed_events)
+        for position, item in enumerate(result.items):
+            start_at = _as_utc(datetime.fromisoformat(item.interval.start))
+            end_at = _as_utc(datetime.fromisoformat(item.interval.end))
+            session.add(
+                ScheduleItem(
+                    id=str(uuid4()),
+                    snapshot_id=snapshot.id,
+                    position=position,
+                    kind=item.kind,
+                    task_id=item.task_id,
+                    fixed_event_id=(
+                        fixed_event_lookup.get((start_at, end_at))
+                        if item.kind == "fixed_event"
+                        else None
+                    ),
+                    interruption_id=None,
+                    start_at=start_at,
+                    end_at=end_at,
+                )
+            )
+        decision_position = 0
+        for decision in result.decisions:
+            session.add(
+                ScheduleDecision(
+                    id=str(uuid4()),
+                    snapshot_id=snapshot.id,
+                    position=decision_position,
+                    task_id=decision.task_id,
+                    reason_code=decision.reason_code,
+                    details_json=dict(decision.details),
+                )
+            )
+            decision_position += 1
+        for warning in result.warnings:
+            session.add(
+                ScheduleDecision(
+                    id=str(uuid4()),
+                    snapshot_id=snapshot.id,
+                    position=decision_position,
+                    task_id=None,
+                    reason_code=f"warning:{warning.code}",
+                    details_json=dict(warning.details),
+                )
+            )
+            decision_position += 1
+        planning_day.current_snapshot_id = snapshot.id
+        return snapshot
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -342,3 +536,94 @@ def _normalize_task(task: Task) -> Task:
     task.created_at = _as_utc(task.created_at)
     task.updated_at = _as_utc(task.updated_at)
     return task
+
+
+def _normalize_schedule_snapshot(snapshot: ScheduleSnapshot) -> ScheduleSnapshot:
+    snapshot.created_at = _as_utc(snapshot.created_at)
+    time_zone = ZoneInfo(snapshot.planning_day.time_zone)
+    for item in snapshot.items:
+        item.start_at = _as_utc(item.start_at).astimezone(time_zone)
+        item.end_at = _as_utc(item.end_at).astimezone(time_zone)
+    return snapshot
+
+
+def _scheduler_configuration(preferences: UserPreferences | None) -> dict[str, object]:
+    return {
+        "day_start": (
+            preferences.day_start_local.isoformat()
+            if preferences is not None
+            else "08:00:00"
+        ),
+        "day_end": (
+            preferences.day_end_local.isoformat()
+            if preferences is not None
+            else "18:00:00"
+        ),
+        "buffer_minutes": (
+            preferences.default_buffer_minutes if preferences is not None else 10
+        ),
+        "minimum_free_time_minutes": 30,
+        "minimum_segment_minutes": 15,
+        "maximum_task_segments": 3,
+    }
+
+
+def _scheduler_request(
+    planning_day: PlanningDay,
+    fixed_events: list[FixedEvent],
+    tasks: list[Task],
+    configuration: dict[str, object],
+) -> dict[str, object]:
+    time_zone = ZoneInfo(planning_day.time_zone)
+    current_at = datetime.combine(
+        planning_day.local_date,
+        time.fromisoformat(str(configuration["day_start"])),
+        time_zone,
+    )
+    return {
+        "planning_day": {
+            "local_date": planning_day.local_date.isoformat(),
+            "time_zone": planning_day.time_zone,
+        },
+        "current_at": current_at.isoformat(),
+        "fixed_events": [
+            {
+                "id": fixed_event.id,
+                "title": fixed_event.title,
+                "interval": {
+                    "start": fixed_event.start_at.astimezone(time_zone).isoformat(),
+                    "end": fixed_event.end_at.astimezone(time_zone).isoformat(),
+                },
+            }
+            for fixed_event in fixed_events
+        ],
+        "interruptions": [],
+        "tasks": [
+            {
+                "id": task.id,
+                "title": task.title,
+                "estimated_minutes": task.estimated_minutes,
+                "priority": task.priority,
+                "created_at": task.created_at.astimezone(time_zone).isoformat(),
+                "due_date": task.due_date.isoformat() if task.due_date else None,
+                "earliest_start_at": (
+                    task.earliest_start_at.astimezone(time_zone).isoformat()
+                    if task.earliest_start_at
+                    else None
+                ),
+                "splitting_allowed": task.splitting_allowed,
+            }
+            for task in tasks
+        ],
+        "task_progress": [],
+        "configuration": configuration,
+    }
+
+
+def _fixed_event_lookup(
+    fixed_events: list[FixedEvent],
+) -> dict[tuple[datetime, datetime], str]:
+    return {
+        (_as_utc(fixed_event.start_at), _as_utc(fixed_event.end_at)): fixed_event.id
+        for fixed_event in fixed_events
+    }
