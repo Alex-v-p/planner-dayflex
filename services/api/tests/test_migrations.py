@@ -16,7 +16,7 @@ from api_service.database import Database
 def test_alembic_upgrade_head_accepts_the_test_database_configuration(
     monkeypatch, settings: Settings
 ) -> None:
-    """Migration wiring creates the account and session schema."""
+    """Migration wiring creates the account, session, and planning input schema."""
     service_root = Path(__file__).parents[1]
     monkeypatch.setenv("PLANNER_API_ENVIRONMENT", "test")
     monkeypatch.setenv(
@@ -29,7 +29,14 @@ def test_alembic_upgrade_head_accepts_the_test_database_configuration(
     database = Database.from_settings(settings)
     try:
         inspector = inspect(database.engine)
-        assert {"users", "auth_sessions"}.issubset(inspector.get_table_names())
+        assert {
+            "users",
+            "auth_sessions",
+            "user_preferences",
+            "planning_days",
+            "tasks",
+            "fixed_events",
+        }.issubset(inspector.get_table_names())
         assert {
             "id",
             "username",
@@ -46,6 +53,68 @@ def test_alembic_upgrade_head_accepts_the_test_database_configuration(
             "revoked_at",
             "created_at",
         } == {column["name"] for column in inspector.get_columns("auth_sessions")}
+        assert {
+            "user_id",
+            "time_zone",
+            "day_start_local",
+            "day_end_local",
+            "default_buffer_minutes",
+        } == {column["name"] for column in inspector.get_columns("user_preferences")}
+        assert {
+            "id",
+            "user_id",
+            "local_date",
+            "time_zone",
+            "created_at",
+        } == {column["name"] for column in inspector.get_columns("planning_days")}
+        assert {
+            "id",
+            "user_id",
+            "title",
+            "estimated_minutes",
+            "priority",
+            "due_date",
+            "earliest_start_at",
+            "splitting_allowed",
+            "min_segment_minutes",
+            "status",
+            "created_at",
+            "updated_at",
+        } == {column["name"] for column in inspector.get_columns("tasks")}
+        assert {
+            "id",
+            "planning_day_id",
+            "title",
+            "start_at",
+            "end_at",
+            "time_zone",
+            "created_at",
+            "updated_at",
+        } == {column["name"] for column in inspector.get_columns("fixed_events")}
+        assert {
+            "ck_user_preferences_buffer_non_negative",
+            "ck_user_preferences_day_bounds",
+        } == {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints("user_preferences")
+        }
+        assert {"uq_planning_days_user_date"} == {
+            constraint["name"]
+            for constraint in inspector.get_unique_constraints("planning_days")
+        }
+        assert {
+            "ck_tasks_estimated_minutes_positive",
+            "ck_tasks_priority",
+            "ck_tasks_split_settings",
+            "ck_tasks_status",
+        } == {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints("tasks")
+        }
+        assert {"ck_fixed_events_interval"} == {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints("fixed_events")
+        }
     finally:
         database.engine.dispose()
 
@@ -53,7 +122,7 @@ def test_alembic_upgrade_head_accepts_the_test_database_configuration(
 def test_alembic_downgrade_drops_sessions_before_users(
     monkeypatch, settings: Settings
 ) -> None:
-    """Rollback removes the TKT-009 tables."""
+    """Rollback removes planning, session, and user tables."""
     service_root = Path(__file__).parents[1]
     monkeypatch.setenv("PLANNER_API_ENVIRONMENT", "test")
     monkeypatch.setenv(
@@ -68,6 +137,10 @@ def test_alembic_downgrade_drops_sessions_before_users(
     try:
         assert "users" not in inspect(database.engine).get_table_names()
         assert "auth_sessions" not in inspect(database.engine).get_table_names()
+        assert "user_preferences" not in inspect(database.engine).get_table_names()
+        assert "planning_days" not in inspect(database.engine).get_table_names()
+        assert "tasks" not in inspect(database.engine).get_table_names()
+        assert "fixed_events" not in inspect(database.engine).get_table_names()
     finally:
         database.engine.dispose()
 
