@@ -298,6 +298,7 @@ class PlanningService:
             raise SchedulerUnavailablePlanningError from error
 
         try:
+            _validate_scheduler_result(result, tasks, fixed_events)
             snapshot = self._persist_schedule_snapshot(
                 session,
                 planning_day,
@@ -627,3 +628,64 @@ def _fixed_event_lookup(
         (_as_utc(fixed_event.start_at), _as_utc(fixed_event.end_at)): fixed_event.id
         for fixed_event in fixed_events
     }
+
+
+ALLOWED_SCHEDULER_ITEM_KINDS = {
+    "task",
+    "fixed_event",
+    "interruption",
+    "buffer",
+    "designated_free_time",
+}
+
+ALLOWED_SCHEDULER_DECISION_REASON_CODES = {
+    "placed_in_earliest_valid_window",
+    "moved_after_interruption",
+    "split_across_available_windows",
+    "blocked_by_fixed_event",
+    "blocked_by_interruption",
+    "missed_before_current_time",
+    "insufficient_time_before_deadline",
+    "insufficient_remaining_day_time",
+    "designated_free_time",
+    "locked_time_overlap_merged",
+}
+
+ALLOWED_SCHEDULER_WARNING_CODES = {
+    "locked_time_overlap_merged",
+}
+
+
+def _validate_scheduler_result(
+    result: ScheduleResultDTO,
+    tasks: list[Task],
+    fixed_events: list[FixedEvent],
+) -> None:
+    active_task_ids = {task.id for task in tasks}
+    fixed_event_intervals = set(_fixed_event_lookup(fixed_events))
+    for item in result.items:
+        if item.kind not in ALLOWED_SCHEDULER_ITEM_KINDS:
+            raise SchedulerUnavailablePlanningError
+        if item.kind == "task":
+            if item.task_id is None or item.task_id not in active_task_ids:
+                raise SchedulerUnavailablePlanningError
+        elif item.task_id is not None:
+            raise SchedulerUnavailablePlanningError
+        if item.kind == "fixed_event":
+            try:
+                start_at = _as_utc(datetime.fromisoformat(item.interval.start))
+                end_at = _as_utc(datetime.fromisoformat(item.interval.end))
+            except ValueError as error:
+                raise SchedulerUnavailablePlanningError from error
+            if (start_at, end_at) not in fixed_event_intervals:
+                raise SchedulerUnavailablePlanningError
+
+    for decision in result.decisions:
+        if decision.reason_code not in ALLOWED_SCHEDULER_DECISION_REASON_CODES:
+            raise SchedulerUnavailablePlanningError
+        if decision.task_id is not None and decision.task_id not in active_task_ids:
+            raise SchedulerUnavailablePlanningError
+
+    for warning in result.warnings:
+        if warning.code not in ALLOWED_SCHEDULER_WARNING_CODES:
+            raise SchedulerUnavailablePlanningError

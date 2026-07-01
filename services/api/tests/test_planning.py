@@ -619,6 +619,67 @@ def test_scheduler_failures_leave_no_partial_snapshot(
         assert session.scalars(select(ScheduleSnapshot)).all() == []
 
 
+def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SuccessfulSchedulerResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "items": [
+                    {
+                        "kind": "task",
+                        "interval": {
+                            "start": "2026-06-22T08:00:00+02:00",
+                            "end": "2026-06-22T08:45:00+02:00",
+                        },
+                        "task_id": "task-id",
+                    },
+                    {
+                        "kind": "designated_free_time",
+                        "interval": {
+                            "start": "2026-06-22T16:00:00+02:00",
+                            "end": "2026-06-22T18:00:00+02:00",
+                        },
+                    },
+                ],
+                "decisions": [
+                    {
+                        "reason_code": "placed_in_earliest_valid_window",
+                        "task_id": "task-id",
+                        "details": {},
+                    }
+                ],
+                "warnings": [
+                    {
+                        "code": "locked_time_overlap_merged",
+                        "details": {"fixed_event_id": "meeting"},
+                    }
+                ],
+            }
+
+    def fake_post(
+        url: str, json: dict[str, object], timeout: float
+    ) -> SuccessfulSchedulerResponse:
+        assert url == "http://scheduler.test/v1/schedule-day"
+        assert json == {"request": "body"}
+        assert timeout == 5.0
+        return SuccessfulSchedulerResponse()
+
+    monkeypatch.setattr(
+        "api_service.infrastructure.scheduler_client.httpx.post", fake_post
+    )
+
+    result = HttpSchedulerClient("http://scheduler.test").schedule_day(
+        {"request": "body"}
+    )
+
+    assert [item.kind for item in result.items] == ["task", "designated_free_time"]
+    assert result.decisions[0].reason_code == "placed_in_earliest_valid_window"
+    assert result.warnings[0].code == "locked_time_overlap_merged"
+
+
 def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
     client: TestClient,
     database: Database,
@@ -679,6 +740,187 @@ def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
         assert planning_day is not None
         assert planning_day.current_snapshot_id is None
         assert session.scalars(select(ScheduleSnapshot)).all() == []
+
+
+@pytest.mark.parametrize(
+    "scheduler_result",
+    [
+        {
+            "items": [
+                {
+                    "kind": "task",
+                    "interval": {
+                        "start": "2026-06-22T08:00:00+02:00",
+                        "end": "2026-06-22T08:45:00+02:00",
+                    },
+                    "task_id": "unknown-task-id",
+                }
+            ],
+            "decisions": [],
+            "warnings": [],
+        },
+        {
+            "items": [
+                {
+                    "kind": "task",
+                    "interval": {
+                        "start": "2026-06-22T08:00:00+02:00",
+                        "end": "2026-06-22T08:45:00+02:00",
+                    },
+                    "task_id": None,
+                }
+            ],
+            "decisions": [],
+            "warnings": [],
+        },
+        {
+            "items": [
+                {
+                    "kind": "buffer",
+                    "interval": {
+                        "start": "2026-06-22T08:45:00+02:00",
+                        "end": "2026-06-22T08:55:00+02:00",
+                    },
+                    "task_id": "unknown-task-id",
+                }
+            ],
+            "decisions": [],
+            "warnings": [],
+        },
+        {
+            "items": [
+                {
+                    "kind": "out_of_contract_kind",
+                    "interval": {
+                        "start": "2026-06-22T08:00:00+02:00",
+                        "end": "2026-06-22T08:45:00+02:00",
+                    },
+                }
+            ],
+            "decisions": [],
+            "warnings": [],
+        },
+        {
+            "items": [
+                {
+                    "kind": "designated_free_time",
+                    "interval": {
+                        "start": "2026-06-22T16:00:00+02:00",
+                        "end": "2026-06-22T18:00:00+02:00",
+                    },
+                }
+            ],
+            "decisions": [
+                {
+                    "reason_code": "placed_in_earliest_valid_window",
+                    "task_id": "unknown-task-id",
+                    "details": {},
+                }
+            ],
+            "warnings": [],
+        },
+        {
+            "items": [
+                {
+                    "kind": "designated_free_time",
+                    "interval": {
+                        "start": "2026-06-22T16:00:00+02:00",
+                        "end": "2026-06-22T18:00:00+02:00",
+                    },
+                }
+            ],
+            "decisions": [
+                {
+                    "reason_code": "out_of_contract_reason",
+                    "details": {},
+                }
+            ],
+            "warnings": [],
+        },
+        {
+            "items": [
+                {
+                    "kind": "designated_free_time",
+                    "interval": {
+                        "start": "2026-06-22T16:00:00+02:00",
+                        "end": "2026-06-22T18:00:00+02:00",
+                    },
+                }
+            ],
+            "decisions": [],
+            "warnings": [
+                {
+                    "code": "out_of_contract_warning",
+                    "details": {},
+                }
+            ],
+        },
+    ],
+)
+def test_malformed_scheduler_contract_values_return_503_without_snapshot(
+    client: TestClient,
+    database: Database,
+    scheduler_result: dict[str, object],
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = StaticResultSchedulerClient(scheduler_result)
+
+    response = client.post(f"/planning/days/{day['id']}/generate-plan")
+
+    assert_generate_plan_503_without_snapshot(response, database, day["id"])
+
+
+def test_cross_user_scheduler_task_id_returns_503_without_snapshot(
+    client: TestClient,
+    database: Database,
+) -> None:
+    register(client, "bob")
+    bob_task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Bob task",
+            "estimated_minutes": 30,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    client.cookies.clear()
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        {
+            "items": [
+                {
+                    "kind": "task",
+                    "interval": {
+                        "start": "2026-06-22T08:00:00+02:00",
+                        "end": "2026-06-22T08:30:00+02:00",
+                    },
+                    "task_id": bob_task["id"],
+                }
+            ],
+            "decisions": [],
+            "warnings": [],
+        }
+    )
+
+    response = client.post(f"/planning/days/{day['id']}/generate-plan")
+
+    assert_generate_plan_503_without_snapshot(response, database, day["id"])
 
 
 def test_invalid_planning_inputs_are_rejected(client: TestClient) -> None:
@@ -1191,6 +1433,14 @@ class FailingSchedulerClient:
         raise self._error
 
 
+class StaticResultSchedulerClient:
+    def __init__(self, result: dict[str, object]) -> None:
+        self._result = result
+
+    def schedule_day(self, request: dict[str, object]) -> ScheduleResultDTO:
+        return ScheduleResultDTO.model_validate(self._result)
+
+
 class CapturingSchedulerClient:
     def __init__(self) -> None:
         self.request: dict[str, object] = {}
@@ -1234,6 +1484,20 @@ def item(
 
 def decision(reason_code: str, task_id: str | None = None) -> dict[str, object]:
     return {"reason_code": reason_code, "task_id": task_id, "details": {}}
+
+
+def assert_generate_plan_503_without_snapshot(
+    response: object, database: Database, planning_day_id: str
+) -> None:
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "The scheduler is unavailable. Please try again shortly."
+    }
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, planning_day_id)
+        assert planning_day is not None
+        assert planning_day.current_snapshot_id is None
+        assert session.scalars(select(ScheduleSnapshot)).all() == []
 
 
 def fixed_event_payload(title: str, start_at: str, end_time: str) -> dict[str, str]:
