@@ -36,8 +36,8 @@ def test_health_is_live_without_accessing_an_unavailable_database(
     unavailable_database.check_connection.assert_not_called()
 
 
-def test_only_health_and_auth_routes_are_published(client: TestClient) -> None:
-    """The API publishes the scoped auth surface without planner behavior."""
+def test_health_auth_and_planning_routes_are_published(client: TestClient) -> None:
+    """The API publishes only the scoped health, auth, and planning surfaces."""
     response = client.get("/openapi.json")
 
     assert response.status_code == 200
@@ -47,4 +47,11 @@ def test_only_health_and_auth_routes_are_published(client: TestClient) -> None:
         "/auth/me",
         "/auth/register",
         "/health",
+        "/planning/days",
+        "/planning/days/{planning_day_id}",
+        "/planning/days/{planning_day_id}/fixed-events",
+        "/planning/days/{planning_day_id}/fixed-events/{fixed_event_id}",
+        "/planning/preferences",
+        "/planning/tasks",
+        "/planning/tasks/{task_id}",
     }

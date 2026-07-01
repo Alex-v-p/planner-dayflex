@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from .config import Settings
 from .database import Database
 from .interfaces.auth import router as auth_router
+from .interfaces.planning import router as planning_router
 from .logging_config import configure_logging
 
 
@@ -69,6 +70,7 @@ def create_app(
         return HealthResponse()
 
     app.include_router(auth_router)
+    app.include_router(planning_router)
 
     logger.info("API application created", extra={"event": "api_started"})
     return app

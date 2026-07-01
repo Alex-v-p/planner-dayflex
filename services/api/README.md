@@ -3,12 +3,13 @@
 `services/api/` is the browser-facing application boundary for
 `planner-dayflex`. It will own browser DTOs, input validation, authorization,
 persistence, and orchestration when the relevant scoped tickets arrive. It
-does not contain scheduler algorithms, planner routes, a scheduler client, AI
-behavior, Docker, or Compose topology.
+does not contain scheduler algorithms, schedule-generation routes, a scheduler
+client, AI behavior, Docker, or Compose topology.
 
-The current service includes the TKT-008 foundation plus TKT-009 username and
-password authentication. The lasting dependency and boundary choice is recorded
-in [ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md).
+The current service includes the TKT-008 foundation, TKT-009 username/password
+authentication, and TKT-010 persisted planning inputs. The lasting dependency
+and boundary choice is recorded in
+[ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md).
 
 ## Toolchain
 
@@ -94,6 +95,43 @@ single API process only; it is not shared across workers, hosts, restarts, or a
 future distributed topology. Do not treat it as a replacement for a shared
 limiter if the service is later scaled horizontally.
 
+## Planning inputs
+
+The planning input surface requires an authenticated session and scopes every
+query through the current user's ID:
+
+- `GET /planning/preferences`
+- `PUT /planning/preferences`
+- `DELETE /planning/preferences`
+- `POST /planning/days`
+- `GET /planning/days`
+- `GET /planning/days/{planning_day_id}`
+- `POST /planning/days/{planning_day_id}/fixed-events`
+- `GET /planning/days/{planning_day_id}/fixed-events`
+- `PUT /planning/days/{planning_day_id}/fixed-events/{fixed_event_id}`
+- `DELETE /planning/days/{planning_day_id}/fixed-events/{fixed_event_id}`
+- `POST /planning/tasks`
+- `GET /planning/tasks`
+- `PUT /planning/tasks/{task_id}`
+- `DELETE /planning/tasks/{task_id}`
+
+Planning day and fixed-event ownership is resolved through `planning_days.user_id`;
+the API never trusts a browser-supplied user ID. Cross-user reads and mutations
+return `404` where a specific resource is involved.
+
+Validation rejects invalid IANA time zones, day bounds where the start is not
+before the end, negative buffer values, non-positive task estimates, task
+priorities outside `1..5`, invalid split settings, naive datetimes, and fixed
+event intervals where `end_at` is not after `start_at`. Fixed events are
+half-open intervals: adjacent events are accepted, overlapping events on the
+same planning day are rejected before persistence.
+
+Task removal is soft: `DELETE /planning/tasks/{task_id}` marks an active task
+as `removed`, and list/update/delete operations only operate on active tasks.
+This preserves future schedule-history compatibility. Fixed events are hard
+deleted because TKT-010 does not create schedule snapshots or other historical
+references.
+
 ## Migrations
 
 Alembic owns the API schema. TKT-009 adds:
@@ -103,7 +141,19 @@ Alembic owns the API schema. TKT-009 adds:
 - `auth_sessions`: `id`, `user_id`, `token_hash`, `expires_at`, `revoked_at`,
   `created_at`, with a unique token hash and a foreign key to `users`.
 
-Backfill: none. Rollback: downgrade drops `auth_sessions` before `users`.
+TKT-010 adds:
+
+- `user_preferences`: `user_id`, `time_zone`, local day bounds, and
+  `default_buffer_minutes`.
+- `planning_days`: `id`, `user_id`, `local_date`, `time_zone`, and
+  `created_at`, with unique `(user_id, local_date)`.
+- `tasks`: user-owned flexible task inputs with duration, priority, due date,
+  earliest start, split settings, status, and timestamps.
+- `fixed_events`: planning-day-owned locked intervals with title, timezone,
+  interval, and timestamps.
+
+Backfill: none. Rollback: downgrade drops planning input tables before
+`auth_sessions`, then drops `users`.
 
 To validate local migration wiring against an explicitly configured PostgreSQL
 database, set the variables shown above and run:
