@@ -16,6 +16,7 @@ from api_service.database import Database
 from api_service.domain.auth import SESSION_COOKIE_NAME
 from api_service.infrastructure.models import PlanningDay, ScheduleSnapshot, Task
 from api_service.infrastructure.scheduler_client import (
+    HttpSchedulerClient,
     ScheduleResultDTO,
     SchedulerUnavailableError,
     SchedulerValidationFailedError,
@@ -611,6 +612,68 @@ def test_scheduler_failures_leave_no_partial_snapshot(
     response = client.post(f"/planning/days/{day['id']}/generate-plan")
 
     assert response.status_code == status_code
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, day["id"])
+        assert planning_day is not None
+        assert planning_day.current_snapshot_id is None
+        assert session.scalars(select(ScheduleSnapshot)).all() == []
+
+
+def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
+    client: TestClient,
+    database: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = HttpSchedulerClient("http://scheduler.test")
+
+    class MalformedSchedulerResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "items": [
+                    {
+                        "kind": "task",
+                        "interval": {
+                            "start": "2026-06-22T09:00:00",
+                            "end": "2026-06-22T08:00:00+02:00",
+                        },
+                        "task_id": "scheduler-task-id",
+                    }
+                ],
+                "decisions": [],
+                "warnings": [],
+            }
+
+    def fake_post(
+        url: str, json: dict[str, object], timeout: float
+    ) -> MalformedSchedulerResponse:
+        assert url == "http://scheduler.test/v1/schedule-day"
+        assert json["planning_day"] == {
+            "local_date": "2026-06-22",
+            "time_zone": "Europe/Brussels",
+        }
+        assert timeout == 5.0
+        return MalformedSchedulerResponse()
+
+    monkeypatch.setattr(
+        "api_service.infrastructure.scheduler_client.httpx.post", fake_post
+    )
+
+    response = client.post(f"/planning/days/{day['id']}/generate-plan")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "The scheduler is unavailable. Please try again shortly."
+    }
     with next(database.session()) as session:
         planning_day = session.get(PlanningDay, day["id"])
         assert planning_day is not None

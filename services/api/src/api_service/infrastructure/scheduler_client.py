@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    ValidationError,
+    model_validator,
+)
 
 
 class SchedulerUnavailableError(Exception):
@@ -23,6 +31,15 @@ class TimeIntervalDTO(BaseModel):
 
     start: StrictStr
     end: StrictStr
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> TimeIntervalDTO:
+        """Require scheduler intervals to be parseable, offset-aware, and ordered."""
+        start = _parse_offset_datetime(self.start)
+        end = _parse_offset_datetime(self.end)
+        if end <= start:
+            raise ValueError("scheduler interval end must be after start")
+        return self
 
 
 class ScheduleItemDTO(BaseModel):
@@ -98,3 +115,13 @@ class HttpSchedulerClient:
             return ScheduleResultDTO.model_validate(response.json())
         except (ValueError, ValidationError) as error:
             raise SchedulerUnavailableError from error
+
+
+def _parse_offset_datetime(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("scheduler interval must be ISO datetime") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("scheduler interval must include an explicit UTC offset")
+    return parsed
