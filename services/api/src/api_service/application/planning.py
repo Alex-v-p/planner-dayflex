@@ -712,10 +712,6 @@ def _normalize_interruption(interruption: Interruption) -> Interruption:
 
 def _normalize_schedule_snapshot(snapshot: ScheduleSnapshot) -> ScheduleSnapshot:
     snapshot.created_at = _as_utc(snapshot.created_at)
-    time_zone = ZoneInfo(snapshot.planning_day.time_zone)
-    for item in snapshot.items:
-        item.start_at = _as_utc(item.start_at).astimezone(time_zone)
-        item.end_at = _as_utc(item.end_at).astimezone(time_zone)
     return snapshot
 
 
@@ -833,6 +829,7 @@ def _interruption_lookup(
 def _previous_result(snapshot: ScheduleSnapshot) -> dict[str, object]:
     decisions: list[dict[str, object]] = []
     warnings: list[dict[str, object]] = []
+    time_zone = ZoneInfo(snapshot.planning_day.time_zone)
     for decision in snapshot.decisions:
         if decision.reason_code.startswith("warning:"):
             warnings.append(
@@ -849,18 +846,22 @@ def _previous_result(snapshot: ScheduleSnapshot) -> dict[str, object]:
                 "details": dict(decision.details_json),
             }
         )
-    return {
-        "items": [
+    items: list[dict[str, object]] = []
+    for item in snapshot.items:
+        start_at = _as_utc(item.start_at).astimezone(time_zone)
+        end_at = _as_utc(item.end_at).astimezone(time_zone)
+        items.append(
             {
                 "kind": item.kind,
                 "interval": {
-                    "start": item.start_at.isoformat(),
-                    "end": item.end_at.isoformat(),
+                    "start": start_at.isoformat(),
+                    "end": end_at.isoformat(),
                 },
                 "task_id": item.task_id,
             }
-            for item in snapshot.items
-        ],
+        )
+    return {
+        "items": items,
         "decisions": decisions,
         "warnings": warnings,
     }

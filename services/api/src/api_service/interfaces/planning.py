@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -441,6 +444,7 @@ def _get_scheduler_client(request: Request) -> SchedulerClient:
 
 
 def _snapshot_response(snapshot: object) -> ScheduleSnapshotResponse:
+    time_zone = ZoneInfo(snapshot.planning_day.time_zone)
     return ScheduleSnapshotResponse(
         id=snapshot.id,
         planning_day_id=snapshot.planning_day_id,
@@ -455,8 +459,8 @@ def _snapshot_response(snapshot: object) -> ScheduleSnapshotResponse:
                 task_id=item.task_id,
                 fixed_event_id=item.fixed_event_id,
                 interruption_id=item.interruption_id,
-                start_at=item.start_at,
-                end_at=item.end_at,
+                start_at=_as_utc(item.start_at).astimezone(time_zone),
+                end_at=_as_utc(item.end_at).astimezone(time_zone),
             )
             for item in snapshot.items
         ],
@@ -470,3 +474,9 @@ def _snapshot_response(snapshot: object) -> ScheduleSnapshotResponse:
             for decision in snapshot.decisions
         ],
     )
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

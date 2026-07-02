@@ -422,6 +422,15 @@ def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
     client.app.state.scheduler_client = scheduler_client
 
     first = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    with next(database.session()) as session:
+        first_item_times = [
+            (item.start_at, item.end_at)
+            for item in session.scalars(
+                select(ScheduleItem)
+                .where(ScheduleItem.snapshot_id == first["id"])
+                .order_by(ScheduleItem.position)
+            )
+        ]
     inbox_progress = client.post(
         f"/planning/days/{day['id']}/task-progress",
         json={
@@ -455,11 +464,14 @@ def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
             "reported_at": "2026-06-22T14:00:00+02:00",
         },
     )
+    first_reloaded = client.get(f"/planning/schedule-snapshots/{first['id']}")
 
     assert inbox_progress.status_code == 201
     assert report_progress.status_code == 201
     assert study_progress.status_code == 201
     assert revised.status_code == 201
+    assert first_reloaded.status_code == 200
+    assert first_reloaded.json() == first
     payload = revised.json()
     interruption_id = payload["items"][1]["interruption_id"]
     assert first["version"] == 1
@@ -591,6 +603,14 @@ def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
             select(ScheduleItem).where(ScheduleItem.interruption_id == interruption_id)
         )
         assert interruption_item is not None
+        assert [
+            (item.start_at, item.end_at)
+            for item in session.scalars(
+                select(ScheduleItem)
+                .where(ScheduleItem.snapshot_id == first["id"])
+                .order_by(ScheduleItem.position)
+            )
+        ] == first_item_times
 
 
 def test_task_progress_is_user_scoped_and_cannot_exceed_estimate(
