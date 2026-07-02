@@ -6,8 +6,9 @@ persistence, and orchestration when the relevant scoped tickets arrive. It
 does not contain scheduler algorithms, AI behavior, Docker, or Compose topology.
 
 The current service includes the TKT-008 foundation, TKT-009 username/password
-authentication, TKT-010 persisted planning inputs, and TKT-011 daily plan
-generation through the scheduler service. The lasting dependency
+authentication, TKT-010 persisted planning inputs, TKT-011 daily plan
+generation through the scheduler service, and TKT-012 progress/interruption
+recovery. The lasting dependency
 and boundary choice is recorded in
 [ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md).
 
@@ -122,6 +123,8 @@ query through the current user's ID:
 - `GET /planning/days/{planning_day_id}/fixed-events`
 - `PUT /planning/days/{planning_day_id}/fixed-events/{fixed_event_id}`
 - `DELETE /planning/days/{planning_day_id}/fixed-events/{fixed_event_id}`
+- `POST /planning/days/{planning_day_id}/task-progress`
+- `POST /planning/days/{planning_day_id}/interruptions`
 - `POST /planning/tasks`
 - `GET /planning/tasks`
 - `PUT /planning/tasks/{task_id}`
@@ -144,6 +147,12 @@ This preserves future schedule-history compatibility. Fixed events are hard
 deleted because TKT-010 does not create schedule snapshots or other historical
 references.
 
+Task progress records are immutable. `POST
+/planning/days/{planning_day_id}/task-progress` validates that the planning day
+and task are owned by the authenticated user, that `recorded_at` is
+offset-aware, and that cumulative progress for the task on that day does not
+exceed the task estimate.
+
 ## Schedule generation
 
 `POST /planning/days/{planning_day_id}/generate-plan` maps the authenticated
@@ -158,6 +167,20 @@ available through the history endpoints. Scheduler validation failures return a
 safe `422`; scheduler availability or malformed-response failures return a safe
 `503`. Both failure paths roll back without partial snapshot rows or a current
 pointer update.
+
+`POST /planning/days/{planning_day_id}/interruptions` records an authenticated
+unavailable interval and synchronously calls the scheduler service
+`POST /v1/reschedule-day` with the current snapshot, persisted progress, fixed
+events, and interruption history. The interruption start becomes scheduler
+`current_at` so completed history before the interruption can be preserved while
+unfinished work is reconsidered. If there is no current snapshot, the endpoint
+returns the same safe planning-resource `404` used by schedule reads. Scheduler
+validation failures return `422`; scheduler availability or malformed-response
+failures return `503` and roll back the interruption plus revised snapshot.
+
+Service and container impact for TKT-012: the application API service owns
+validation, authorization, persistence, and scheduler orchestration for recovery.
+No AI service, worker, queue, Docker image, or Compose topology is added.
 
 ## Migrations
 
@@ -189,8 +212,18 @@ TKT-011 adds:
 - `schedule_decisions`: persisted scheduler decisions and warnings with reason
   codes and details JSON.
 
-Backfill: none. Rollback: downgrade drops planning input tables before
-`auth_sessions`, then drops `users`.
+TKT-012 adds:
+
+- `task_progress`: immutable task completion records with task/day foreign
+  keys, positive completed minutes, `recorded_at`, and `created_at`.
+- `interruptions`: planning-day-owned unavailable intervals with timezone,
+  reported time, created time, and interval validation.
+- A foreign key from `schedule_items.interruption_id` to `interruptions.id` so
+  revised snapshots can link scheduler interruption blocks to the saved report.
+
+Backfill: none. Rollback: downgrade drops TKT-012 interruption/progress records
+before schedule history and planning input tables, then drops `auth_sessions`
+and `users`.
 
 To validate local migration wiring against an explicitly configured PostgreSQL
 database, set the variables shown above and run:

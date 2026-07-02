@@ -36,6 +36,8 @@ def test_alembic_upgrade_head_accepts_the_test_database_configuration(
             "planning_days",
             "tasks",
             "fixed_events",
+            "task_progress",
+            "interruptions",
         }.issubset(inspector.get_table_names())
         assert {
             "id",
@@ -87,6 +89,23 @@ def test_alembic_upgrade_head_accepts_the_test_database_configuration(
             "start_at",
             "end_at",
         } == {column["name"] for column in inspector.get_columns("schedule_items")}
+        assert {
+            "id",
+            "task_id",
+            "planning_day_id",
+            "completed_minutes",
+            "recorded_at",
+            "created_at",
+        } == {column["name"] for column in inspector.get_columns("task_progress")}
+        assert {
+            "id",
+            "planning_day_id",
+            "start_at",
+            "end_at",
+            "time_zone",
+            "reported_at",
+            "created_at",
+        } == {column["name"] for column in inspector.get_columns("interruptions")}
         assert {
             "id",
             "snapshot_id",
@@ -144,6 +163,16 @@ def test_alembic_upgrade_head_accepts_the_test_database_configuration(
             for constraint in inspector.get_check_constraints("fixed_events")
         }
         assert {
+            "ck_task_progress_completed_minutes_positive",
+        } == {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints("task_progress")
+        }
+        assert {"ck_interruptions_interval"} == {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints("interruptions")
+        }
+        assert {
             "ck_schedule_snapshots_version_positive",
         } == {
             constraint["name"]
@@ -194,6 +223,8 @@ def test_alembic_downgrade_drops_sessions_before_users(
         assert "planning_days" not in inspect(database.engine).get_table_names()
         assert "tasks" not in inspect(database.engine).get_table_names()
         assert "fixed_events" not in inspect(database.engine).get_table_names()
+        assert "task_progress" not in inspect(database.engine).get_table_names()
+        assert "interruptions" not in inspect(database.engine).get_table_names()
         assert "schedule_snapshots" not in inspect(database.engine).get_table_names()
         assert "schedule_items" not in inspect(database.engine).get_table_names()
         assert "schedule_decisions" not in inspect(database.engine).get_table_names()
