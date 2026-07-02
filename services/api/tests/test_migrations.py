@@ -65,8 +65,36 @@ def test_alembic_upgrade_head_accepts_the_test_database_configuration(
             "user_id",
             "local_date",
             "time_zone",
+            "current_snapshot_id",
             "created_at",
         } == {column["name"] for column in inspector.get_columns("planning_days")}
+        assert {
+            "id",
+            "planning_day_id",
+            "version",
+            "created_at",
+            "scheduler_version",
+            "configuration_json",
+        } == {column["name"] for column in inspector.get_columns("schedule_snapshots")}
+        assert {
+            "id",
+            "snapshot_id",
+            "position",
+            "kind",
+            "task_id",
+            "fixed_event_id",
+            "interruption_id",
+            "start_at",
+            "end_at",
+        } == {column["name"] for column in inspector.get_columns("schedule_items")}
+        assert {
+            "id",
+            "snapshot_id",
+            "position",
+            "task_id",
+            "reason_code",
+            "details_json",
+        } == {column["name"] for column in inspector.get_columns("schedule_decisions")}
         assert {
             "id",
             "user_id",
@@ -115,6 +143,31 @@ def test_alembic_upgrade_head_accepts_the_test_database_configuration(
             constraint["name"]
             for constraint in inspector.get_check_constraints("fixed_events")
         }
+        assert {
+            "ck_schedule_snapshots_version_positive",
+        } == {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints("schedule_snapshots")
+        }
+        assert {
+            "ck_schedule_items_interval",
+            "ck_schedule_items_position",
+        } == {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints("schedule_items")
+        }
+        assert {
+            "ck_schedule_decisions_position",
+        } == {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints("schedule_decisions")
+        }
+        assert {
+            "uq_schedule_snapshots_planning_day_version",
+        } == {
+            constraint["name"]
+            for constraint in inspector.get_unique_constraints("schedule_snapshots")
+        }
     finally:
         database.engine.dispose()
 
@@ -141,6 +194,9 @@ def test_alembic_downgrade_drops_sessions_before_users(
         assert "planning_days" not in inspect(database.engine).get_table_names()
         assert "tasks" not in inspect(database.engine).get_table_names()
         assert "fixed_events" not in inspect(database.engine).get_table_names()
+        assert "schedule_snapshots" not in inspect(database.engine).get_table_names()
+        assert "schedule_items" not in inspect(database.engine).get_table_names()
+        assert "schedule_decisions" not in inspect(database.engine).get_table_names()
     finally:
         database.engine.dispose()
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import SecretStr, ValidationInfo, field_validator
+from pydantic import AnyHttpUrl, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     environment: Environment = Environment.DEVELOPMENT
     database_url: SecretStr
     log_level: str = "INFO"
+    scheduler_base_url: AnyHttpUrl = "http://127.0.0.1:8001"
+    scheduler_version: str = "0.1.0"
 
     @field_validator("database_url")
     @classmethod
@@ -56,6 +58,15 @@ class Settings(BaseSettings):
         if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("must be a standard logging level")
         return level
+
+    @field_validator("scheduler_version")
+    @classmethod
+    def validate_scheduler_version(cls, value: str) -> str:
+        """Keep persisted scheduler provenance non-empty and stable."""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
 
     @property
     def database_url_value(self) -> str:

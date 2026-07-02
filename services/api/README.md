@@ -3,11 +3,11 @@
 `services/api/` is the browser-facing application boundary for
 `planner-dayflex`. It will own browser DTOs, input validation, authorization,
 persistence, and orchestration when the relevant scoped tickets arrive. It
-does not contain scheduler algorithms, schedule-generation routes, a scheduler
-client, AI behavior, Docker, or Compose topology.
+does not contain scheduler algorithms, AI behavior, Docker, or Compose topology.
 
 The current service includes the TKT-008 foundation, TKT-009 username/password
-authentication, and TKT-010 persisted planning inputs. The lasting dependency
+authentication, TKT-010 persisted planning inputs, and TKT-011 daily plan
+generation through the scheduler service. The lasting dependency
 and boundary choice is recorded in
 [ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md).
 
@@ -15,10 +15,11 @@ and boundary choice is recorded in
 
 The service uses Python 3.13, `uv`, FastAPI, Uvicorn, SQLAlchemy 2.x, psycopg
 3, Alembic, Pydantic Settings, Argon2id password hashing through
-`argon2-cffi`, Ruff, and pytest. SQLAlchemy and psycopg are runtime
-dependencies because the application API owns durable persistence. Alembic is
-available to run the service's schema migrations. These dependencies do not
-create a container topology.
+`argon2-cffi`, HTTPX, Ruff, and pytest. SQLAlchemy and psycopg are runtime
+dependencies because the application API owns durable persistence. HTTPX is a
+runtime dependency because TKT-011 calls the scheduler service through its HTTP
+contract. Alembic is available to run the service's schema migrations. These
+dependencies do not create a container topology.
 
 Run all commands from `services/api/`:
 
@@ -39,6 +40,8 @@ production process requires an explicit PostgreSQL psycopg URL:
 $env:PLANNER_API_ENVIRONMENT = "development"
 $env:PLANNER_API_DATABASE_URL = "postgresql+psycopg://<user>:<password>@<host>:5432/<database>"
 $env:PLANNER_API_LOG_LEVEL = "INFO"
+$env:PLANNER_API_SCHEDULER_BASE_URL = "http://127.0.0.1:8001"
+$env:PLANNER_API_SCHEDULER_VERSION = "0.1.0"
 python -m uv run uvicorn api_service.app:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
@@ -47,6 +50,11 @@ python -m uv run uvicorn api_service.app:create_app --factory --host 127.0.0.1 -
 `postgresql+psycopg` URLs are accepted. SQLite is deliberately accepted only
 when `PLANNER_API_ENVIRONMENT=test`, so normal service startup cannot silently
 use a local test database.
+
+`PLANNER_API_SCHEDULER_BASE_URL` defaults to `http://127.0.0.1:8001` and is
+used only by the explicit scheduler HTTP client. `PLANNER_API_SCHEDULER_VERSION`
+defaults to `0.1.0` and is persisted with each generated schedule snapshot for
+history and auditability.
 
 `GET /health` returns `200` with `{"status":"ok"}` for process liveness. It
 does not run a database query: a database outage should not make a process
@@ -106,6 +114,10 @@ query through the current user's ID:
 - `POST /planning/days`
 - `GET /planning/days`
 - `GET /planning/days/{planning_day_id}`
+- `POST /planning/days/{planning_day_id}/generate-plan`
+- `GET /planning/days/{planning_day_id}/schedule`
+- `GET /planning/days/{planning_day_id}/schedule-snapshots`
+- `GET /planning/schedule-snapshots/{snapshot_id}`
 - `POST /planning/days/{planning_day_id}/fixed-events`
 - `GET /planning/days/{planning_day_id}/fixed-events`
 - `PUT /planning/days/{planning_day_id}/fixed-events/{fixed_event_id}`
@@ -132,6 +144,21 @@ This preserves future schedule-history compatibility. Fixed events are hard
 deleted because TKT-010 does not create schedule snapshots or other historical
 references.
 
+## Schedule generation
+
+`POST /planning/days/{planning_day_id}/generate-plan` maps the authenticated
+user's planning day, fixed events, active tasks, and preferences into the
+scheduler service `POST /v1/schedule-day` contract. The API service does not
+import or run scheduler-core algorithms.
+
+A successful generation persists a new immutable `schedule_snapshots` row, its
+chronological `schedule_items`, and structured `schedule_decisions`, then moves
+`planning_days.current_snapshot_id` to the new snapshot. Prior snapshots remain
+available through the history endpoints. Scheduler validation failures return a
+safe `422`; scheduler availability or malformed-response failures return a safe
+`503`. Both failure paths roll back without partial snapshot rows or a current
+pointer update.
+
 ## Migrations
 
 Alembic owns the API schema. TKT-009 adds:
@@ -151,6 +178,16 @@ TKT-010 adds:
   earliest start, split settings, status, and timestamps.
 - `fixed_events`: planning-day-owned locked intervals with title, timezone,
   interval, and timestamps.
+
+TKT-011 adds:
+
+- `planning_days.current_snapshot_id`: nullable latest-snapshot pointer.
+- `schedule_snapshots`: immutable per-day results with version, creation time,
+  scheduler version, and scheduler configuration JSON.
+- `schedule_items`: persisted timeline blocks with kind, source IDs where
+  applicable, and timezone-aware interval columns.
+- `schedule_decisions`: persisted scheduler decisions and warnings with reason
+  codes and details JSON.
 
 Backfill: none. Rollback: downgrade drops planning input tables before
 `auth_sessions`, then drops `users`.
@@ -173,5 +210,6 @@ Remove-Item .\api-test.db -ErrorAction SilentlyContinue
 ```
 
 The full `pytest` suite creates a different temporary SQLite database for each
-test fixture and does not require PostgreSQL, Docker, Compose, a scheduler, or
-an AI service.
+test fixture and uses a fake scheduler client where schedule generation is
+exercised. It does not require PostgreSQL, Docker, Compose, a live scheduler,
+or an AI service.

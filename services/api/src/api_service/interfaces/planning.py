@@ -2,20 +2,27 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from api_service.application.planning import (
     PlanningConflictError,
     PlanningResourceNotFoundError,
     PlanningService,
+    SchedulerRejectedPlanningInputsError,
+    SchedulerUnavailablePlanningError,
 )
+from api_service.config import Settings
 from api_service.contracts.planning import (
     FixedEventCreateRequest,
     FixedEventResponse,
     FixedEventUpdateRequest,
     PlanningDayCreateRequest,
     PlanningDayResponse,
+    ScheduleDecisionResponse,
+    ScheduleItemResponse,
+    ScheduleSnapshotResponse,
+    ScheduleSnapshotSummaryResponse,
     TaskCreateRequest,
     TaskResponse,
     TaskUpdateRequest,
@@ -23,7 +30,8 @@ from api_service.contracts.planning import (
     UserPreferencesResponse,
 )
 from api_service.infrastructure.models import User
-from api_service.interfaces.auth import get_current_user, get_session
+from api_service.infrastructure.scheduler_client import SchedulerClient
+from api_service.interfaces.auth import get_current_user, get_session, get_settings
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
@@ -253,6 +261,106 @@ def remove_task(
         raise _not_found() from error
 
 
+@router.post(
+    "/days/{planning_day_id}/generate-plan",
+    response_model=ScheduleSnapshotResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_plan(
+    planning_day_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ScheduleSnapshotResponse:
+    """Generate and save an immutable schedule snapshot for a user-owned day."""
+    try:
+        snapshot = planning_service.generate_plan(
+            session,
+            user.id,
+            planning_day_id,
+            _get_scheduler_client(request),
+            scheduler_version=settings.scheduler_version,
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    except SchedulerRejectedPlanningInputsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Saved planning inputs could not be scheduled. Please review the day.",
+        ) from error
+    except SchedulerUnavailablePlanningError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The scheduler is unavailable. Please try again shortly.",
+        ) from error
+    return _snapshot_response(snapshot)
+
+
+@router.get(
+    "/days/{planning_day_id}/schedule",
+    response_model=ScheduleSnapshotResponse,
+)
+def get_latest_schedule(
+    planning_day_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> ScheduleSnapshotResponse:
+    """Return the latest saved schedule snapshot for a user-owned day."""
+    try:
+        snapshot = planning_service.get_latest_schedule_snapshot(
+            session, user.id, planning_day_id
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    return _snapshot_response(snapshot)
+
+
+@router.get(
+    "/days/{planning_day_id}/schedule-snapshots",
+    response_model=list[ScheduleSnapshotSummaryResponse],
+)
+def list_schedule_snapshots(
+    planning_day_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> list[ScheduleSnapshotSummaryResponse]:
+    """List historical schedule snapshots for a user-owned day."""
+    try:
+        snapshots = planning_service.list_schedule_snapshots(
+            session, user.id, planning_day_id
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    return [
+        ScheduleSnapshotSummaryResponse(
+            id=snapshot.id,
+            planning_day_id=snapshot.planning_day_id,
+            version=snapshot.version,
+            created_at=snapshot.created_at,
+            scheduler_version=snapshot.scheduler_version,
+        )
+        for snapshot in snapshots
+    ]
+
+
+@router.get(
+    "/schedule-snapshots/{snapshot_id}",
+    response_model=ScheduleSnapshotResponse,
+)
+def get_schedule_snapshot(
+    snapshot_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> ScheduleSnapshotResponse:
+    """Return one historical schedule snapshot owned by the authenticated user."""
+    try:
+        snapshot = planning_service.get_schedule_snapshot(session, user.id, snapshot_id)
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    return _snapshot_response(snapshot)
+
+
 def _not_found() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -262,3 +370,39 @@ def _not_found() -> HTTPException:
 
 def _conflict(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+
+def _get_scheduler_client(request: Request) -> SchedulerClient:
+    return request.app.state.scheduler_client
+
+
+def _snapshot_response(snapshot: object) -> ScheduleSnapshotResponse:
+    return ScheduleSnapshotResponse(
+        id=snapshot.id,
+        planning_day_id=snapshot.planning_day_id,
+        version=snapshot.version,
+        created_at=snapshot.created_at,
+        scheduler_version=snapshot.scheduler_version,
+        configuration=snapshot.configuration_json,
+        items=[
+            ScheduleItemResponse(
+                id=item.id,
+                kind=item.kind,
+                task_id=item.task_id,
+                fixed_event_id=item.fixed_event_id,
+                interruption_id=item.interruption_id,
+                start_at=item.start_at,
+                end_at=item.end_at,
+            )
+            for item in snapshot.items
+        ],
+        decisions=[
+            ScheduleDecisionResponse(
+                id=decision.id,
+                task_id=decision.task_id,
+                reason_code=decision.reason_code,
+                details=decision.details_json,
+            )
+            for decision in snapshot.decisions
+        ],
+    )

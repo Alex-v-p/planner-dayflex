@@ -87,6 +87,7 @@ class PlanningDayResponse(BaseModel):
     id: str
     local_date: date
     time_zone: str
+    current_snapshot_id: str | None
     created_at: datetime
 
 
@@ -253,6 +254,54 @@ class TaskResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+class ScheduleItemResponse(BaseModel):
+    """One browser-facing block in a persisted schedule snapshot."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: str
+    task_id: str | None
+    fixed_event_id: str | None
+    interruption_id: str | None
+    start_at: datetime
+    end_at: datetime
+
+
+class ScheduleDecisionResponse(BaseModel):
+    """A stable structured decision or warning from a persisted snapshot."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    task_id: str | None
+    reason_code: str
+    details: dict[str, str]
+
+
+class ScheduleSnapshotResponse(BaseModel):
+    """A complete immutable daily schedule snapshot."""
+
+    id: str
+    planning_day_id: str
+    version: int
+    created_at: datetime
+    scheduler_version: str
+    configuration: dict[str, object]
+    items: list[ScheduleItemResponse]
+    decisions: list[ScheduleDecisionResponse]
+
+
+class ScheduleSnapshotSummaryResponse(BaseModel):
+    """Small historical snapshot listing shape."""
+
+    id: str
+    planning_day_id: str
+    version: int
+    created_at: datetime
+    scheduler_version: str
 
 
 def _valid_time_zone(value: str) -> str:

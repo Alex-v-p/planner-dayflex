@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 
 from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer
+from sqlalchemy import JSON
 from sqlalchemy import String, Time, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -125,6 +126,12 @@ class PlanningDay(Base):
     )
     local_date: Mapped[date] = mapped_column(Date(), nullable=False)
     time_zone: Mapped[str] = mapped_column(String(64), nullable=False)
+    current_snapshot_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("schedule_snapshots.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -133,6 +140,11 @@ class PlanningDay(Base):
     fixed_events: Mapped[list[FixedEvent]] = relationship(
         back_populates="planning_day",
         cascade="all, delete-orphan",
+    )
+    schedule_snapshots: Mapped[list[ScheduleSnapshot]] = relationship(
+        back_populates="planning_day",
+        cascade="all, delete-orphan",
+        foreign_keys="ScheduleSnapshot.planning_day_id",
     )
 
     __table_args__ = (
@@ -222,4 +234,106 @@ class FixedEvent(Base):
 
     __table_args__ = (
         CheckConstraint("end_at > start_at", name="ck_fixed_events_interval"),
+    )
+
+
+class ScheduleSnapshot(Base):
+    """Immutable scheduler output for one planning day."""
+
+    __tablename__ = "schedule_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    planning_day_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("planning_days.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    scheduler_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    configuration_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+
+    planning_day: Mapped[PlanningDay] = relationship(
+        back_populates="schedule_snapshots",
+        foreign_keys=[planning_day_id],
+    )
+    items: Mapped[list[ScheduleItem]] = relationship(
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+        order_by="ScheduleItem.position",
+    )
+    decisions: Mapped[list[ScheduleDecision]] = relationship(
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+        order_by="ScheduleDecision.position",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "planning_day_id",
+            "version",
+            name="uq_schedule_snapshots_planning_day_version",
+        ),
+        CheckConstraint("version > 0", name="ck_schedule_snapshots_version_positive"),
+    )
+
+
+class ScheduleItem(Base):
+    """One persisted timeline item inside a snapshot."""
+
+    __tablename__ = "schedule_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("schedule_snapshots.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    fixed_event_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("fixed_events.id", ondelete="SET NULL"), nullable=True
+    )
+    interruption_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    snapshot: Mapped[ScheduleSnapshot] = relationship(back_populates="items")
+
+    __table_args__ = (
+        CheckConstraint("position >= 0", name="ck_schedule_items_position"),
+        CheckConstraint("end_at > start_at", name="ck_schedule_items_interval"),
+    )
+
+
+class ScheduleDecision(Base):
+    """Structured scheduler decision or warning persisted with a snapshot."""
+
+    __tablename__ = "schedule_decisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("schedule_snapshots.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    details_json: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False)
+
+    snapshot: Mapped[ScheduleSnapshot] = relationship(back_populates="decisions")
+
+    __table_args__ = (
+        CheckConstraint("position >= 0", name="ck_schedule_decisions_position"),
     )
