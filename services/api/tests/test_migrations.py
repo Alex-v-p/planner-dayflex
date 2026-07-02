@@ -197,6 +197,42 @@ def test_alembic_upgrade_head_accepts_the_test_database_configuration(
             constraint["name"]
             for constraint in inspector.get_unique_constraints("schedule_snapshots")
         }
+        task_progress_foreign_keys = {
+            tuple(foreign_key["constrained_columns"]): (
+                foreign_key["referred_table"],
+                tuple(foreign_key["referred_columns"]),
+                foreign_key["options"].get("ondelete"),
+            )
+            for foreign_key in inspector.get_foreign_keys("task_progress")
+        }
+        assert task_progress_foreign_keys == {
+            ("planning_day_id",): ("planning_days", ("id",), "CASCADE"),
+            ("task_id",): ("tasks", ("id",), "CASCADE"),
+        }
+        interruption_foreign_keys = {
+            tuple(foreign_key["constrained_columns"]): (
+                foreign_key["referred_table"],
+                tuple(foreign_key["referred_columns"]),
+                foreign_key["options"].get("ondelete"),
+            )
+            for foreign_key in inspector.get_foreign_keys("interruptions")
+        }
+        assert interruption_foreign_keys == {
+            ("planning_day_id",): ("planning_days", ("id",), "CASCADE"),
+        }
+        schedule_item_foreign_keys = {
+            tuple(foreign_key["constrained_columns"]): (
+                foreign_key["referred_table"],
+                tuple(foreign_key["referred_columns"]),
+                foreign_key["options"].get("ondelete"),
+            )
+            for foreign_key in inspector.get_foreign_keys("schedule_items")
+        }
+        assert schedule_item_foreign_keys["interruption_id",] == (
+            "interruptions",
+            ("id",),
+            "SET NULL",
+        )
     finally:
         database.engine.dispose()
 

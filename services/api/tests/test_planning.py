@@ -945,6 +945,50 @@ def test_malformed_reschedule_result_rolls_back_interruption_and_snapshot(
         assert session.scalars(select(Interruption)).all() == []
 
 
+@pytest.mark.parametrize(
+    ("scheduler_error,status_code"),
+    [
+        (SchedulerValidationFailedError(), 422),
+        (SchedulerUnavailableError(), 503),
+    ],
+)
+def test_reschedule_scheduler_failures_roll_back_interruption_and_snapshot(
+    client: TestClient,
+    database: Database,
+    scheduler_error: Exception,
+    status_code: int,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = CanonicalSchedulerClient()
+    first = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    client.app.state.scheduler_client = FailingSchedulerClient(scheduler_error)
+
+    response = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-06-22T14:00:00+02:00",
+            "end_at": "2026-06-22T15:15:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+
+    assert response.status_code == status_code
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, day["id"])
+        assert planning_day is not None
+        assert planning_day.current_snapshot_id == first["id"]
+        assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
+        assert session.scalars(select(Interruption)).all() == []
+
+
 def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
