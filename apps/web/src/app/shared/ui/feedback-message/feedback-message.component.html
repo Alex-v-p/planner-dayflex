@@ -1,0 +1,26 @@
+<div
+  [class]="'min-h-32 rounded-lg border p-4 text-left shadow-sm ' + toneClass"
+  [attr.role]="statusRole"
+>
+  <div class="flex items-start gap-3">
+    @if (state === "loading") {
+      <span
+        aria-hidden="true"
+        class="mt-1 h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-meadow-600/30 border-t-meadow-700"
+      ></span>
+    } @else {
+      <span
+        aria-hidden="true"
+        class="mt-1 h-4 w-4 shrink-0 rounded-full border-2 border-current"
+      ></span>
+    }
+    <div>
+      <h2 class="text-sm font-semibold tracking-normal text-ink-950">
+        {{ title }}
+      </h2>
+      <p class="mt-2 text-sm leading-6 text-ink-600">
+        {{ message }}
+      </p>
+    </div>
+  </div>
+</div>

@@ -7,12 +7,11 @@ not to punish them for having one.
 
 The deterministic [`scheduler-core`](packages/scheduler-core/README.md), its
 thin [`scheduler service`](services/scheduler/README.md) transport boundary,
-and the [`application API`](services/api/README.md) foundation are initialized.
-The API owns future browser-facing validation, authorization, persistence, and
-orchestration; its current scope is deliberately limited to configuration,
-health, logging, database-session, migration, and test conventions. Browser
-features, product persistence, scheduler clients, AI, Docker, and Compose
-remain ticketed work.
+the [`application API`](services/api/README.md), and the
+[`web application`](apps/web/README.md) foundation are initialized. The API owns
+future browser-facing validation, authorization, persistence, and orchestration;
+the browser calls that API boundary rather than scheduler, database, AI, or
+model internals. Product features, AI, Docker, and Compose remain ticketed work.
 
 ## Product direction
 
@@ -67,6 +66,6 @@ Release numbering and the planned automation work are documented in
 [the versioning policy](docs/architecture/versioning.md) and the queued
 [release automation ticket](docs/tickets/TKT-027-release-versioning-and-cd.md).
 
-The scheduler-core, scheduler-service, and API-service CI jobs run their
-documented format, lint, and test commands. Deployment remains a safe
-placeholder until a hosting platform is chosen.
+The scheduler-core, scheduler-service, API-service, and web-application CI jobs
+run their documented format, lint, test, and build commands. Deployment remains
+a safe placeholder until a hosting platform is chosen.
