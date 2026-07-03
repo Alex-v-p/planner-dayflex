@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -17,6 +20,7 @@ from api_service.contracts.planning import (
     FixedEventCreateRequest,
     FixedEventResponse,
     FixedEventUpdateRequest,
+    InterruptionCreateRequest,
     PlanningDayCreateRequest,
     PlanningDayResponse,
     ScheduleDecisionResponse,
@@ -24,6 +28,8 @@ from api_service.contracts.planning import (
     ScheduleSnapshotResponse,
     ScheduleSnapshotSummaryResponse,
     TaskCreateRequest,
+    TaskProgressCreateRequest,
+    TaskProgressResponse,
     TaskResponse,
     TaskUpdateRequest,
     UserPreferencesRequest,
@@ -262,6 +268,29 @@ def remove_task(
 
 
 @router.post(
+    "/days/{planning_day_id}/task-progress",
+    response_model=TaskProgressResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def record_task_progress(
+    planning_day_id: str,
+    request: TaskProgressCreateRequest,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> TaskProgressResponse:
+    """Record immutable progress for a task owned by the current user."""
+    try:
+        progress = planning_service.record_task_progress(
+            session, user.id, planning_day_id, request
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    except PlanningConflictError as error:
+        raise _conflict(str(error)) from error
+    return TaskProgressResponse.model_validate(progress)
+
+
+@router.post(
     "/days/{planning_day_id}/generate-plan",
     response_model=ScheduleSnapshotResponse,
     status_code=status.HTTP_201_CREATED,
@@ -279,6 +308,44 @@ def generate_plan(
             session,
             user.id,
             planning_day_id,
+            _get_scheduler_client(request),
+            scheduler_version=settings.scheduler_version,
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    except SchedulerRejectedPlanningInputsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Saved planning inputs could not be scheduled. Please review the day.",
+        ) from error
+    except SchedulerUnavailablePlanningError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The scheduler is unavailable. Please try again shortly.",
+        ) from error
+    return _snapshot_response(snapshot)
+
+
+@router.post(
+    "/days/{planning_day_id}/interruptions",
+    response_model=ScheduleSnapshotResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def report_interruption(
+    planning_day_id: str,
+    body: InterruptionCreateRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ScheduleSnapshotResponse:
+    """Record an interruption and synchronously save a revised schedule."""
+    try:
+        snapshot = planning_service.report_interruption_and_reschedule(
+            session,
+            user.id,
+            planning_day_id,
+            body,
             _get_scheduler_client(request),
             scheduler_version=settings.scheduler_version,
         )
@@ -377,6 +444,7 @@ def _get_scheduler_client(request: Request) -> SchedulerClient:
 
 
 def _snapshot_response(snapshot: object) -> ScheduleSnapshotResponse:
+    time_zone = ZoneInfo(snapshot.planning_day.time_zone)
     return ScheduleSnapshotResponse(
         id=snapshot.id,
         planning_day_id=snapshot.planning_day_id,
@@ -391,8 +459,8 @@ def _snapshot_response(snapshot: object) -> ScheduleSnapshotResponse:
                 task_id=item.task_id,
                 fixed_event_id=item.fixed_event_id,
                 interruption_id=item.interruption_id,
-                start_at=item.start_at,
-                end_at=item.end_at,
+                start_at=_as_utc(item.start_at).astimezone(time_zone),
+                end_at=_as_utc(item.end_at).astimezone(time_zone),
             )
             for item in snapshot.items
         ],
@@ -406,3 +474,9 @@ def _snapshot_response(snapshot: object) -> ScheduleSnapshotResponse:
             for decision in snapshot.decisions
         ],
     )
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

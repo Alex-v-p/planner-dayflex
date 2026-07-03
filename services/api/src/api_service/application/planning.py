@@ -13,8 +13,10 @@ from sqlalchemy.orm import Session
 
 from api_service.contracts.planning import (
     FixedEventCreateRequest,
+    InterruptionCreateRequest,
     FixedEventUpdateRequest,
     PlanningDayCreateRequest,
+    TaskProgressCreateRequest,
     TaskCreateRequest,
     TaskUpdateRequest,
     UserPreferencesRequest,
@@ -27,11 +29,13 @@ from api_service.infrastructure.scheduler_client import (
 )
 from api_service.infrastructure.models import (
     FixedEvent,
+    Interruption,
     PlanningDay,
     ScheduleDecision,
     ScheduleItem,
     ScheduleSnapshot,
     Task,
+    TaskProgress,
     UserPreferences,
 )
 
@@ -270,6 +274,42 @@ class PlanningService:
         task.updated_at = _utc_now()
         session.commit()
 
+    def record_task_progress(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day_id: str,
+        request: TaskProgressCreateRequest,
+    ) -> TaskProgress:
+        self._get_planning_day_for_update(session, user_id, planning_day_id)
+        task = self._get_active_task(session, user_id, request.task_id)
+        completed_so_far = (
+            session.scalar(
+                select(
+                    func.coalesce(func.sum(TaskProgress.completed_minutes), 0)
+                ).where(
+                    TaskProgress.planning_day_id == planning_day_id,
+                    TaskProgress.task_id == task.id,
+                )
+            )
+            or 0
+        )
+        if completed_so_far + request.completed_minutes > task.estimated_minutes:
+            raise PlanningConflictError("Task progress cannot exceed the estimate.")
+        now = _utc_now()
+        progress = TaskProgress(
+            id=str(uuid4()),
+            task_id=task.id,
+            planning_day_id=planning_day_id,
+            completed_minutes=request.completed_minutes,
+            recorded_at=_as_utc(request.recorded_at),
+            created_at=now,
+        )
+        session.add(progress)
+        session.commit()
+        session.refresh(progress)
+        return _normalize_task_progress(progress)
+
     def generate_plan(
         self,
         session: Session,
@@ -283,10 +323,19 @@ class PlanningService:
             session, user_id, planning_day_id
         )
         fixed_events = self._list_fixed_events_for_day(session, planning_day_id)
+        interruptions = self._list_interruptions_for_day(session, planning_day_id)
         tasks = self._list_active_tasks_for_user(session, user_id)
+        task_progress = self._list_task_progress_for_day(session, planning_day_id)
         preferences = session.get(UserPreferences, user_id)
         configuration = _scheduler_configuration(preferences)
-        request = _scheduler_request(planning_day, fixed_events, tasks, configuration)
+        request = _scheduler_request(
+            planning_day,
+            fixed_events,
+            interruptions,
+            tasks,
+            task_progress,
+            configuration,
+        )
 
         try:
             result = scheduler_client.schedule_day(request)
@@ -298,11 +347,89 @@ class PlanningService:
             raise SchedulerUnavailablePlanningError from error
 
         try:
-            _validate_scheduler_result(result, tasks, fixed_events)
+            _validate_scheduler_result(result, tasks, fixed_events, interruptions)
             snapshot = self._persist_schedule_snapshot(
                 session,
                 planning_day,
                 fixed_events,
+                interruptions,
+                result,
+                configuration,
+                scheduler_version,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        session.refresh(snapshot)
+        return self.get_schedule_snapshot(session, user_id, snapshot.id)
+
+    def report_interruption_and_reschedule(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day_id: str,
+        request: InterruptionCreateRequest,
+        scheduler_client: SchedulerClient,
+        *,
+        scheduler_version: str,
+    ) -> ScheduleSnapshot:
+        planning_day = self._get_planning_day_for_update(
+            session, user_id, planning_day_id
+        )
+        if planning_day.current_snapshot_id is None:
+            raise PlanningResourceNotFoundError
+
+        previous_snapshot = self.get_schedule_snapshot(
+            session, user_id, planning_day.current_snapshot_id
+        )
+        now = _utc_now()
+        interruption = Interruption(
+            id=str(uuid4()),
+            planning_day_id=planning_day_id,
+            start_at=_as_utc(request.start_at),
+            end_at=_as_utc(request.end_at),
+            time_zone=request.time_zone,
+            reported_at=_as_utc(request.reported_at),
+            created_at=now,
+        )
+        session.add(interruption)
+        session.flush()
+
+        fixed_events = self._list_fixed_events_for_day(session, planning_day_id)
+        interruptions = self._list_interruptions_for_day(session, planning_day_id)
+        tasks = self._list_active_tasks_for_user(session, user_id)
+        task_progress = self._list_task_progress_for_day(session, planning_day_id)
+        preferences = session.get(UserPreferences, user_id)
+        configuration = _scheduler_configuration(preferences)
+        schedule_request = _scheduler_request(
+            planning_day,
+            fixed_events,
+            interruptions,
+            tasks,
+            task_progress,
+            configuration,
+            current_at=interruption.start_at,
+        )
+
+        try:
+            result = scheduler_client.reschedule_day(
+                _previous_result(previous_snapshot), schedule_request
+            )
+        except SchedulerValidationFailedError as error:
+            session.rollback()
+            raise SchedulerRejectedPlanningInputsError from error
+        except SchedulerUnavailableError as error:
+            session.rollback()
+            raise SchedulerUnavailablePlanningError from error
+
+        try:
+            _validate_scheduler_result(result, tasks, fixed_events, interruptions)
+            snapshot = self._persist_schedule_snapshot(
+                session,
+                planning_day,
+                fixed_events,
+                interruptions,
                 result,
                 configuration,
                 scheduler_version,
@@ -421,6 +548,30 @@ class PlanningService:
             )
         ]
 
+    def _list_interruptions_for_day(
+        self, session: Session, planning_day_id: str
+    ) -> list[Interruption]:
+        return [
+            _normalize_interruption(interruption)
+            for interruption in session.scalars(
+                select(Interruption)
+                .where(Interruption.planning_day_id == planning_day_id)
+                .order_by(Interruption.start_at, Interruption.created_at)
+            )
+        ]
+
+    def _list_task_progress_for_day(
+        self, session: Session, planning_day_id: str
+    ) -> list[TaskProgress]:
+        return [
+            _normalize_task_progress(progress)
+            for progress in session.scalars(
+                select(TaskProgress)
+                .where(TaskProgress.planning_day_id == planning_day_id)
+                .order_by(TaskProgress.recorded_at, TaskProgress.created_at)
+            )
+        ]
+
     def _list_active_tasks_for_user(self, session: Session, user_id: str) -> list[Task]:
         return [
             _normalize_task(task)
@@ -436,6 +587,7 @@ class PlanningService:
         session: Session,
         planning_day: PlanningDay,
         fixed_events: list[FixedEvent],
+        interruptions: list[Interruption],
         result: ScheduleResultDTO,
         configuration: dict[str, object],
         scheduler_version: str,
@@ -459,6 +611,7 @@ class PlanningService:
         session.add(snapshot)
         session.flush()
         fixed_event_lookup = _fixed_event_lookup(fixed_events)
+        interruption_lookup = _interruption_lookup(interruptions)
         for position, item in enumerate(result.items):
             start_at = _as_utc(datetime.fromisoformat(item.interval.start))
             end_at = _as_utc(datetime.fromisoformat(item.interval.end))
@@ -474,7 +627,11 @@ class PlanningService:
                         if item.kind == "fixed_event"
                         else None
                     ),
-                    interruption_id=None,
+                    interruption_id=(
+                        interruption_lookup.get((start_at, end_at))
+                        if item.kind == "interruption"
+                        else None
+                    ),
                     start_at=start_at,
                     end_at=end_at,
                 )
@@ -539,12 +696,22 @@ def _normalize_task(task: Task) -> Task:
     return task
 
 
+def _normalize_task_progress(progress: TaskProgress) -> TaskProgress:
+    progress.recorded_at = _as_utc(progress.recorded_at)
+    progress.created_at = _as_utc(progress.created_at)
+    return progress
+
+
+def _normalize_interruption(interruption: Interruption) -> Interruption:
+    interruption.start_at = _as_utc(interruption.start_at)
+    interruption.end_at = _as_utc(interruption.end_at)
+    interruption.reported_at = _as_utc(interruption.reported_at)
+    interruption.created_at = _as_utc(interruption.created_at)
+    return interruption
+
+
 def _normalize_schedule_snapshot(snapshot: ScheduleSnapshot) -> ScheduleSnapshot:
     snapshot.created_at = _as_utc(snapshot.created_at)
-    time_zone = ZoneInfo(snapshot.planning_day.time_zone)
-    for item in snapshot.items:
-        item.start_at = _as_utc(item.start_at).astimezone(time_zone)
-        item.end_at = _as_utc(item.end_at).astimezone(time_zone)
     return snapshot
 
 
@@ -572,11 +739,15 @@ def _scheduler_configuration(preferences: UserPreferences | None) -> dict[str, o
 def _scheduler_request(
     planning_day: PlanningDay,
     fixed_events: list[FixedEvent],
+    interruptions: list[Interruption],
     tasks: list[Task],
+    task_progress: list[TaskProgress],
     configuration: dict[str, object],
+    *,
+    current_at: datetime | None = None,
 ) -> dict[str, object]:
     time_zone = ZoneInfo(planning_day.time_zone)
-    current_at = datetime.combine(
+    scheduler_current_at = current_at or datetime.combine(
         planning_day.local_date,
         time.fromisoformat(str(configuration["day_start"])),
         time_zone,
@@ -586,7 +757,7 @@ def _scheduler_request(
             "local_date": planning_day.local_date.isoformat(),
             "time_zone": planning_day.time_zone,
         },
-        "current_at": current_at.isoformat(),
+        "current_at": scheduler_current_at.astimezone(time_zone).isoformat(),
         "fixed_events": [
             {
                 "id": fixed_event.id,
@@ -598,7 +769,16 @@ def _scheduler_request(
             }
             for fixed_event in fixed_events
         ],
-        "interruptions": [],
+        "interruptions": [
+            {
+                "id": interruption.id,
+                "interval": {
+                    "start": interruption.start_at.astimezone(time_zone).isoformat(),
+                    "end": interruption.end_at.astimezone(time_zone).isoformat(),
+                },
+            }
+            for interruption in interruptions
+        ],
         "tasks": [
             {
                 "id": task.id,
@@ -616,7 +796,14 @@ def _scheduler_request(
             }
             for task in tasks
         ],
-        "task_progress": [],
+        "task_progress": [
+            {
+                "task_id": progress.task_id,
+                "completed_minutes": progress.completed_minutes,
+                "recorded_at": progress.recorded_at.astimezone(time_zone).isoformat(),
+            }
+            for progress in task_progress
+        ],
         "configuration": configuration,
     }
 
@@ -630,9 +817,60 @@ def _fixed_event_lookup(
     }
 
 
+def _interruption_lookup(
+    interruptions: list[Interruption],
+) -> dict[tuple[datetime, datetime], str]:
+    return {
+        (_as_utc(interruption.start_at), _as_utc(interruption.end_at)): interruption.id
+        for interruption in interruptions
+    }
+
+
+def _previous_result(snapshot: ScheduleSnapshot) -> dict[str, object]:
+    decisions: list[dict[str, object]] = []
+    warnings: list[dict[str, object]] = []
+    time_zone = ZoneInfo(snapshot.planning_day.time_zone)
+    for decision in snapshot.decisions:
+        if decision.reason_code.startswith("warning:"):
+            warnings.append(
+                {
+                    "code": decision.reason_code.removeprefix("warning:"),
+                    "details": dict(decision.details_json),
+                }
+            )
+            continue
+        decisions.append(
+            {
+                "reason_code": decision.reason_code,
+                "task_id": decision.task_id,
+                "details": dict(decision.details_json),
+            }
+        )
+    items: list[dict[str, object]] = []
+    for item in snapshot.items:
+        start_at = _as_utc(item.start_at).astimezone(time_zone)
+        end_at = _as_utc(item.end_at).astimezone(time_zone)
+        items.append(
+            {
+                "kind": item.kind,
+                "interval": {
+                    "start": start_at.isoformat(),
+                    "end": end_at.isoformat(),
+                },
+                "task_id": item.task_id,
+            }
+        )
+    return {
+        "items": items,
+        "decisions": decisions,
+        "warnings": warnings,
+    }
+
+
 ALLOWED_SCHEDULER_ITEM_KINDS = {
     "task",
     "fixed_event",
+    "interruption",
     "buffer",
     "designated_free_time",
 }
@@ -659,9 +897,11 @@ def _validate_scheduler_result(
     result: ScheduleResultDTO,
     tasks: list[Task],
     fixed_events: list[FixedEvent],
+    interruptions: list[Interruption],
 ) -> None:
     active_task_ids = {task.id for task in tasks}
     fixed_event_intervals = set(_fixed_event_lookup(fixed_events))
+    interruption_intervals = set(_interruption_lookup(interruptions))
     for item in result.items:
         if item.kind not in ALLOWED_SCHEDULER_ITEM_KINDS:
             raise SchedulerUnavailablePlanningError
@@ -677,6 +917,14 @@ def _validate_scheduler_result(
             except ValueError as error:
                 raise SchedulerUnavailablePlanningError from error
             if (start_at, end_at) not in fixed_event_intervals:
+                raise SchedulerUnavailablePlanningError
+        if item.kind == "interruption":
+            try:
+                start_at = _as_utc(datetime.fromisoformat(item.interval.start))
+                end_at = _as_utc(datetime.fromisoformat(item.interval.end))
+            except ValueError as error:
+                raise SchedulerUnavailablePlanningError from error
+            if (start_at, end_at) not in interruption_intervals:
                 raise SchedulerUnavailablePlanningError
 
     for decision in result.decisions:

@@ -14,7 +14,14 @@ from api_service.application.planning import (
 )
 from api_service.database import Database
 from api_service.domain.auth import SESSION_COOKIE_NAME
-from api_service.infrastructure.models import PlanningDay, ScheduleSnapshot, Task
+from api_service.infrastructure.models import (
+    Interruption,
+    PlanningDay,
+    ScheduleItem,
+    ScheduleSnapshot,
+    Task,
+    TaskProgress,
+)
 from api_service.infrastructure.scheduler_client import (
     HttpSchedulerClient,
     ScheduleResultDTO,
@@ -400,6 +407,308 @@ def test_generate_canonical_plan_persists_and_reloads_latest_snapshot(
         assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
 
 
+def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
+    client: TestClient, database: Database
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    fixed_events = save_canonical_fixed_events(client, day["id"])
+    tasks = save_canonical_tasks(client)
+    scheduler_client = RecoverySchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+
+    first = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    with next(database.session()) as session:
+        first_item_times = [
+            (item.start_at, item.end_at)
+            for item in session.scalars(
+                select(ScheduleItem)
+                .where(ScheduleItem.snapshot_id == first["id"])
+                .order_by(ScheduleItem.position)
+            )
+        ]
+    inbox_progress = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": tasks["Reply to inbox"],
+            "completed_minutes": 45,
+            "recorded_at": "2026-06-22T08:45:00+02:00",
+        },
+    )
+    report_progress = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": tasks["Write report"],
+            "completed_minutes": 90,
+            "recorded_at": "2026-06-22T11:30:00+02:00",
+        },
+    )
+    study_progress = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": tasks["Study notes"],
+            "completed_minutes": 60,
+            "recorded_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+    revised = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-06-22T14:00:00+02:00",
+            "end_at": "2026-06-22T15:15:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+    first_reloaded = client.get(f"/planning/schedule-snapshots/{first['id']}")
+
+    assert inbox_progress.status_code == 201
+    assert report_progress.status_code == 201
+    assert study_progress.status_code == 201
+    assert revised.status_code == 201
+    assert first_reloaded.status_code == 200
+    assert first_reloaded.json() == first
+    payload = revised.json()
+    interruption_id = payload["items"][1]["interruption_id"]
+    assert first["version"] == 1
+    assert payload["version"] == 2
+    assert (
+        scheduler_client.previous_result["items"][6]["task_id"] == tasks["Study notes"]
+    )
+    assert (
+        scheduler_client.schedule_request["current_at"] == "2026-06-22T14:00:00+02:00"
+    )
+    assert scheduler_client.schedule_request["interruptions"] == [
+        {
+            "id": interruption_id,
+            "interval": {
+                "start": "2026-06-22T14:00:00+02:00",
+                "end": "2026-06-22T15:15:00+02:00",
+            },
+        }
+    ]
+    assert [
+        set(progress) for progress in scheduler_client.schedule_request["task_progress"]
+    ] == [
+        {"task_id", "completed_minutes", "recorded_at"},
+        {"task_id", "completed_minutes", "recorded_at"},
+        {"task_id", "completed_minutes", "recorded_at"},
+    ]
+    assert [
+        (
+            progress["task_id"],
+            progress["completed_minutes"],
+            progress["recorded_at"],
+        )
+        for progress in scheduler_client.schedule_request["task_progress"]
+    ] == [
+        (tasks["Reply to inbox"], 45, "2026-06-22T08:45:00+02:00"),
+        (tasks["Write report"], 90, "2026-06-22T11:30:00+02:00"),
+        (tasks["Study notes"], 60, "2026-06-22T14:00:00+02:00"),
+    ]
+    assert [
+        (
+            item["kind"],
+            item["task_id"],
+            item["fixed_event_id"],
+            item["interruption_id"],
+            item["start_at"],
+            item["end_at"],
+        )
+        for item in payload["items"]
+    ] == [
+        (
+            "task",
+            tasks["Study notes"],
+            None,
+            None,
+            "2026-06-22T13:00:00+02:00",
+            "2026-06-22T14:00:00+02:00",
+        ),
+        (
+            "interruption",
+            None,
+            None,
+            interruption_id,
+            "2026-06-22T14:00:00+02:00",
+            "2026-06-22T15:15:00+02:00",
+        ),
+        (
+            "fixed_event",
+            None,
+            fixed_events["Collection appointment"],
+            None,
+            "2026-06-22T15:30:00+02:00",
+            "2026-06-22T16:00:00+02:00",
+        ),
+        (
+            "task",
+            tasks["Study notes"],
+            None,
+            None,
+            "2026-06-22T16:00:00+02:00",
+            "2026-06-22T16:30:00+02:00",
+        ),
+        (
+            "buffer",
+            None,
+            None,
+            None,
+            "2026-06-22T16:30:00+02:00",
+            "2026-06-22T16:40:00+02:00",
+        ),
+        (
+            "task",
+            tasks["Buy groceries"],
+            None,
+            None,
+            "2026-06-22T16:40:00+02:00",
+            "2026-06-22T17:10:00+02:00",
+        ),
+        (
+            "buffer",
+            None,
+            None,
+            None,
+            "2026-06-22T17:10:00+02:00",
+            "2026-06-22T17:20:00+02:00",
+        ),
+        (
+            "designated_free_time",
+            None,
+            None,
+            None,
+            "2026-06-22T17:20:00+02:00",
+            "2026-06-22T18:00:00+02:00",
+        ),
+    ]
+    assert [decision["reason_code"] for decision in payload["decisions"]] == [
+        "moved_after_interruption",
+        "placed_in_earliest_valid_window",
+        "designated_free_time",
+    ]
+
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, day["id"])
+        assert planning_day is not None
+        assert planning_day.current_snapshot_id == payload["id"]
+        assert len(session.scalars(select(ScheduleSnapshot)).all()) == 2
+        assert len(session.scalars(select(TaskProgress)).all()) == 3
+        assert len(session.scalars(select(Interruption)).all()) == 1
+        interruption_item = session.scalar(
+            select(ScheduleItem).where(ScheduleItem.interruption_id == interruption_id)
+        )
+        assert interruption_item is not None
+        assert [
+            (item.start_at, item.end_at)
+            for item in session.scalars(
+                select(ScheduleItem)
+                .where(ScheduleItem.snapshot_id == first["id"])
+                .order_by(ScheduleItem.position)
+            )
+        ] == first_item_times
+
+
+def test_task_progress_is_user_scoped_and_cannot_exceed_estimate(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day = create_day(client)
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare",
+            "estimated_minutes": 30,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+
+    first = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 20,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    )
+    duplicate_excess = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 20,
+            "recorded_at": "2026-07-01T09:30:00+02:00",
+        },
+    )
+
+    client.cookies.clear()
+    register(client, "bob")
+    cross_user_day = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 10,
+            "recorded_at": "2026-07-01T10:00:00+02:00",
+        },
+    )
+    bob_day = create_day(client)
+    cross_user_task = client.post(
+        f"/planning/days/{bob_day['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 10,
+            "recorded_at": "2026-07-01T10:00:00+02:00",
+        },
+    )
+
+    assert first.status_code == 201
+    assert duplicate_excess.status_code == 409
+    assert cross_user_day.status_code == 404
+    assert cross_user_task.status_code == 404
+
+
+def test_invalid_interruption_inputs_are_rejected(client: TestClient) -> None:
+    register(client, "alice")
+    day = create_day(client)
+
+    no_snapshot = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-07-01T14:00:00+02:00",
+            "end_at": "2026-07-01T15:00:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-07-01T14:00:00+02:00",
+        },
+    )
+    backwards = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-07-01T15:00:00+02:00",
+            "end_at": "2026-07-01T14:00:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-07-01T14:00:00+02:00",
+        },
+    )
+    naive = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-07-01T14:00:00",
+            "end_at": "2026-07-01T15:00:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-07-01T14:00:00+02:00",
+        },
+    )
+
+    assert no_snapshot.status_code == 404
+    assert backwards.status_code == 422
+    assert naive.status_code == 422
+
+
 def test_generate_twice_preserves_history_and_advances_latest(
     client: TestClient,
 ) -> None:
@@ -619,6 +928,87 @@ def test_scheduler_failures_leave_no_partial_snapshot(
         assert session.scalars(select(ScheduleSnapshot)).all() == []
 
 
+def test_malformed_reschedule_result_rolls_back_interruption_and_snapshot(
+    client: TestClient, database: Database
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    scheduler_client = UnknownInterruptionSchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+    first = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+
+    response = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-06-22T14:00:00+02:00",
+            "end_at": "2026-06-22T15:15:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "The scheduler is unavailable. Please try again shortly."
+    }
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, day["id"])
+        assert planning_day is not None
+        assert planning_day.current_snapshot_id == first["id"]
+        assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
+        assert session.scalars(select(Interruption)).all() == []
+
+
+@pytest.mark.parametrize(
+    ("scheduler_error,status_code"),
+    [
+        (SchedulerValidationFailedError(), 422),
+        (SchedulerUnavailableError(), 503),
+    ],
+)
+def test_reschedule_scheduler_failures_roll_back_interruption_and_snapshot(
+    client: TestClient,
+    database: Database,
+    scheduler_error: Exception,
+    status_code: int,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = CanonicalSchedulerClient()
+    first = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    client.app.state.scheduler_client = FailingSchedulerClient(scheduler_error)
+
+    response = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-06-22T14:00:00+02:00",
+            "end_at": "2026-06-22T15:15:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+
+    assert response.status_code == status_code
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, day["id"])
+        assert planning_day is not None
+        assert planning_day.current_snapshot_id == first["id"]
+        assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
+        assert session.scalars(select(Interruption)).all() == []
+
+
 def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -678,6 +1068,49 @@ def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
     assert [item.kind for item in result.items] == ["task", "designated_free_time"]
     assert result.decisions[0].reason_code == "placed_in_earliest_valid_window"
     assert result.warnings[0].code == "locked_time_overlap_merged"
+
+
+def test_http_scheduler_client_posts_reschedule_day_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SuccessfulSchedulerResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "items": [
+                    {
+                        "kind": "designated_free_time",
+                        "interval": {
+                            "start": "2026-06-22T16:00:00+02:00",
+                            "end": "2026-06-22T18:00:00+02:00",
+                        },
+                    }
+                ],
+                "decisions": [],
+                "warnings": [],
+            }
+
+    def fake_post(
+        url: str, json: dict[str, object], timeout: float
+    ) -> SuccessfulSchedulerResponse:
+        assert url == "http://scheduler.test/v1/reschedule-day"
+        assert json == {
+            "previous_result": {"items": []},
+            "schedule_request": {"planning_day": "body"},
+        }
+        assert timeout == 5.0
+        return SuccessfulSchedulerResponse()
+
+    monkeypatch.setattr(
+        "api_service.infrastructure.scheduler_client.httpx.post", fake_post
+    )
+
+    result = HttpSchedulerClient("http://scheduler.test").reschedule_day(
+        {"items": []}, {"planning_day": "body"}
+    )
+
+    assert [item.kind for item in result.items] == ["designated_free_time"]
 
 
 def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
@@ -1281,6 +1714,23 @@ def test_planning_routes_require_authentication(client: TestClient) -> None:
         ),
         client.get("/planning/days"),
         client.post("/planning/days/day-id/generate-plan"),
+        client.post(
+            "/planning/days/day-id/task-progress",
+            json={
+                "task_id": "task-id",
+                "completed_minutes": 10,
+                "recorded_at": "2026-07-01T09:00:00+02:00",
+            },
+        ),
+        client.post(
+            "/planning/days/day-id/interruptions",
+            json={
+                "start_at": "2026-07-01T10:00:00+02:00",
+                "end_at": "2026-07-01T11:00:00+02:00",
+                "time_zone": "Europe/Brussels",
+                "reported_at": "2026-07-01T10:00:00+02:00",
+            },
+        ),
         client.get("/planning/days/day-id/schedule"),
         client.get("/planning/days/day-id/schedule-snapshots"),
         client.get("/planning/schedule-snapshots/snapshot-id"),
@@ -1438,11 +1888,85 @@ class CanonicalSchedulerClient:
         )
 
 
+class RecoverySchedulerClient(CanonicalSchedulerClient):
+    def __init__(self) -> None:
+        self.previous_result: dict[str, object] = {}
+        self.schedule_request: dict[str, object] = {}
+
+    def reschedule_day(
+        self,
+        previous_result: dict[str, object],
+        schedule_request: dict[str, object],
+    ) -> ScheduleResultDTO:
+        self.previous_result = previous_result
+        self.schedule_request = schedule_request
+        task_ids = {task["title"]: task["id"] for task in schedule_request["tasks"]}
+        interruption = schedule_request["interruptions"][0]
+        return ScheduleResultDTO.model_validate(
+            {
+                "items": [
+                    item("task", "13:00:00", "14:00:00", task_ids["Study notes"]),
+                    {
+                        "kind": "interruption",
+                        "interval": interruption["interval"],
+                        "task_id": None,
+                    },
+                    item("fixed_event", "15:30:00", "16:00:00"),
+                    item("task", "16:00:00", "16:30:00", task_ids["Study notes"]),
+                    item("buffer", "16:30:00", "16:40:00"),
+                    item("task", "16:40:00", "17:10:00", task_ids["Buy groceries"]),
+                    item("buffer", "17:10:00", "17:20:00"),
+                    item("designated_free_time", "17:20:00", "18:00:00"),
+                ],
+                "decisions": [
+                    decision("moved_after_interruption", task_ids["Study notes"]),
+                    decision(
+                        "placed_in_earliest_valid_window",
+                        task_ids["Buy groceries"],
+                    ),
+                    decision("designated_free_time"),
+                ],
+                "warnings": [],
+            }
+        )
+
+
+class UnknownInterruptionSchedulerClient(CanonicalSchedulerClient):
+    def reschedule_day(
+        self,
+        previous_result: dict[str, object],
+        schedule_request: dict[str, object],
+    ) -> ScheduleResultDTO:
+        return ScheduleResultDTO.model_validate(
+            {
+                "items": [
+                    {
+                        "kind": "interruption",
+                        "interval": {
+                            "start": "2026-06-22T15:00:00+02:00",
+                            "end": "2026-06-22T15:15:00+02:00",
+                        },
+                        "task_id": None,
+                    }
+                ],
+                "decisions": [],
+                "warnings": [],
+            }
+        )
+
+
 class FailingSchedulerClient:
     def __init__(self, error: Exception) -> None:
         self._error = error
 
     def schedule_day(self, request: dict[str, object]) -> ScheduleResultDTO:
+        raise self._error
+
+    def reschedule_day(
+        self,
+        previous_result: dict[str, object],
+        schedule_request: dict[str, object],
+    ) -> ScheduleResultDTO:
         raise self._error
 
 
@@ -1451,6 +1975,13 @@ class StaticResultSchedulerClient:
         self._result = result
 
     def schedule_day(self, request: dict[str, object]) -> ScheduleResultDTO:
+        return ScheduleResultDTO.model_validate(self._result)
+
+    def reschedule_day(
+        self,
+        previous_result: dict[str, object],
+        schedule_request: dict[str, object],
+    ) -> ScheduleResultDTO:
         return ScheduleResultDTO.model_validate(self._result)
 
 
@@ -1480,6 +2011,14 @@ class CapturingSchedulerClient:
                 "warnings": [],
             }
         )
+
+    def reschedule_day(
+        self,
+        previous_result: dict[str, object],
+        schedule_request: dict[str, object],
+    ) -> ScheduleResultDTO:
+        self.request = schedule_request
+        return self.schedule_day(schedule_request)
 
 
 def item(

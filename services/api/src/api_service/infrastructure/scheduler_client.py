@@ -87,6 +87,13 @@ class SchedulerClient(Protocol):
     def schedule_day(self, request: dict[str, object]) -> ScheduleResultDTO:
         """Return one deterministic scheduler result for API-owned inputs."""
 
+    def reschedule_day(
+        self,
+        previous_result: dict[str, object],
+        schedule_request: dict[str, object],
+    ) -> ScheduleResultDTO:
+        """Return a revised deterministic scheduler result."""
+
 
 class HttpSchedulerClient:
     """Synchronous HTTP adapter for the scheduler service."""
@@ -97,9 +104,27 @@ class HttpSchedulerClient:
 
     def schedule_day(self, request: dict[str, object]) -> ScheduleResultDTO:
         """Call the scheduler service and validate its response envelope."""
+        return self._post_result("/v1/schedule-day", request)
+
+    def reschedule_day(
+        self,
+        previous_result: dict[str, object],
+        schedule_request: dict[str, object],
+    ) -> ScheduleResultDTO:
+        """Call the scheduler service to revise a day from a prior result."""
+        return self._post_result(
+            "/v1/reschedule-day",
+            {
+                "previous_result": previous_result,
+                "schedule_request": schedule_request,
+            },
+        )
+
+    def _post_result(self, path: str, request: dict[str, object]) -> ScheduleResultDTO:
+        """Post a scheduler request and validate the response envelope."""
         try:
             response = httpx.post(
-                f"{self._base_url}/v1/schedule-day",
+                f"{self._base_url}{path}",
                 json=request,
                 timeout=self._timeout,
             )

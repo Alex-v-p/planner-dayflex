@@ -256,6 +256,57 @@ class TaskResponse(BaseModel):
     updated_at: datetime
 
 
+class TaskProgressCreateRequest(PlanningRequest):
+    """Record immutable completed work for a task on one planning day."""
+
+    task_id: StrictStr = Field(min_length=1, max_length=36)
+    completed_minutes: StrictInt = Field(gt=0)
+    recorded_at: datetime
+
+    @field_validator("recorded_at")
+    @classmethod
+    def validate_recorded_at(cls, value: datetime) -> datetime:
+        return _aware_datetime(value)
+
+
+class TaskProgressResponse(BaseModel):
+    """Stored task progress record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    task_id: str
+    planning_day_id: str
+    completed_minutes: int
+    recorded_at: datetime
+    created_at: datetime
+
+
+class InterruptionCreateRequest(PlanningRequest):
+    """Report an unavailable interval on one planning day."""
+
+    start_at: datetime
+    end_at: datetime
+    time_zone: StrictStr = Field(min_length=1, max_length=64)
+    reported_at: datetime
+
+    @field_validator("time_zone")
+    @classmethod
+    def validate_time_zone(cls, value: str) -> str:
+        return _valid_time_zone(value)
+
+    @field_validator("start_at", "end_at", "reported_at")
+    @classmethod
+    def validate_aware_datetime(cls, value: datetime) -> datetime:
+        return _aware_datetime(value)
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> Self:
+        if self.end_at <= self.start_at:
+            raise ValueError("end_at must be after start_at")
+        return self
+
+
 class ScheduleItemResponse(BaseModel):
     """One browser-facing block in a persisted schedule snapshot."""
 

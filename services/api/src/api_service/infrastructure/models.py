@@ -141,6 +141,14 @@ class PlanningDay(Base):
         back_populates="planning_day",
         cascade="all, delete-orphan",
     )
+    interruptions: Mapped[list[Interruption]] = relationship(
+        back_populates="planning_day",
+        cascade="all, delete-orphan",
+    )
+    task_progress: Mapped[list[TaskProgress]] = relationship(
+        back_populates="planning_day",
+        cascade="all, delete-orphan",
+    )
     schedule_snapshots: Mapped[list[ScheduleSnapshot]] = relationship(
         back_populates="planning_day",
         cascade="all, delete-orphan",
@@ -182,6 +190,10 @@ class Task(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="tasks")
+    progress_records: Mapped[list[TaskProgress]] = relationship(
+        back_populates="task",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -234,6 +246,72 @@ class FixedEvent(Base):
 
     __table_args__ = (
         CheckConstraint("end_at > start_at", name="ck_fixed_events_interval"),
+    )
+
+
+class TaskProgress(Base):
+    """Immutable completion record for a task on a planning day."""
+
+    __tablename__ = "task_progress"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    planning_day_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("planning_days.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    completed_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    task: Mapped[Task] = relationship(back_populates="progress_records")
+    planning_day: Mapped[PlanningDay] = relationship(back_populates="task_progress")
+
+    __table_args__ = (
+        CheckConstraint(
+            "completed_minutes > 0",
+            name="ck_task_progress_completed_minutes_positive",
+        ),
+    )
+
+
+class Interruption(Base):
+    """Reported unavailable interval on a planning day."""
+
+    __tablename__ = "interruptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    planning_day_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("planning_days.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    time_zone: Mapped[str] = mapped_column(String(64), nullable=False)
+    reported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    planning_day: Mapped[PlanningDay] = relationship(back_populates="interruptions")
+
+    __table_args__ = (
+        CheckConstraint("end_at > start_at", name="ck_interruptions_interval"),
     )
 
 
@@ -301,7 +379,9 @@ class ScheduleItem(Base):
     fixed_event_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("fixed_events.id", ondelete="SET NULL"), nullable=True
     )
-    interruption_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    interruption_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("interruptions.id", ondelete="SET NULL"), nullable=True
+    )
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
