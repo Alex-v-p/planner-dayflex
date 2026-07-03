@@ -15,4 +15,10 @@ describe("ApiPath", () => {
       "http://127.0.0.1:8000/health",
     );
   });
+
+  it("rejects protocol-relative API paths", () => {
+    expect(() => joinApiUrl("/", "//example.test/health")).toThrow(
+      "API paths must be app-relative and start with a single slash.",
+    );
+  });
 });
