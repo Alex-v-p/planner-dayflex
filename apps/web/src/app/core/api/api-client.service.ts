@@ -21,6 +21,12 @@ export class ApiClientService {
     });
   }
 
+  postEmpty<TResponse>(path: ApiPath) {
+    return this.http.post<TResponse>(this.urlFor(path), null, {
+      withCredentials: true,
+    });
+  }
+
   urlFor(path: ApiPath): string {
     return joinApiUrl(this.config.apiBaseUrl, path);
   }

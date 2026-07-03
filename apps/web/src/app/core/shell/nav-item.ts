@@ -15,4 +15,9 @@ export const SHELL_NAV_ITEMS: readonly ShellNavItem[] = [
     path: "/status",
     ariaLabel: "Open application status",
   },
+  {
+    label: "Planner",
+    path: "/planner",
+    ariaLabel: "Open planner workspace",
+  },
 ];

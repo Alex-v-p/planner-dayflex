@@ -19,24 +19,48 @@
         </p>
       </div>
 
-      <nav aria-label="Primary navigation">
-        <ul class="flex flex-wrap gap-2">
-          @for (item of navItems; track item.path) {
-            <li>
-              <a
-                [routerLink]="item.path"
-                routerLinkActive="bg-meadow-700 text-white"
-                [routerLinkActiveOptions]="{ exact: item.path === '/' }"
-                ariaCurrentWhenActive="page"
-                [attr.aria-label]="item.ariaLabel"
-                class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-              >
-                {{ item.label }}
-              </a>
-            </li>
+      <div class="flex flex-col gap-3 md:items-end">
+        <nav aria-label="Primary navigation">
+          <ul class="flex flex-wrap gap-2">
+            @for (item of navItems; track item.path) {
+              <li>
+                <a
+                  [routerLink]="item.path"
+                  routerLinkActive="bg-meadow-700 text-white"
+                  [routerLinkActiveOptions]="{ exact: item.path === '/' }"
+                  ariaCurrentWhenActive="page"
+                  [attr.aria-label]="item.ariaLabel"
+                  class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                >
+                  {{ item.label }}
+                </a>
+              </li>
+            }
+          </ul>
+        </nav>
+
+        <div class="flex flex-wrap items-center gap-2">
+          @if (auth.currentUser(); as user) {
+            <span class="text-sm text-ink-600"
+              >Signed in as {{ user.username }}</span
+            >
+            <button
+              type="button"
+              class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+              (click)="signOut()"
+            >
+              Sign out
+            </button>
+          } @else {
+            <a
+              routerLink="/sign-in"
+              class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+            >
+              Sign in
+            </a>
           }
-        </ul>
-      </nav>
+        </div>
+      </div>
     </div>
   </header>
 

@@ -12,17 +12,23 @@ const shellTemplate = readFileSync(
   join(shellDirectory, "shell.component.html"),
   "utf8",
 );
+const shellSource = readFileSync(
+  join(shellDirectory, "shell.component.ts"),
+  "utf8",
+);
 const routesSource = readFileSync(join(appDirectory, "app.routes.ts"), "utf8");
 
 describe("ShellComponent", () => {
-  it("keeps primary navigation aligned with configured application routes", () => {
+  it("keeps primary navigation pointed at configured application routes", () => {
     const routePaths = [...routesSource.matchAll(/path:\s*"([^"]*)"/g)]
       .map((match) => match[1])
       .filter((path) => path !== "**")
       .map((path) => `/${path}`)
       .map((path) => (path === "/" ? path : path.replace(/\/$/, "")));
 
-    expect(SHELL_NAV_ITEMS.map((item) => item.path)).toEqual(routePaths);
+    expect(routePaths).toEqual(
+      expect.arrayContaining(SHELL_NAV_ITEMS.map((item) => item.path)),
+    );
     expect(SHELL_NAV_ITEMS).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -38,6 +44,20 @@ describe("ShellComponent", () => {
     expect(shellTemplate).toContain('id="main-content"');
     expect(shellTemplate).toContain('aria-label="Primary navigation"');
     expect(shellTemplate).toContain('ariaCurrentWhenActive="page"');
+  });
+
+  it("shows authentication actions without rendering password values", () => {
+    expect(shellTemplate).toContain("Sign in");
+    expect(shellTemplate).toContain("Sign out");
+    expect(shellTemplate).toContain('(click)="signOut()"');
+    expect(shellTemplate).not.toContain("password");
+  });
+
+  it("restores the cookie session once from the app shell startup path", () => {
+    expect(shellSource).toContain("implements OnInit");
+    expect(shellSource).toContain("ngOnInit(): void");
+    expect(shellSource).toContain("this.auth.restoreSession().subscribe");
+    expect(shellTemplate).not.toContain("restoreSession");
   });
 
   it("uses responsive layout primitives for narrow and wider viewports", () => {
