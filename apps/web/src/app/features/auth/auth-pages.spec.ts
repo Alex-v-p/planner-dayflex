@@ -1,3 +1,5 @@
+import "@angular/compiler";
+
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,11 +62,21 @@ describe("authentication pages", () => {
 
   it("clears password controls after API attempts and avoids credential logging or storage", () => {
     for (const source of [signInSource, registerSource]) {
+      expect(source).toContain("const credentials = this.form.getRawValue();");
       expect(source).toContain("this.form.controls.password.reset");
       expect(source).not.toContain("console.");
       expect(source).not.toContain("localStorage");
       expect(source).not.toContain("sessionStorage");
     }
+  });
+
+  it("submits auth forms through the session service before navigation", () => {
+    expect(signInSource).toContain(".signIn(credentials)");
+    expect(signInSource).toContain(
+      "this.router.navigateByUrl(this.safeReturnUrl())",
+    );
+    expect(registerSource).toContain(".register(credentials)");
+    expect(registerSource).toContain('this.router.navigateByUrl("/planner")');
   });
 
   it("uses generic non-enumerating failure copy", () => {
@@ -81,6 +93,13 @@ describe("authentication pages", () => {
   it("rejects protocol-relative sign-in return URLs", () => {
     expect(signInSource).toContain('requestedUrl.startsWith("//")');
     expect(signInSource).toContain('return "/planner";');
+  });
+
+  it("uses submit buttons so keyboard form submission follows the same flow", () => {
+    expect(signInTemplate).toContain('label="Sign in"');
+    expect(signInTemplate).toContain('type="submit"');
+    expect(registerTemplate).toContain('label="Create account"');
+    expect(registerTemplate).toContain('type="submit"');
   });
 
   it("keeps mobile layout constraints on the auth surfaces", () => {
