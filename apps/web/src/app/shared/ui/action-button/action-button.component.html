@@ -1,0 +1,15 @@
+<button
+  [type]="type"
+  [disabled]="isDisabled"
+  [attr.aria-busy]="busy"
+  (click)="emitPressed()"
+  class="inline-flex min-h-11 w-full items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-ink-600 sm:w-auto"
+>
+  @if (busy) {
+    <span
+      aria-hidden="true"
+      class="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+    ></span>
+  }
+  <span>{{ label }}</span>
+</button>

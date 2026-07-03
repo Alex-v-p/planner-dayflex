@@ -1,4 +1,4 @@
-name: Scheduler core CI
+name: Planner Dayflex CI
 
 on:
   pull_request:
@@ -102,3 +102,36 @@ jobs:
 
       - name: Test
         run: uv run pytest
+
+  web-application-quality:
+    name: Web application quality
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.3"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build

@@ -7,3 +7,9 @@
 **/.ruff_cache/
 **/__pycache__/
 **/*.egg-info/
+
+# Node application dependencies and build output are reproducible.
+**/node_modules/
+**/.angular/cache/
+**/dist/
+**/coverage/
