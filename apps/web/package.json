@@ -13,7 +13,7 @@
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "lint": "ng lint",
-    "test": "vitest run"
+    "test": "ng test --watch=false"
   },
   "dependencies": {
     "@angular/common": "22.0.5",
