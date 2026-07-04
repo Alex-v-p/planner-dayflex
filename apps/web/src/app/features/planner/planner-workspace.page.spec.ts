@@ -190,6 +190,61 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("No active flexible tasks are saved yet.");
   });
 
+  it("renders saved inputs clearly when a planning day has no schedule snapshot", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    expect(text(fixture)).toContain("No schedule snapshot yet.");
+    expect(text(fixture)).toContain(
+      "Saved inputs are still shown below so the day remains easy to review.",
+    );
+    expect(text(fixture)).toContain("Team meeting");
+    expect(text(fixture)).toContain("Write report");
+    expect(text(fixture)).toContain("Snapshot");
+    expect(text(fixture)).toContain("None");
+    expect(announcement(fixture)).toContain("Planner workspace loaded");
+  });
+
+  it("preserves selected-date context in the accessible loading state", async () => {
+    const pendingLoad = new Subject<PlannerWorkspaceData>();
+    plannerApi.responses.set(selectedDate, pendingLoad);
+
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const liveAnnouncement = announcement(fixture).trim();
+
+    expect(text(fixture)).toContain("Loading");
+    expect(text(fixture)).toContain("Keeping your selected day in view");
+    expect(liveAnnouncement).toContain("Loading planner workspace for");
+    expect(liveAnnouncement).toContain("July 4, 2026");
+    expect(
+      fixture.nativeElement.querySelector("[aria-busy='true']"),
+    ).not.toBeNull();
+    expect(text(fixture)).not.toContain("Write report");
+
+    pendingLoad.next(workspaceData({ snapshot: null }));
+    pendingLoad.complete();
+  });
+
+  it("keeps workspace regions on responsive desktop and narrow-width grids", async () => {
+    plannerApi.result = workspaceData({ snapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const timeline = query(fixture, "[aria-labelledby='timeline-title']");
+    const fixedEvents = query(
+      fixture,
+      "[aria-labelledby='fixed-events-title']",
+    );
+    const dateControlGroup = query(fixture, "#planner-date")?.parentElement;
+
+    expect(query(fixture, "header")?.className).toContain("lg:grid-cols");
+    expect(query(fixture, "form")?.className).toContain("rounded-lg");
+    expect(timeline?.parentElement?.className).toContain("lg:grid-cols");
+    expect(fixedEvents?.parentElement?.className).toContain("lg:grid-cols-2");
+    expect(query(fixture, "#planner-date")?.className).toContain("w-full");
+    expect(dateControlGroup?.className).toContain("sm:flex-row");
+    expect(text(fixture)).toContain("Day timeline");
+    expect(text(fixture)).toContain("Planning inputs");
+  });
+
   it("preserves selected-date context when the API fails", async () => {
     plannerApi.error = new HttpErrorResponse({
       status: 503,
@@ -404,6 +459,13 @@ function announcement<T>(fixture: ComponentFixture<T>): string {
       '[data-testid="planner-announcement"]',
     ) as HTMLElement
   ).textContent;
+}
+
+function query<T>(
+  fixture: ComponentFixture<T>,
+  selector: string,
+): Element | null {
+  return fixture.nativeElement.querySelector(selector);
 }
 
 async function firstValue<T>(observable: Observable<T>): Promise<T> {
