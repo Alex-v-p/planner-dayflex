@@ -205,6 +205,72 @@ describe("rendered planner workspace", () => {
     expect(announcement(fixture)).toContain("Planner workspace loaded");
   });
 
+  it("renders schedule and fixed-event times in their retained IANA zones", async () => {
+    const tokyoEvent: FixedEvent = {
+      ...fixedEvent,
+      id: "event-tokyo",
+      title: "Tokyo call",
+      start_at: "2026-07-04T00:00:00Z",
+      end_at: "2026-07-04T01:00:00Z",
+      time_zone: "Asia/Tokyo",
+    };
+    const newYorkSnapshot: ScheduleSnapshot = {
+      ...snapshot,
+      items: [
+        {
+          ...snapshot.items[0],
+          start_at: "2026-07-04T13:00:00Z",
+          end_at: "2026-07-04T14:00:00Z",
+        },
+      ],
+    };
+    plannerApi.result = workspaceData({
+      day: {
+        id: "day-1",
+        local_date: selectedDate,
+        time_zone: "America/New_York",
+        current_snapshot_id: "snapshot-1",
+        created_at: "2026-07-03T08:00:00Z",
+      },
+      fixedEvents: [tokyoEvent],
+      snapshot: newYorkSnapshot,
+    });
+
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const timelineText =
+      query(fixture, "[aria-labelledby='timeline-title']")?.textContent ?? "";
+    const fixedEventsText =
+      query(fixture, "[aria-labelledby='fixed-events-title']")?.textContent ??
+      "";
+    const newYorkRange = expectedTimeRange(
+      "2026-07-04T13:00:00Z",
+      "2026-07-04T14:00:00Z",
+      "America/New_York",
+    );
+    const tokyoRange = expectedTimeRange(
+      "2026-07-04T00:00:00Z",
+      "2026-07-04T01:00:00Z",
+      "Asia/Tokyo",
+    );
+    const brusselsScheduleRange = expectedTimeRange(
+      "2026-07-04T13:00:00Z",
+      "2026-07-04T14:00:00Z",
+      "Europe/Brussels",
+    );
+    const brusselsFixedEventRange = expectedTimeRange(
+      "2026-07-04T00:00:00Z",
+      "2026-07-04T01:00:00Z",
+      "Europe/Brussels",
+    );
+
+    expect(timelineText).toContain("Write report");
+    expect(timelineText).toContain(newYorkRange);
+    expect(timelineText).not.toContain(brusselsScheduleRange);
+    expect(fixedEventsText).toContain("Tokyo call");
+    expect(fixedEventsText).toContain(tokyoRange);
+    expect(fixedEventsText).not.toContain(brusselsFixedEventRange);
+  });
+
   it("preserves selected-date context in the accessible loading state", async () => {
     const pendingLoad = new Subject<PlannerWorkspaceData>();
     plannerApi.responses.set(selectedDate, pendingLoad);
@@ -327,6 +393,21 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("Current task");
     expect(text(fixture)).not.toContain("Stale task");
     expect(announcement(fixture)).toContain("July 5, 2026");
+  });
+
+  it("falls back to today when a route date has an impossible calendar day", async () => {
+    routeParams = new BehaviorSubject(
+      convertToParamMap({ date: "2026-02-31" }),
+    );
+    plannerApi.result = workspaceData({ snapshot: null });
+
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const today = todayLocalDate();
+
+    expect(plannerApi.loadedDates).toEqual([today]);
+    expect(
+      (query(fixture, "#planner-date") as HTMLInputElement | null)?.value,
+    ).toBe(today);
   });
 });
 
@@ -466,6 +547,30 @@ function query<T>(
   selector: string,
 ): Element | null {
   return fixture.nativeElement.querySelector(selector);
+}
+
+function todayLocalDate(): string {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function expectedTimeRange(
+  startAt: string,
+  endAt: string,
+  timeZone: string,
+): string {
+  return `${expectedTime(startAt, timeZone)}-${expectedTime(endAt, timeZone)}`;
+}
+
+function expectedTime(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+  }).format(new Date(value));
 }
 
 async function firstValue<T>(observable: Observable<T>): Promise<T> {

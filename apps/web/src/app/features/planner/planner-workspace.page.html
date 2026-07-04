@@ -137,7 +137,8 @@
               {{ itemLabel( item, view.data.tasks, view.data.fixedEvents ) }}
             </p>
             <p class="text-sm font-medium text-ink-600">
-              {{ formatTimeRange(item.start_at, item.end_at) }}
+              {{ formatScheduleTimeRange( item.start_at, item.end_at,
+              view.data.day?.time_zone ) }}
             </p>
           </div>
           <p class="mt-1 text-sm text-ink-600">{{ kindLabel(item.kind) }}</p>
@@ -247,7 +248,8 @@
           <li class="rounded-md border border-mist-200 p-4">
             <p class="font-medium text-ink-950">{{ event.title }}</p>
             <p class="mt-1 text-sm text-ink-600">
-              {{ formatTimeRange(event.start_at, event.end_at) }}
+              {{ formatTimeRange( event.start_at, event.end_at, event.time_zone
+              ) }}
             </p>
           </li>
           }

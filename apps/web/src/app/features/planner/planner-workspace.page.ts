@@ -131,8 +131,20 @@ export class PlannerWorkspacePage implements OnInit {
     return formatDateLabel(value);
   }
 
-  protected formatTimeRange(startAt: string, endAt: string): string {
-    return `${formatTime(startAt)}-${formatTime(endAt)}`;
+  protected formatTimeRange(
+    startAt: string,
+    endAt: string,
+    timeZone: string,
+  ): string {
+    return `${formatTime(startAt, timeZone)}-${formatTime(endAt, timeZone)}`;
+  }
+
+  protected formatScheduleTimeRange(
+    startAt: string,
+    endAt: string,
+    planningDayTimeZone: string | undefined,
+  ): string {
+    return this.formatTimeRange(startAt, endAt, planningDayTimeZone ?? "UTC");
   }
 
   protected itemLabel(
@@ -202,11 +214,30 @@ function errorState(selectedDate: string, error: unknown): WorkspaceLoadState {
 }
 
 function normalizeDateInput(value: string | null): string {
-  if (value !== null && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+  if (value !== null && isValidDateInput(value)) {
     return value;
   }
 
   return todayLocalDate();
+}
+
+function isValidDateInput(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (match === null) {
+    return false;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 function todayLocalDate(): string {
@@ -235,10 +266,11 @@ function formatDateLabel(value: string): string {
   }).format(new Date(`${value}T00:00:00`));
 }
 
-function formatTime(value: string): string {
+function formatTime(value: string, timeZone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     hour: "numeric",
     minute: "2-digit",
+    timeZone,
   }).format(new Date(value));
 }
 
