@@ -1,30 +1,300 @@
-<section class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-  <div class="py-2">
-    <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
-      Protected workspace
-    </p>
-    <h1 class="mt-2 text-3xl font-semibold tracking-normal text-ink-950">
-      Today&apos;s planner
-    </h1>
-    <p class="mt-3 max-w-2xl text-base leading-7 text-ink-600">
-      Signed in as {{ auth.currentUser()?.username }}. Planning tools will land
-      here behind the authenticated API boundary.
-    </p>
+<section class="space-y-6">
+  <div
+    aria-live="polite"
+    aria-atomic="true"
+    class="sr-only"
+    data-testid="planner-announcement"
+  >
+    {{ announcement() }}
   </div>
 
-  <aside
-    aria-labelledby="workspace-status-title"
-    class="rounded-lg border border-mist-200 bg-white p-6 shadow-sm"
-  >
-    <h2
-      id="workspace-status-title"
-      class="text-base font-semibold text-ink-950"
+  <header class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-end">
+    <div>
+      <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
+        Daily planner
+      </p>
+      <h1 class="mt-2 text-3xl font-semibold tracking-normal text-ink-950">
+        {{ formatDateLabel(state().selectedDate) }}
+      </h1>
+      <p class="mt-3 max-w-2xl text-base leading-7 text-ink-600">
+        Signed in as {{ auth.currentUser()?.username }}. This workspace shows
+        the selected day from your authenticated API session.
+      </p>
+    </div>
+
+    <form
+      class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm"
+      (submit)="$event.preventDefault(); openSelectedDate()"
+      aria-label="Select planning day"
     >
-      Session
-    </h2>
-    <p class="mt-3 text-sm leading-6 text-ink-600">
-      Your active session is held by the API cookie and restored before this
-      route opens.
+      <label for="planner-date" class="text-sm font-medium text-ink-800">
+        Planning day
+      </label>
+      <div class="mt-3 flex flex-col gap-3 sm:flex-row">
+        <input
+          id="planner-date"
+          name="planner-date"
+          type="date"
+          class="min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+          [ngModel]="selectedDate()"
+          (ngModelChange)="selectedDate.set($event)"
+        />
+        <button
+          type="submit"
+          class="inline-flex min-h-11 items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+        >
+          Open
+        </button>
+      </div>
+      <div class="mt-3 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+          (click)="moveDate(-1)"
+        >
+          Previous day
+        </button>
+        <button
+          type="button"
+          class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+          (click)="moveDate(1)"
+        >
+          Next day
+        </button>
+      </div>
+    </form>
+  </header>
+
+  @if (state(); as view) { @if (view.status === "loading") {
+  <section
+    class="rounded-lg border border-mist-200 bg-white p-6 shadow-sm"
+    aria-busy="true"
+  >
+    <p class="text-sm font-medium text-ink-950">
+      Loading {{ formatDateLabel(view.selectedDate) }}
     </p>
-  </aside>
+    <p class="mt-2 text-sm leading-6 text-ink-600">
+      Keeping your selected day in view while its inputs and latest schedule
+      snapshot load.
+    </p>
+  </section>
+  } @else if (view.status === "permission") {
+  <section
+    class="rounded-lg border border-signal-600 bg-white p-6 shadow-sm"
+    role="alert"
+  >
+    <p class="text-sm font-semibold text-ink-950">
+      We cannot open {{ formatDateLabel(view.selectedDate) }}
+    </p>
+    <p class="mt-2 text-sm leading-6 text-ink-600">{{ view.message }}</p>
+  </section>
+  } @else if (view.status === "error") {
+  <section
+    class="rounded-lg border border-signal-600 bg-white p-6 shadow-sm"
+    role="alert"
+  >
+    <p class="text-sm font-semibold text-ink-950">Planner data did not load</p>
+    <p class="mt-2 text-sm leading-6 text-ink-600">{{ view.message }}</p>
+    <button
+      type="button"
+      class="mt-4 inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+      (click)="reload()"
+    >
+      Try again
+    </button>
+  </section>
+  } @else {
+  <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <section
+      aria-labelledby="timeline-title"
+      class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
+    >
+      <div
+        class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"
+      >
+        <div>
+          <h2 id="timeline-title" class="text-lg font-semibold text-ink-950">
+            Day timeline
+          </h2>
+          <p class="mt-1 text-sm leading-6 text-ink-600">
+            Snapshot items, fixed events, interruptions, and useful free time
+            for the selected day.
+          </p>
+        </div>
+        <span class="text-sm font-medium text-ink-600">
+          {{ snapshotItemCount(view.data.snapshot) }} blocks
+        </span>
+      </div>
+
+      @if (view.data.snapshot; as snapshot) {
+      <ol class="mt-5 space-y-3">
+        @for (item of snapshot.items; track item.id) {
+        <li [class]="itemClass(item.kind)">
+          <div
+            class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"
+          >
+            <p class="font-medium text-ink-950">
+              {{ itemLabel( item, view.data.tasks, view.data.fixedEvents ) }}
+            </p>
+            <p class="text-sm font-medium text-ink-600">
+              {{ formatTimeRange(item.start_at, item.end_at) }}
+            </p>
+          </div>
+          <p class="mt-1 text-sm text-ink-600">{{ kindLabel(item.kind) }}</p>
+        </li>
+        }
+      </ol>
+      } @else if (view.data.day) {
+      <div class="mt-5 rounded-md border border-dashed border-mist-300 p-5">
+        <p class="font-medium text-ink-950">No schedule snapshot yet.</p>
+        <p class="mt-2 text-sm leading-6 text-ink-600">
+          Saved inputs are still shown below so the day remains easy to review.
+        </p>
+      </div>
+      } @else {
+      <div class="mt-5 rounded-md border border-dashed border-mist-300 p-5">
+        <p class="font-medium text-ink-950">
+          No saved planning day for this date.
+        </p>
+        <p class="mt-2 text-sm leading-6 text-ink-600">
+          Choose another date with saved planning data, or keep this empty day
+          in view.
+        </p>
+      </div>
+      }
+    </section>
+
+    <aside class="space-y-6">
+      <section
+        aria-labelledby="summary-title"
+        class="rounded-lg border border-mist-200 bg-white p-5 shadow-sm"
+      >
+        <h2 id="summary-title" class="text-base font-semibold text-ink-950">
+          Summary
+        </h2>
+        <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <dt class="text-ink-600">Saved day</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{ view.data.day ? "Yes" : "No" }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-ink-600">Snapshot</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{ view.data.snapshot ? "v" + view.data.snapshot.version : "None"
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-ink-600">Fixed events</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{ view.data.fixedEvents.length }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-ink-600">Active tasks</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{ view.data.tasks.length }}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section
+        aria-labelledby="recovery-title"
+        class="rounded-lg border border-mist-200 bg-white p-5 shadow-sm"
+      >
+        <h2 id="recovery-title" class="text-base font-semibold text-ink-950">
+          Recovery actions
+        </h2>
+        <p class="mt-3 text-sm leading-6 text-ink-600">
+          No recovery actions are available for this workspace state.
+        </p>
+      </section>
+    </aside>
+  </div>
+
+  <section
+    aria-labelledby="inputs-title"
+    class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
+  >
+    <div
+      class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"
+    >
+      <div>
+        <h2 id="inputs-title" class="text-lg font-semibold text-ink-950">
+          Planning inputs
+        </h2>
+        <p class="mt-1 text-sm leading-6 text-ink-600">
+          Current fixed events for this day and active flexible tasks from your
+          account.
+        </p>
+      </div>
+    </div>
+
+    <div class="mt-5 grid gap-5 lg:grid-cols-2">
+      <section aria-labelledby="fixed-events-title">
+        <h3
+          id="fixed-events-title"
+          class="text-sm font-semibold uppercase tracking-normal text-ink-600"
+        >
+          Fixed events
+        </h3>
+        @if (view.data.fixedEvents.length > 0) {
+        <ul class="mt-3 space-y-3">
+          @for (event of view.data.fixedEvents; track event.id) {
+          <li class="rounded-md border border-mist-200 p-4">
+            <p class="font-medium text-ink-950">{{ event.title }}</p>
+            <p class="mt-1 text-sm text-ink-600">
+              {{ formatTimeRange(event.start_at, event.end_at) }}
+            </p>
+          </li>
+          }
+        </ul>
+        } @else {
+        <p
+          class="mt-3 rounded-md border border-dashed border-mist-300 p-4 text-sm leading-6 text-ink-600"
+        >
+          No fixed events are saved for this day.
+        </p>
+        }
+      </section>
+
+      <section aria-labelledby="tasks-title">
+        <h3
+          id="tasks-title"
+          class="text-sm font-semibold uppercase tracking-normal text-ink-600"
+        >
+          Flexible tasks
+        </h3>
+        @if (view.data.tasks.length > 0) {
+        <ul class="mt-3 space-y-3">
+          @for (task of view.data.tasks; track task.id) {
+          <li class="rounded-md border border-mist-200 p-4">
+            <div
+              class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"
+            >
+              <p class="font-medium text-ink-950">{{ task.title }}</p>
+              <p class="text-sm text-ink-600">Priority {{ task.priority }}</p>
+            </div>
+            <p class="mt-1 text-sm text-ink-600">
+              {{ task.estimated_minutes }} minutes @if (task.due_date) {
+              <span> &middot; Due {{ task.due_date }}</span>
+              }
+            </p>
+          </li>
+          }
+        </ul>
+        } @else {
+        <p
+          class="mt-3 rounded-md border border-dashed border-mist-300 p-4 text-sm leading-6 text-ink-600"
+        >
+          No active flexible tasks are saved yet.
+        </p>
+        }
+      </section>
+    </div>
+  </section>
+  } }
 </section>
