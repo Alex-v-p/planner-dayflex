@@ -8,6 +8,7 @@ import { routes } from "../../app.routes";
 import { AuthCredentials, AuthUser } from "../../core/auth/auth-contracts";
 import { AuthSessionService } from "../../core/auth/auth-session.service";
 import { ShellComponent } from "../../core/shell/shell.component";
+import { PlannerApiService } from "../planner/planner-api.service";
 import { RegisterPage } from "./register.page";
 import { SignInPage } from "./sign-in.page";
 
@@ -229,9 +230,7 @@ describe("rendered protected route authentication flow", () => {
     await harness.navigateByUrl("/planner");
 
     expect(TestBed.inject(Router).url).toBe("/planner");
-    expect(harness.routeNativeElement?.textContent).toContain(
-      "Today's planner",
-    );
+    expect(harness.routeNativeElement?.textContent).toContain("Daily planner");
     expect(harness.routeNativeElement?.textContent).toContain(
       "Signed in as daily_user",
     );
@@ -378,8 +377,22 @@ async function configureRouterFlowTestingModule(
     providers: [
       provideRouter(routes),
       { provide: AuthSessionService, useValue: auth },
+      { provide: PlannerApiService, useValue: new FakePlannerApi() },
     ],
   }).compileComponents();
+}
+
+class FakePlannerApi {
+  loadWorkspaceDate() {
+    return of({
+      selectedDate: "2026-07-04",
+      planningDays: [],
+      day: null,
+      fixedEvents: [],
+      tasks: [],
+      snapshot: null,
+    });
+  }
 }
 
 function setInput<T>(
