@@ -27,6 +27,7 @@ import {
   FixedEventInputRequest,
   PlannerApiService,
   PlannerWorkspaceData,
+  ScheduleDecision,
   ScheduleItem,
   ScheduleSnapshot,
   Task,
@@ -74,6 +75,34 @@ interface FixedEventFormModel {
 
 type FormErrors = Readonly<Record<string, string>>;
 
+type GeneratePlanState =
+  | { readonly status: "idle"; readonly message: string }
+  | { readonly status: "pending"; readonly message: string }
+  | { readonly status: "success"; readonly message: string }
+  | { readonly status: "error"; readonly message: string };
+
+interface TimelineBlock {
+  readonly item: ScheduleItem;
+  readonly label: string;
+  readonly kindLabel: string;
+  readonly marker: string;
+  readonly minutes: number;
+  readonly topPercent: number;
+  readonly heightPercent: number;
+  readonly topMinutes: number;
+  readonly heightMinutes: number;
+  readonly laneIndex: number;
+  readonly laneCount: number;
+  readonly leftPercent: number;
+  readonly widthPercent: number;
+}
+
+interface ScheduleSummary {
+  readonly scheduledWorkMinutes: number;
+  readonly freeTimeMinutes: number;
+  readonly deferredWorkCount: number;
+}
+
 @Component({
   selector: "pdf-planner-workspace-page",
   standalone: true,
@@ -95,6 +124,10 @@ export class PlannerWorkspacePage implements OnInit {
   protected readonly fixedEventFormErrors = signal<FormErrors>({});
   protected readonly taskFormMessage = signal("");
   protected readonly fixedEventFormMessage = signal("");
+  protected readonly generatePlanState = signal<GeneratePlanState>({
+    status: "idle",
+    message: "",
+  });
   protected readonly busyAction = signal<string | null>(null);
   protected readonly announcement = computed(() => {
     const state = this.state();
@@ -128,6 +161,7 @@ export class PlannerWorkspacePage implements OnInit {
       .pipe(
         tap((selectedDate) => {
           this.state.set({ status: "loading", selectedDate });
+          this.generatePlanState.set({ status: "idle", message: "" });
         }),
         switchMap((selectedDate) =>
           this.plannerApi.loadWorkspaceDate(selectedDate).pipe(
@@ -316,6 +350,76 @@ export class PlannerWorkspacePage implements OnInit {
     );
   }
 
+  protected generatePlan(): void {
+    const state = this.state();
+    if (state.status !== "ready") {
+      this.generatePlanState.set({
+        status: "error",
+        message: "Planner data is still loading.",
+      });
+      return;
+    }
+
+    const day = state.data.day;
+    if (day === null) {
+      this.generatePlanState.set({
+        status: "error",
+        message:
+          "Save a planning day before generating a schedule. Add a fixed event for this date or open a saved day.",
+      });
+      return;
+    }
+
+    const action = "plan:generate";
+    this.busyAction.set(action);
+    this.generatePlanState.set({
+      status: "pending",
+      message: "Generating a schedule from the saved planning inputs.",
+    });
+    this.plannerApi
+      .generatePlan(day.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (snapshot) => {
+          this.busyAction.set(null);
+          let snapshotApplied = false;
+          this.state.update((current) => {
+            if (current.status === "ready" && current.data.day?.id === day.id) {
+              snapshotApplied = true;
+              return {
+                ...current,
+                data: {
+                  ...current.data,
+                  day: {
+                    ...current.data.day,
+                    current_snapshot_id: snapshot.id,
+                  },
+                  snapshot,
+                },
+              };
+            }
+            return current;
+          });
+          if (snapshotApplied) {
+            this.generatePlanState.set({
+              status: "success",
+              message: `Generated schedule snapshot v${snapshot.version}.`,
+            });
+          }
+        },
+        error: (error: unknown) => {
+          this.busyAction.set(null);
+          const current = this.state();
+          if (current.status === "ready" && current.data.day?.id === day.id) {
+            this.generatePlanState.set({
+              status: "error",
+              message: generatePlanErrorMessage(error),
+            });
+          }
+        },
+      });
+  }
+
   protected fieldError(errors: FormErrors, field: string): string {
     return errors[field] ?? "";
   }
@@ -371,7 +475,8 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected itemClass(kind: string): string {
-    const shared = "rounded-md border border-mist-200 border-l-4 bg-white p-4";
+    const shared =
+      "absolute overflow-hidden rounded-md border border-mist-200 border-l-4 bg-white p-3 shadow-sm";
 
     switch (kind) {
       case "task":
@@ -393,6 +498,137 @@ export class PlannerWorkspacePage implements OnInit {
 
   protected snapshotItemCount(snapshot: ScheduleSnapshot | null): number {
     return snapshot?.items.length ?? 0;
+  }
+
+  protected timelineBlocks(
+    snapshot: ScheduleSnapshot,
+    tasks: readonly Task[],
+    fixedEvents: readonly FixedEvent[],
+    planningDayTimeZone: string | undefined,
+  ): readonly TimelineBlock[] {
+    const timeZone = planningDayTimeZone ?? "UTC";
+    const bounds = timelineBounds(snapshot, timeZone);
+    const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
+
+    const laneLayout = timelineLaneLayout(snapshot.items, timeZone);
+
+    return snapshot.items.map((item) => {
+      const startMinutes = minutesFromIsoInZone(item.start_at, timeZone);
+      const endMinutes = minutesFromIsoInZone(item.end_at, timeZone);
+      const topMinutes = Math.max(0, startMinutes - bounds.startMinutes);
+      const heightMinutes = Math.max(1, endMinutes - startMinutes);
+      const lanes = laneLayout.get(item.id) ?? { laneIndex: 0, laneCount: 1 };
+      const widthPercent = 100 / lanes.laneCount;
+
+      return {
+        item,
+        label: this.itemLabel(item, tasks, fixedEvents),
+        kindLabel: this.kindLabel(item.kind),
+        marker: itemMarker(item.kind),
+        minutes: heightMinutes,
+        topPercent: (topMinutes / totalMinutes) * 100,
+        heightPercent: (heightMinutes / totalMinutes) * 100,
+        topMinutes,
+        heightMinutes,
+        laneIndex: lanes.laneIndex,
+        laneCount: lanes.laneCount,
+        leftPercent: lanes.laneIndex * widthPercent,
+        widthPercent,
+      };
+    });
+  }
+
+  protected timelineHeight(
+    snapshot: ScheduleSnapshot,
+    planningDayTimeZone: string | undefined,
+  ): number {
+    const bounds = timelineBounds(snapshot, planningDayTimeZone ?? "UTC");
+    return Math.max(26, (bounds.endMinutes - bounds.startMinutes) * 1.2);
+  }
+
+  protected scheduleSummary(
+    snapshot: ScheduleSnapshot | null,
+  ): ScheduleSummary {
+    if (snapshot === null) {
+      return {
+        scheduledWorkMinutes: 0,
+        freeTimeMinutes: 0,
+        deferredWorkCount: 0,
+      };
+    }
+
+    return {
+      scheduledWorkMinutes: minutesByKind(snapshot, "task"),
+      freeTimeMinutes: minutesByKind(snapshot, "designated_free_time"),
+      deferredWorkCount: this.deferredDecisions(snapshot, []).length,
+    };
+  }
+
+  protected deferredDecisions(
+    snapshot: ScheduleSnapshot,
+    tasks: readonly Task[],
+  ): ReadonlyArray<ScheduleDecision & { readonly taskTitle: string }> {
+    return snapshot.decisions
+      .filter((decision) => isDeferredReasonCode(decision.reason_code))
+      .map((decision) => ({
+        ...decision,
+        taskTitle:
+          tasks.find((task) => task.id === decision.task_id)?.title ??
+          "Unscheduled work",
+      }));
+  }
+
+  protected decisionText(
+    decision: ScheduleDecision,
+    tasks: readonly Task[],
+  ): string {
+    const taskTitle =
+      decision.task_id === null
+        ? null
+        : (tasks.find((task) => task.id === decision.task_id)?.title ?? "Task");
+    const subject = taskTitle === null ? "The schedule" : taskTitle;
+
+    switch (decision.reason_code) {
+      case "placed_in_earliest_valid_window":
+        return `${subject} was placed in the earliest valid window.`;
+      case "moved_after_interruption":
+        return `${subject} was moved after reported unavailable time.`;
+      case "split_across_available_windows":
+        return `${subject} was split across available windows.`;
+      case "blocked_by_fixed_event":
+        return `${subject} was not scheduled because fixed events reserve the available time.`;
+      case "blocked_by_interruption":
+        return `${subject} was not scheduled because reported unavailable time reserves the available time.`;
+      case "missed_before_current_time":
+        return `${subject} was not scheduled because its previous time is already past.`;
+      case "insufficient_time_before_deadline":
+        return `${subject} was not scheduled because there is not enough time before its due date.`;
+      case "insufficient_remaining_day_time":
+        return `${subject} was not scheduled because there is not enough remaining time in the day.`;
+      case "designated_free_time":
+        return "A remaining useful window was kept as free time.";
+      case "locked_time_overlap_merged":
+        return "Overlapping unavailable time was counted once.";
+      default:
+        if (decision.reason_code.startsWith("warning:")) {
+          return `Schedule warning ${decision.reason_code}.`;
+        }
+        return `Scheduler reason ${decision.reason_code}.`;
+    }
+  }
+
+  protected decisionCode(decision: ScheduleDecision): string {
+    return decision.reason_code;
+  }
+
+  protected formatDuration(minutes: number): string {
+    if (minutes < 60) {
+      return `${minutes} min`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder === 0 ? `${hours} hr` : `${hours} hr ${remainder} min`;
   }
 
   private runMutation<T>(
@@ -819,6 +1055,189 @@ function mutationErrorMessage(error: unknown): string {
   }
 
   return "We could not save that change. Try again when the API is available.";
+}
+
+function generatePlanErrorMessage(error: unknown): string {
+  if (error instanceof HttpErrorResponse) {
+    if (error.status === 422) {
+      return "The saved planning inputs could not produce a schedule. Review fixed events and task constraints, then try again.";
+    }
+    if (error.status === 503) {
+      return "The scheduler is unavailable right now. Saved inputs are unchanged; try again when scheduling is available.";
+    }
+    if (error.status === 401 || error.status === 403) {
+      return "Your session cannot generate this schedule. Sign in again before continuing.";
+    }
+    if (error.status === 404) {
+      return "That planning day is no longer available. Refresh the workspace.";
+    }
+  }
+
+  return "We could not generate the schedule. Saved inputs are unchanged; try again when the API is available.";
+}
+
+function itemMarker(kind: string): string {
+  switch (kind) {
+    case "task":
+      return "Work";
+    case "fixed_event":
+      return "Fixed";
+    case "interruption":
+      return "Unavailable";
+    case "buffer":
+      return "Buffer";
+    case "designated_free_time":
+      return "Free";
+    default:
+      return "Block";
+  }
+}
+
+function timelineBounds(
+  snapshot: ScheduleSnapshot,
+  timeZone: string,
+): { readonly startMinutes: number; readonly endMinutes: number } {
+  const configuredStart = configurationTimeMinutes(
+    snapshot.configuration["day_start"],
+  );
+  const configuredEnd = configurationTimeMinutes(
+    snapshot.configuration["day_end"],
+  );
+  const itemStarts = snapshot.items.map((item) =>
+    minutesFromIsoInZone(item.start_at, timeZone),
+  );
+  const itemEnds = snapshot.items.map((item) =>
+    minutesFromIsoInZone(item.end_at, timeZone),
+  );
+  const startMinutes = Math.min(configuredStart ?? 8 * 60, ...itemStarts);
+  const endMinutes = Math.max(configuredEnd ?? 18 * 60, ...itemEnds);
+
+  return { startMinutes, endMinutes };
+}
+
+function timelineLaneLayout(
+  items: readonly ScheduleItem[],
+  timeZone: string,
+): ReadonlyMap<
+  string,
+  { readonly laneIndex: number; readonly laneCount: number }
+> {
+  const sortedItems = items
+    .map((item, index) => ({
+      item,
+      index,
+      startMinutes: minutesFromIsoInZone(item.start_at, timeZone),
+      endMinutes: minutesFromIsoInZone(item.end_at, timeZone),
+    }))
+    .sort(
+      (a, b) =>
+        a.startMinutes - b.startMinutes ||
+        a.endMinutes - b.endMinutes ||
+        a.index - b.index,
+    );
+  const layout = new Map<string, { laneIndex: number; laneCount: number }>();
+  let active: Array<{
+    readonly laneIndex: number;
+    readonly endMinutes: number;
+  }> = [];
+  let groupIds: string[] = [];
+  let groupLaneCount = 0;
+
+  const closeGroup = () => {
+    if (groupIds.length === 0) {
+      return;
+    }
+
+    for (const id of groupIds) {
+      const existing = layout.get(id);
+      if (existing) {
+        layout.set(id, {
+          laneIndex: existing.laneIndex,
+          laneCount: Math.max(1, groupLaneCount),
+        });
+      }
+    }
+    groupIds = [];
+    groupLaneCount = 0;
+  };
+
+  for (const entry of sortedItems) {
+    const nextActive = active.filter(
+      (candidate) => candidate.endMinutes > entry.startMinutes,
+    );
+    if (nextActive.length === 0) {
+      closeGroup();
+    }
+    active = nextActive;
+
+    const usedLanes = new Set(active.map((candidate) => candidate.laneIndex));
+    let laneIndex = 0;
+    while (usedLanes.has(laneIndex)) {
+      laneIndex += 1;
+    }
+
+    layout.set(entry.item.id, { laneIndex, laneCount: 1 });
+    active.push({
+      laneIndex,
+      endMinutes: Math.max(entry.endMinutes, entry.startMinutes + 1),
+    });
+    groupIds.push(entry.item.id);
+    groupLaneCount = Math.max(groupLaneCount, active.length);
+  }
+
+  closeGroup();
+
+  return layout;
+}
+
+function configurationTimeMinutes(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(value);
+  if (match === null) {
+    return null;
+  }
+
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function minutesFromIsoInZone(value: string, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(value));
+  const part = (type: string) =>
+    Number(parts.find((candidate) => candidate.type === type)?.value ?? "0");
+
+  return part("hour") * 60 + part("minute");
+}
+
+function minutesByKind(snapshot: ScheduleSnapshot, kind: string): number {
+  return snapshot.items
+    .filter((item) => item.kind === kind)
+    .reduce(
+      (total, item) =>
+        total +
+        Math.max(
+          0,
+          (Date.parse(item.end_at) - Date.parse(item.start_at)) / 60_000,
+        ),
+      0,
+    );
+}
+
+function isDeferredReasonCode(reasonCode: string): boolean {
+  return (
+    reasonCode === "blocked_by_fixed_event" ||
+    reasonCode === "blocked_by_interruption" ||
+    reasonCode === "missed_before_current_time" ||
+    reasonCode === "insufficient_time_before_deadline" ||
+    reasonCode === "insufficient_remaining_day_time"
+  );
 }
 
 function validationErrorsFor(

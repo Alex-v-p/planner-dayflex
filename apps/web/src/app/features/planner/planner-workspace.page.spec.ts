@@ -80,6 +80,141 @@ const snapshot: ScheduleSnapshot = {
   decisions: [],
 };
 
+const canonicalSnapshot: ScheduleSnapshot = {
+  ...snapshot,
+  items: [
+    {
+      id: "fixed-item",
+      kind: "fixed_event",
+      task_id: null,
+      fixed_event_id: "event-1",
+      interruption_id: null,
+      start_at: "2026-07-04T09:00:00+02:00",
+      end_at: "2026-07-04T10:00:00+02:00",
+    },
+    {
+      id: "task-item",
+      kind: "task",
+      task_id: "task-1",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T10:00:00+02:00",
+      end_at: "2026-07-04T11:30:00+02:00",
+    },
+    {
+      id: "buffer-item",
+      kind: "buffer",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T11:30:00+02:00",
+      end_at: "2026-07-04T11:40:00+02:00",
+    },
+    {
+      id: "interruption-item",
+      kind: "interruption",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: "interruption-1",
+      start_at: "2026-07-04T14:00:00+02:00",
+      end_at: "2026-07-04T14:30:00+02:00",
+    },
+    {
+      id: "free-item",
+      kind: "designated_free_time",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T16:00:00+02:00",
+      end_at: "2026-07-04T18:00:00+02:00",
+    },
+  ],
+  decisions: [
+    {
+      id: "decision-1",
+      task_id: "task-1",
+      reason_code: "placed_in_earliest_valid_window",
+      details: {},
+    },
+    {
+      id: "decision-2",
+      task_id: null,
+      reason_code: "designated_free_time",
+      details: {},
+    },
+  ],
+};
+
+const overlappingLockedSnapshot: ScheduleSnapshot = {
+  ...snapshot,
+  items: [
+    {
+      id: "fixed-overlap-item",
+      kind: "fixed_event",
+      task_id: null,
+      fixed_event_id: "event-1",
+      interruption_id: null,
+      start_at: "2026-07-04T09:00:00+02:00",
+      end_at: "2026-07-04T10:00:00+02:00",
+    },
+    {
+      id: "interruption-overlap-item",
+      kind: "interruption",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: "interruption-1",
+      start_at: "2026-07-04T09:30:00+02:00",
+      end_at: "2026-07-04T10:30:00+02:00",
+    },
+    {
+      id: "task-after-overlap-item",
+      kind: "task",
+      task_id: "task-1",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T10:30:00+02:00",
+      end_at: "2026-07-04T11:30:00+02:00",
+    },
+  ],
+  decisions: [
+    {
+      id: "decision-locked-overlap",
+      task_id: null,
+      reason_code: "locked_time_overlap_merged",
+      details: {},
+    },
+  ],
+};
+
+const noFitSnapshot: ScheduleSnapshot = {
+  ...canonicalSnapshot,
+  id: "snapshot-no-fit",
+  version: 3,
+  decisions: [
+    ...canonicalSnapshot.decisions,
+    {
+      id: "decision-no-fit",
+      task_id: "task-2",
+      reason_code: "insufficient_remaining_day_time",
+      details: {},
+    },
+    {
+      id: "decision-unknown",
+      task_id: null,
+      reason_code: "out_of_contract_reason",
+      details: {},
+    },
+  ],
+};
+
+const taskThatDoesNotFit: Task = {
+  ...task,
+  id: "task-2",
+  title: "Prepare workshop",
+  estimated_minutes: 240,
+  priority: 4,
+};
+
 describe("planner workspace API contract", () => {
   it("loads the selected day through authenticated user-scoped planning endpoints", async () => {
     const api = new FakeApiClient();
@@ -246,6 +381,27 @@ describe("planner workspace API contract", () => {
       JSON.stringify({ puts: api.puts, deletes: api.deletes }),
     ).not.toContain("user-1");
   });
+
+  it("generates a persisted schedule snapshot through the planning day endpoint", async () => {
+    const api = new FakeApiClient();
+    api.responses.set("/planning/days/day-1/generate-plan", snapshot);
+    await TestBed.configureTestingModule({
+      providers: [
+        PlannerApiService,
+        { provide: ApiClientService, useValue: api },
+      ],
+    }).compileComponents();
+
+    const generated = await firstValue(
+      TestBed.inject(PlannerApiService).generatePlan("day-1"),
+    );
+
+    expect(generated).toEqual(snapshot);
+    expect(api.posts).toEqual([
+      { path: "/planning/days/day-1/generate-plan", body: null },
+    ]);
+    expect(JSON.stringify(api.posts)).not.toContain("user-1");
+  });
 });
 
 describe("rendered planner workspace", () => {
@@ -261,20 +417,43 @@ describe("rendered planner workspace", () => {
     router = new FakeRouter();
   });
 
-  it("loads the query-selected day and renders snapshot, inputs, summary, and recovery regions", async () => {
-    plannerApi.result = workspaceData({ snapshot });
+  it("loads the canonical initial day and renders the proportional accessible timeline", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
     expect(text(fixture)).toContain("Signed in as daily_user");
     expect(text(fixture)).toContain("Day timeline");
     expect(text(fixture)).toContain("Write report");
+    expect(text(fixture)).toContain("Team meeting");
+    expect(text(fixture)).toContain("Buffer");
+    expect(text(fixture)).toContain("Unavailable");
+    expect(text(fixture)).toContain("Work");
+    expect(text(fixture)).toContain("Fixed");
+    expect(text(fixture)).toContain("Free");
     expect(text(fixture)).toContain("Designated Free Time");
     expect(text(fixture)).toContain("Planning inputs");
-    expect(text(fixture)).toContain("Team meeting");
     expect(text(fixture)).toContain("Snapshot");
     expect(text(fixture)).toContain("v2");
-    expect(text(fixture)).toContain("Recovery actions");
+    expect(text(fixture)).toContain("Scheduled work");
+    expect(text(fixture)).toContain("1 hr 30 min");
+    expect(text(fixture)).toContain("Free time");
+    expect(text(fixture)).toContain("2 hr");
+    expect(text(fixture)).toContain("Generate schedule");
+    expect(text(fixture)).toContain(
+      "Write report was placed in the earliest valid window.",
+    );
+    expect(text(fixture)).toContain("placed_in_earliest_valid_window");
+    expect(text(fixture)).toContain(
+      "A remaining useful window was kept as free time.",
+    );
+    expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
+      "fixed_event",
+      "task",
+      "buffer",
+      "interruption",
+      "designated_free_time",
+    ]);
     expect(announcement(fixture)).toContain("Planner workspace loaded");
   });
 
@@ -394,7 +573,7 @@ describe("rendered planner workspace", () => {
   });
 
   it("keeps workspace regions on responsive desktop and narrow-width grids", async () => {
-    plannerApi.result = workspaceData({ snapshot });
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
     const timeline = query(fixture, "[aria-labelledby='timeline-title']");
     const fixedEvents = query(
@@ -409,8 +588,297 @@ describe("rendered planner workspace", () => {
     expect(fixedEvents?.parentElement?.className).toContain("lg:grid-cols-2");
     expect(query(fixture, "#planner-date")?.className).toContain("w-full");
     expect(dateControlGroup?.className).toContain("sm:flex-row");
+    expect(
+      query(fixture, "[data-testid='daily-timeline']")?.className,
+    ).toContain("min-h");
     expect(text(fixture)).toContain("Day timeline");
     expect(text(fixture)).toContain("Planning inputs");
+  });
+
+  it("positions timeline blocks from item times without overlap", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const blocks = timelineBlocks(fixture);
+
+    expect(blocks.length).toBe(5);
+    for (let index = 1; index < blocks.length; index += 1) {
+      const previous = blocks[index - 1];
+      const current = blocks[index];
+      expect(current.top).toBeGreaterThanOrEqual(
+        previous.top + previous.height,
+      );
+    }
+    expect(blocks[0]).toMatchObject({
+      kind: "fixed_event",
+      top: 60,
+      height: 60,
+    });
+    expect(blocks[1]).toMatchObject({ kind: "task", top: 120, height: 90 });
+  });
+
+  it("renders overlapping locked snapshot blocks in separate timeline lanes", async () => {
+    plannerApi.result = workspaceData({ snapshot: overlappingLockedSnapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const blocks = timelineBlocks(fixture);
+
+    expect(blocks).toEqual([
+      {
+        kind: "fixed_event",
+        top: 60,
+        height: 60,
+        laneIndex: 0,
+        laneCount: 2,
+        left: 0,
+        width: 50,
+      },
+      {
+        kind: "interruption",
+        top: 90,
+        height: 60,
+        laneIndex: 1,
+        laneCount: 2,
+        left: 50,
+        width: 50,
+      },
+      {
+        kind: "task",
+        top: 150,
+        height: 60,
+        laneIndex: 0,
+        laneCount: 1,
+        left: 0,
+        width: 100,
+      },
+    ]);
+    expect(blocks[1].top).toBeLessThan(blocks[0].top + blocks[0].height);
+    expect(blocks[1].left).toBeGreaterThanOrEqual(
+      blocks[0].left + blocks[0].width,
+    );
+  });
+
+  it("generates a plan, shows pending state, and displays the returned snapshot", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const generated = {
+      ...canonicalSnapshot,
+      id: "snapshot-generated",
+      version: 4,
+    };
+    const generateResponse = new Subject<ScheduleSnapshot>();
+    plannerApi.generateResponse = generateResponse;
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    fixture.detectChanges();
+
+    expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
+    expect(text(fixture)).toContain(
+      "Generating a schedule from the saved planning inputs.",
+    );
+    expect(query(fixture, "button[aria-busy='true']")?.textContent).toContain(
+      "Generating",
+    );
+
+    generateResponse.next(generated);
+    generateResponse.complete();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Generated schedule snapshot v4.");
+    expect(text(fixture)).toContain("Write report");
+    expect(text(fixture)).toContain("v4");
+  });
+
+  it("replaces an older displayed snapshot with the generated latest snapshot", async () => {
+    plannerApi.result = workspaceData({ snapshot });
+    const generated = {
+      ...canonicalSnapshot,
+      id: "snapshot-generated",
+      version: 4,
+    };
+    plannerApi.generateResponse = of(generated);
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    expect(text(fixture)).toContain("v2");
+    expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
+      "task",
+      "designated_free_time",
+    ]);
+
+    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
+    expect(text(fixture)).toContain("Generated schedule snapshot v4.");
+    expect(text(fixture)).toContain("v4");
+    expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
+      "fixed_event",
+      "task",
+      "buffer",
+      "interruption",
+      "designated_free_time",
+    ]);
+  });
+
+  it("does not apply a generated snapshot after the user changes days", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const generated = {
+      ...canonicalSnapshot,
+      id: "snapshot-generated",
+      version: 4,
+    };
+    const generateResponse = new Subject<ScheduleSnapshot>();
+    plannerApi.generateResponse = generateResponse;
+    plannerApi.responses.set(
+      "2026-07-05",
+      of(
+        workspaceData({
+          selectedDate: "2026-07-05",
+          planningDays: [
+            {
+              id: "day-2",
+              local_date: "2026-07-05",
+              time_zone: "Europe/Brussels",
+              current_snapshot_id: null,
+              created_at: "2026-07-03T08:00:00Z",
+            },
+          ],
+          day: {
+            id: "day-2",
+            local_date: "2026-07-05",
+            time_zone: "Europe/Brussels",
+            current_snapshot_id: null,
+            created_at: "2026-07-03T08:00:00Z",
+          },
+          fixedEvents: [],
+          snapshot: null,
+        }),
+      ),
+    );
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    fixture.detectChanges();
+    routeParams.next(convertToParamMap({ date: "2026-07-05" }));
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    generateResponse.next(generated);
+    generateResponse.complete();
+    fixture.detectChanges();
+
+    expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
+    expect(text(fixture)).toContain("July 5, 2026");
+    expect(text(fixture)).not.toContain("Generated schedule snapshot v4.");
+    expect(query(fixture, "[data-testid='daily-timeline']")).toBeNull();
+  });
+
+  it("does not show a generate-plan error after the user changes days", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const generateResponse = new Subject<ScheduleSnapshot>();
+    plannerApi.generateResponse = generateResponse;
+    plannerApi.responses.set(
+      "2026-07-05",
+      of(
+        workspaceData({
+          selectedDate: "2026-07-05",
+          planningDays: [
+            {
+              id: "day-2",
+              local_date: "2026-07-05",
+              time_zone: "Europe/Brussels",
+              current_snapshot_id: null,
+              created_at: "2026-07-03T08:00:00Z",
+            },
+          ],
+          day: {
+            id: "day-2",
+            local_date: "2026-07-05",
+            time_zone: "Europe/Brussels",
+            current_snapshot_id: null,
+            created_at: "2026-07-03T08:00:00Z",
+          },
+          fixedEvents: [],
+          snapshot: null,
+        }),
+      ),
+    );
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    fixture.detectChanges();
+    routeParams.next(convertToParamMap({ date: "2026-07-05" }));
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    generateResponse.error(new HttpErrorResponse({ status: 503 }));
+    fixture.detectChanges();
+
+    expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
+    expect(text(fixture)).toContain("July 5, 2026");
+    expect(text(fixture)).not.toContain("scheduler is unavailable");
+    expect(text(fixture)).not.toContain("We could not generate the schedule");
+  });
+
+  it("requires a saved planning day before generating a plan", async () => {
+    plannerApi.result = workspaceData({
+      day: null,
+      fixedEvents: [],
+      tasks: [],
+      snapshot: null,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    (
+      fixture.componentInstance as unknown as { generatePlan(): void }
+    ).generatePlan();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Save a planning day before generating");
+    expect(plannerApi.generatedPlanningDayIds).toEqual([]);
+  });
+
+  it.each([
+    [
+      422,
+      "The saved planning inputs could not produce a schedule. Review fixed events and task constraints, then try again.",
+    ],
+    [
+      503,
+      "The scheduler is unavailable right now. Saved inputs are unchanged; try again when scheduling is available.",
+    ],
+    [403, "Your session cannot generate this schedule."],
+    [404, "That planning day is no longer available."],
+    [500, "We could not generate the schedule."],
+  ])("shows generate-plan error state for HTTP %s", async (status, message) => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    plannerApi.generateError = new HttpErrorResponse({ status });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(message);
+  });
+
+  it("presents no-fit decisions as deferred work with scheduler-code wording", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [task, taskThatDoesNotFit],
+      snapshot: noFitSnapshot,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    expect(text(fixture)).toContain("Deferred work");
+    expect(text(fixture)).toContain("1");
+    expect(text(fixture)).toContain("Deferred or unscheduled work");
+    expect(text(fixture)).toContain("Prepare workshop");
+    expect(text(fixture)).toContain(
+      "Prepare workshop was not scheduled because there is not enough remaining time in the day.",
+    );
+    expect(text(fixture)).toContain("insufficient_remaining_day_time");
+    expect(text(fixture)).toContain("Scheduler reason out_of_contract_reason.");
   });
 
   it("preserves selected-date context when the API fails", async () => {
@@ -842,6 +1310,16 @@ class FakeApiClient {
     return of(this.responses.get(path) as TResponse);
   }
 
+  postEmpty<TResponse>(path: string): Observable<TResponse> {
+    this.posts.push({ path, body: null });
+
+    if (!this.responses.has(path)) {
+      throw new Error(`Unexpected POST ${path}`);
+    }
+
+    return of(this.responses.get(path) as TResponse);
+  }
+
   putJson<TRequest, TResponse>(
     path: string,
     body: TRequest,
@@ -878,8 +1356,11 @@ class FakePlannerApi {
   readonly savedFixedEvents: unknown[] = [];
   readonly updatedFixedEvents: unknown[] = [];
   readonly deletedFixedEvents: unknown[] = [];
+  readonly generatedPlanningDayIds: string[] = [];
   taskMutationError: unknown = null;
   fixedEventMutationError: unknown = null;
+  generateError: unknown = null;
+  generateResponse: Observable<ScheduleSnapshot> | null = null;
 
   loadWorkspaceDate(date: string): Observable<PlannerWorkspaceData> {
     this.loadedDates.push(date);
@@ -951,6 +1432,17 @@ class FakePlannerApi {
   ): Observable<void> {
     this.deletedFixedEvents.push({ planningDayId, fixedEventId });
     return of(undefined);
+  }
+
+  generatePlan(planningDayId: string): Observable<ScheduleSnapshot> {
+    this.generatedPlanningDayIds.push(planningDayId);
+    if (this.generateResponse !== null) {
+      return this.generateResponse;
+    }
+    if (this.generateError !== null) {
+      return throwError(() => this.generateError);
+    }
+    return of(snapshot);
   }
 }
 
@@ -1116,7 +1608,7 @@ function buttonByText<T>(
 ): HTMLButtonElement {
   const region = query(
     fixture,
-    `[aria-labelledby="${regionLabel === "Flexible tasks" ? "tasks-title" : "fixed-events-title"}"]`,
+    `[aria-labelledby="${regionIdForLabel(regionLabel)}"]`,
   );
   const buttons = Array.from(region?.querySelectorAll("button") ?? []);
   const button = buttons.find((candidate) =>
@@ -1128,6 +1620,43 @@ function buttonByText<T>(
   }
 
   return button as HTMLButtonElement;
+}
+
+function regionIdForLabel(regionLabel: string): string {
+  switch (regionLabel) {
+    case "Flexible tasks":
+      return "tasks-title";
+    case "Fixed events":
+      return "fixed-events-title";
+    case "Generate schedule":
+      return "recovery-title";
+    default:
+      throw new Error(`Unknown region label ${regionLabel}`);
+  }
+}
+
+function timelineBlocks<T>(fixture: ComponentFixture<T>): Array<{
+  readonly kind: string;
+  readonly top: number;
+  readonly height: number;
+  readonly laneIndex: number;
+  readonly laneCount: number;
+  readonly left: number;
+  readonly width: number;
+}> {
+  return Array.from(
+    (fixture.nativeElement as HTMLElement).querySelectorAll(
+      "[data-testid='daily-timeline'] article",
+    ),
+  ).map((element) => ({
+    kind: element.getAttribute("data-kind") ?? "",
+    top: Number(element.getAttribute("data-top-minutes") ?? "0"),
+    height: Number(element.getAttribute("data-height-minutes") ?? "0"),
+    laneIndex: Number(element.getAttribute("data-lane-index") ?? "0"),
+    laneCount: Number(element.getAttribute("data-lane-count") ?? "1"),
+    left: Number(element.getAttribute("data-left-percent") ?? "0"),
+    width: Number(element.getAttribute("data-width-percent") ?? "100"),
+  }));
 }
 
 function submitEvent(): SubmitEvent {
