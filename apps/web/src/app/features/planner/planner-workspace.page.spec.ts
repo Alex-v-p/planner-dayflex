@@ -527,6 +527,20 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.createdTasks).toEqual([]);
   });
 
+  it("blocks invalid task priorities before calling the API", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#task-title", "Draft outline");
+    setInput(fixture, "#task-estimate", "30");
+    setInput(fixture, "#task-priority", "6");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Priority must be from 1 to 5.");
+    expect(plannerApi.createdTasks).toEqual([]);
+  });
+
   it("defaults a new fixed event to the selected planning day's time zone", async () => {
     plannerApi.result = workspaceData({
       day: {
@@ -572,6 +586,21 @@ describe("rendered planner workspace", () => {
     ]);
   });
 
+  it("blocks invalid fixed-event intervals before calling the API", async () => {
+    plannerApi.result = workspaceData({ fixedEvents: [], snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#fixed-event-title", "Backwards event");
+    setInput(fixture, "#fixed-event-start", "2026-07-04T10:00");
+    setInput(fixture, "#fixed-event-end", "2026-07-04T09:00");
+    setInput(fixture, "#fixed-event-time-zone", "Europe/Brussels");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("End time must be after start time.");
+    expect(plannerApi.savedFixedEvents).toEqual([]);
+  });
+
   it("edits a task, refreshes the workspace, and keeps user IDs out of payloads", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
@@ -601,6 +630,38 @@ describe("rendered planner workspace", () => {
       },
     ]);
     expect(JSON.stringify(plannerApi.updatedTasks)).not.toContain("user-1");
+    expect(plannerApi.loadedDates).toEqual([selectedDate, selectedDate]);
+  });
+
+  it("edits a fixed event, refreshes the workspace, and keeps user IDs out of payloads", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Edit", "Fixed events").click();
+    fixture.detectChanges();
+    setInput(fixture, "#fixed-event-title", "Planning review");
+    setInput(fixture, "#fixed-event-start", "2026-07-04T11:00");
+    setInput(fixture, "#fixed-event-end", "2026-07-04T12:00");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.updatedFixedEvents).toEqual([
+      {
+        planningDayId: "day-1",
+        fixedEventId: "event-1",
+        request: {
+          title: "Planning review",
+          start_at: "2026-07-04T11:00:00+02:00",
+          end_at: "2026-07-04T12:00:00+02:00",
+          time_zone: "Europe/Brussels",
+        },
+      },
+    ]);
+    expect(JSON.stringify(plannerApi.updatedFixedEvents)).not.toContain(
+      "user-1",
+    );
     expect(plannerApi.loadedDates).toEqual([selectedDate, selectedDate]);
   });
 
