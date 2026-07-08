@@ -511,7 +511,14 @@
                 class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
                 [ngModel]="taskForm().dueDate"
                 (ngModelChange)="updateTaskForm({ dueDate: $event })"
+                [attr.aria-invalid]="fieldError(taskFormErrors(), 'dueDate') ? 'true' : null"
+                [attr.aria-describedby]="fieldError(taskFormErrors(), 'dueDate') ? 'task-due-date-error' : null"
               />
+              @if (fieldError(taskFormErrors(), "dueDate")) {
+              <p id="task-due-date-error" class="mt-1 text-sm text-signal-700">
+                {{ fieldError(taskFormErrors(), "dueDate") }}
+              </p>
+              }
             </div>
             <div>
               <label
@@ -527,7 +534,14 @@
                 class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
                 [ngModel]="taskForm().earliestStartLocal"
                 (ngModelChange)="updateTaskForm({ earliestStartLocal: $event })"
+                [attr.aria-invalid]="fieldError(taskFormErrors(), 'earliestStartLocal') ? 'true' : null"
+                [attr.aria-describedby]="fieldError(taskFormErrors(), 'earliestStartLocal') ? 'task-earliest-error' : null"
               />
+              @if (fieldError(taskFormErrors(), "earliestStartLocal")) {
+              <p id="task-earliest-error" class="mt-1 text-sm text-signal-700">
+                {{ fieldError(taskFormErrors(), "earliestStartLocal") }}
+              </p>
+              }
             </div>
           </div>
           <div>
@@ -560,6 +574,8 @@
               class="h-5 w-5 rounded border-mist-300 text-meadow-700 focus-visible:shadow-focus"
               [ngModel]="taskForm().splittingAllowed"
               (ngModelChange)="updateTaskForm({ splittingAllowed: $event })"
+              [attr.aria-invalid]="fieldError(taskFormErrors(), 'splittingAllowed') ? 'true' : null"
+              [attr.aria-describedby]="fieldError(taskFormErrors(), 'splittingAllowed') ? 'task-splitting-error' : null"
             />
             <label
               for="task-splitting"
@@ -568,6 +584,11 @@
               Allow splitting
             </label>
           </div>
+          @if (fieldError(taskFormErrors(), "splittingAllowed")) {
+          <p id="task-splitting-error" class="text-sm text-signal-700">
+            {{ fieldError(taskFormErrors(), "splittingAllowed") }}
+          </p>
+          }
           <div>
             <label
               for="task-min-segment"

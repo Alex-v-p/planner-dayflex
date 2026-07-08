@@ -414,9 +414,16 @@ export class PlannerWorkspacePage implements OnInit {
       error: (error: unknown) => {
         this.busyAction.set(null);
         const message = mutationErrorMessage(error);
+        const validationErrors = validationErrorsFor(error, formKind);
         if (formKind === "task") {
+          if (Object.keys(validationErrors).length > 0) {
+            this.taskFormErrors.set(validationErrors);
+          }
           this.taskFormMessage.set(message);
         } else {
+          if (Object.keys(validationErrors).length > 0) {
+            this.fixedEventFormErrors.set(validationErrors);
+          }
           this.fixedEventFormMessage.set(message);
         }
       },
@@ -812,4 +819,137 @@ function mutationErrorMessage(error: unknown): string {
   }
 
   return "We could not save that change. Try again when the API is available.";
+}
+
+function validationErrorsFor(
+  error: unknown,
+  formKind: "task" | "fixedEvent",
+): FormErrors {
+  if (!(error instanceof HttpErrorResponse) || error.status !== 422) {
+    return {};
+  }
+
+  const errors: Record<string, string> = {};
+  const details = validationDetails(error.error);
+  for (const detail of details) {
+    const apiField = validationApiField(detail);
+    if (apiField === null) {
+      continue;
+    }
+
+    const formField =
+      formKind === "task"
+        ? taskFieldForApiField(apiField)
+        : fixedEventFieldForApiField(apiField);
+    if (formField !== null) {
+      errors[formField] = safeValidationMessage(apiField, detail.msg);
+    }
+  }
+
+  return errors;
+}
+
+interface FastApiValidationDetail {
+  readonly loc: readonly unknown[];
+  readonly msg?: unknown;
+}
+
+function validationDetails(value: unknown): readonly FastApiValidationDetail[] {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("detail" in value) ||
+    !Array.isArray(value.detail)
+  ) {
+    return [];
+  }
+
+  return value.detail.filter(
+    (detail): detail is FastApiValidationDetail =>
+      typeof detail === "object" &&
+      detail !== null &&
+      "loc" in detail &&
+      Array.isArray(detail.loc),
+  );
+}
+
+function validationApiField(detail: FastApiValidationDetail): string | null {
+  const bodyIndex = detail.loc.findIndex((part) => part === "body");
+  const candidate =
+    bodyIndex >= 0 ? detail.loc[bodyIndex + 1] : detail.loc.at(-1);
+  return typeof candidate === "string" ? candidate : null;
+}
+
+function taskFieldForApiField(apiField: string): string | null {
+  switch (apiField) {
+    case "title":
+      return "title";
+    case "estimated_minutes":
+      return "estimatedMinutes";
+    case "priority":
+      return "priority";
+    case "due_date":
+      return "dueDate";
+    case "earliest_start_at":
+      return "earliestStartLocal";
+    case "splitting_allowed":
+      return "splittingAllowed";
+    case "min_segment_minutes":
+      return "minSegmentMinutes";
+    default:
+      return null;
+  }
+}
+
+function fixedEventFieldForApiField(apiField: string): string | null {
+  switch (apiField) {
+    case "title":
+      return "title";
+    case "start_at":
+      return "startLocal";
+    case "end_at":
+      return "endLocal";
+    case "time_zone":
+      return "timeZone";
+    default:
+      return null;
+  }
+}
+
+function safeValidationMessage(apiField: string, message: unknown): string {
+  const lowerMessage = typeof message === "string" ? message.toLowerCase() : "";
+  const label = apiField.replace(/_/g, " ");
+
+  if (lowerMessage.includes("at most 200")) {
+    return "Use 200 characters or fewer.";
+  }
+  if (lowerMessage.includes("at most 64")) {
+    return "Use 64 characters or fewer.";
+  }
+  if (lowerMessage.includes("valid iana time zone")) {
+    return "Use a valid IANA time zone.";
+  }
+  if (lowerMessage.includes("date without a time")) {
+    return "Use a date without a time.";
+  }
+  if (lowerMessage.includes("explicit utc offset")) {
+    return "Use a date and time with a valid offset.";
+  }
+  if (lowerMessage.includes("after start_at")) {
+    return "End time must be after start time.";
+  }
+  if (lowerMessage.includes("greater than 0")) {
+    return "Use a value greater than 0.";
+  }
+  if (lowerMessage.includes("greater than or equal to 1")) {
+    return "Use a value from 1 to 5.";
+  }
+  if (lowerMessage.includes("less than or equal to 5")) {
+    return "Use a value from 1 to 5.";
+  }
+  if (lowerMessage.includes("minimum segment")) {
+    return "Review the split minimum.";
+  }
+
+  return `Review ${label}.`;
 }

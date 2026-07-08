@@ -541,6 +541,64 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.createdTasks).toEqual([]);
   });
 
+  it("renders invalid task due date and earliest start errors inline", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#task-title", "Draft outline");
+    setInput(fixture, "#task-estimate", "30");
+    setInput(fixture, "#task-priority", "3");
+    updateTaskFormForTest(fixture, {
+      dueDate: "2026-02-31",
+      earliestStartLocal: "2026-02-31T09:00",
+    });
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Use a valid due date.");
+    expect(text(fixture)).toContain("Use a valid earliest start time.");
+    expect(inputAriaInvalid(fixture, "#task-due-date")).toBe("true");
+    expect(inputAriaInvalid(fixture, "#task-earliest")).toBe("true");
+    expect(plannerApi.createdTasks).toEqual([]);
+  });
+
+  it("maps task API 422 validation details to inline field errors", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    plannerApi.taskMutationError = new HttpErrorResponse({
+      status: 422,
+      statusText: "Unprocessable Entity",
+      error: {
+        detail: [
+          {
+            loc: ["body", "title"],
+            msg: "String should have at most 200 characters",
+          },
+          {
+            loc: ["body", "due_date"],
+            msg: "Value error, due_date must be a date without a time",
+          },
+        ],
+      },
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#task-title", "Server rejected task");
+    setInput(fixture, "#task-estimate", "30");
+    setInput(fixture, "#task-priority", "3");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "The API could not accept those details. Review the form and try again.",
+    );
+    expect(text(fixture)).toContain("Use 200 characters or fewer.");
+    expect(text(fixture)).toContain("Use a date without a time.");
+    expect(inputAriaInvalid(fixture, "#task-title")).toBe("true");
+    expect(inputAriaInvalid(fixture, "#task-due-date")).toBe("true");
+  });
+
   it("defaults a new fixed event to the selected planning day's time zone", async () => {
     plannerApi.result = workspaceData({
       day: {
@@ -715,6 +773,43 @@ describe("rendered planner workspace", () => {
     );
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
   });
+
+  it("maps fixed-event API 422 validation details to inline field errors", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    plannerApi.fixedEventMutationError = new HttpErrorResponse({
+      status: 422,
+      statusText: "Unprocessable Entity",
+      error: {
+        detail: [
+          {
+            loc: ["body", "time_zone"],
+            msg: "String should have at most 64 characters",
+          },
+          {
+            loc: ["body", "end_at"],
+            msg: "Value error, end_at must be after start_at",
+          },
+        ],
+      },
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Edit", "Fixed events").click();
+    fixture.detectChanges();
+    setInput(fixture, "#fixed-event-title", "Server rejected event");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "The API could not accept those details. Review the form and try again.",
+    );
+    expect(text(fixture)).toContain("Use 64 characters or fewer.");
+    expect(text(fixture)).toContain("End time must be after start time.");
+    expect(inputAriaInvalid(fixture, "#fixed-event-time-zone")).toBe("true");
+    expect(inputAriaInvalid(fixture, "#fixed-event-end")).toBe("true");
+  });
 });
 
 class FakeApiClient {
@@ -783,6 +878,7 @@ class FakePlannerApi {
   readonly savedFixedEvents: unknown[] = [];
   readonly updatedFixedEvents: unknown[] = [];
   readonly deletedFixedEvents: unknown[] = [];
+  taskMutationError: unknown = null;
   fixedEventMutationError: unknown = null;
 
   loadWorkspaceDate(date: string): Observable<PlannerWorkspaceData> {
@@ -802,11 +898,17 @@ class FakePlannerApi {
 
   createTask(request: unknown): Observable<Task> {
     this.createdTasks.push(request);
+    if (this.taskMutationError !== null) {
+      return throwError(() => this.taskMutationError);
+    }
     return of({ ...task, ...(request as Partial<Task>) });
   }
 
   updateTask(id: string, request: unknown): Observable<Task> {
     this.updatedTasks.push({ id, request });
+    if (this.taskMutationError !== null) {
+      return throwError(() => this.taskMutationError);
+    }
     return of({ ...task, id, ...(request as Partial<Task>) });
   }
 
@@ -966,6 +1068,27 @@ function setInput<T>(
 
 function inputValue<T>(fixture: ComponentFixture<T>, selector: string): string {
   return (query(fixture, selector) as HTMLInputElement).value;
+}
+
+function inputAriaInvalid<T>(
+  fixture: ComponentFixture<T>,
+  selector: string,
+): string | null {
+  return (query(fixture, selector) as HTMLInputElement).getAttribute(
+    "aria-invalid",
+  );
+}
+
+function updateTaskFormForTest(
+  fixture: ComponentFixture<PlannerWorkspacePage>,
+  patch: Record<string, unknown>,
+): void {
+  (
+    fixture.componentInstance as unknown as {
+      updateTaskForm(patch: Record<string, unknown>): void;
+    }
+  ).updateTaskForm(patch);
+  fixture.detectChanges();
 }
 
 function setCheckbox<T>(
