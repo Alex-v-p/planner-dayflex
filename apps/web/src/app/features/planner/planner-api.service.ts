@@ -74,6 +74,28 @@ export interface PlannerWorkspaceData {
   readonly snapshot: ScheduleSnapshot | null;
 }
 
+export interface PlanningDayCreateRequest {
+  readonly local_date: string;
+  readonly time_zone: string;
+}
+
+export interface TaskInputRequest {
+  readonly title: string;
+  readonly estimated_minutes: number;
+  readonly priority: number;
+  readonly due_date: string | null;
+  readonly earliest_start_at: string | null;
+  readonly splitting_allowed: boolean;
+  readonly min_segment_minutes: number | null;
+}
+
+export interface FixedEventInputRequest {
+  readonly title: string;
+  readonly start_at: string;
+  readonly end_at: string;
+  readonly time_zone: string;
+}
+
 @Injectable({ providedIn: "root" })
 export class PlannerApiService {
   private readonly api = inject(ApiClientService);
@@ -137,5 +159,77 @@ export class PlannerApiService {
           throw error;
         }),
       );
+  }
+
+  createTask(request: TaskInputRequest): Observable<Task> {
+    return this.api.postJson<TaskInputRequest, Task>(
+      "/planning/tasks",
+      request,
+    );
+  }
+
+  updateTask(taskId: string, request: TaskInputRequest): Observable<Task> {
+    return this.api.putJson<TaskInputRequest, Task>(
+      `/planning/tasks/${taskId}`,
+      request,
+    );
+  }
+
+  deleteTask(taskId: string): Observable<void> {
+    return this.api.deleteEmpty(`/planning/tasks/${taskId}`);
+  }
+
+  saveFixedEventForDate(
+    selectedDate: string,
+    existingDay: PlanningDay | null,
+    request: FixedEventInputRequest,
+  ): Observable<FixedEvent> {
+    if (existingDay !== null) {
+      return this.createFixedEvent(existingDay.id, request);
+    }
+
+    return this.createPlanningDay({
+      local_date: selectedDate,
+      time_zone: request.time_zone,
+    }).pipe(switchMap((day) => this.createFixedEvent(day.id, request)));
+  }
+
+  updateFixedEvent(
+    planningDayId: string,
+    fixedEventId: string,
+    request: FixedEventInputRequest,
+  ): Observable<FixedEvent> {
+    return this.api.putJson<FixedEventInputRequest, FixedEvent>(
+      `/planning/days/${planningDayId}/fixed-events/${fixedEventId}`,
+      request,
+    );
+  }
+
+  deleteFixedEvent(
+    planningDayId: string,
+    fixedEventId: string,
+  ): Observable<void> {
+    return this.api.deleteEmpty(
+      `/planning/days/${planningDayId}/fixed-events/${fixedEventId}`,
+    );
+  }
+
+  private createPlanningDay(
+    request: PlanningDayCreateRequest,
+  ): Observable<PlanningDay> {
+    return this.api.postJson<PlanningDayCreateRequest, PlanningDay>(
+      "/planning/days",
+      request,
+    );
+  }
+
+  private createFixedEvent(
+    planningDayId: string,
+    request: FixedEventInputRequest,
+  ): Observable<FixedEvent> {
+    return this.api.postJson<FixedEventInputRequest, FixedEvent>(
+      `/planning/days/${planningDayId}/fixed-events`,
+      request,
+    );
   }
 }
