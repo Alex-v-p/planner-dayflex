@@ -606,6 +606,39 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("v4");
   });
 
+  it("replaces an older displayed snapshot with the generated latest snapshot", async () => {
+    plannerApi.result = workspaceData({ snapshot });
+    const generated = {
+      ...canonicalSnapshot,
+      id: "snapshot-generated",
+      version: 4,
+    };
+    plannerApi.generateResponse = of(generated);
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    expect(text(fixture)).toContain("v2");
+    expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
+      "task",
+      "designated_free_time",
+    ]);
+
+    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
+    expect(text(fixture)).toContain("Generated schedule snapshot v4.");
+    expect(text(fixture)).toContain("v4");
+    expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
+      "fixed_event",
+      "task",
+      "buffer",
+      "interruption",
+      "designated_free_time",
+    ]);
+  });
+
   it("does not apply a generated snapshot after the user changes days", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const generated = {
