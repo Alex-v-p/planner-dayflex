@@ -139,9 +139,15 @@
           [class]="itemClass(block.item.kind)"
           [style.top.%]="block.topPercent"
           [style.height.%]="block.heightPercent"
+          [style.left.%]="block.leftPercent"
+          [style.width.%]="block.widthPercent"
           [attr.data-kind]="block.item.kind"
           [attr.data-top-minutes]="block.topMinutes"
           [attr.data-height-minutes]="block.heightMinutes"
+          [attr.data-lane-index]="block.laneIndex"
+          [attr.data-lane-count]="block.laneCount"
+          [attr.data-left-percent]="block.leftPercent"
+          [attr.data-width-percent]="block.widthPercent"
         >
           <div
             class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"

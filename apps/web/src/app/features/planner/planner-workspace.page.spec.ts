@@ -145,6 +145,47 @@ const canonicalSnapshot: ScheduleSnapshot = {
   ],
 };
 
+const overlappingLockedSnapshot: ScheduleSnapshot = {
+  ...snapshot,
+  items: [
+    {
+      id: "fixed-overlap-item",
+      kind: "fixed_event",
+      task_id: null,
+      fixed_event_id: "event-1",
+      interruption_id: null,
+      start_at: "2026-07-04T09:00:00+02:00",
+      end_at: "2026-07-04T10:00:00+02:00",
+    },
+    {
+      id: "interruption-overlap-item",
+      kind: "interruption",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: "interruption-1",
+      start_at: "2026-07-04T09:30:00+02:00",
+      end_at: "2026-07-04T10:30:00+02:00",
+    },
+    {
+      id: "task-after-overlap-item",
+      kind: "task",
+      task_id: "task-1",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T10:30:00+02:00",
+      end_at: "2026-07-04T11:30:00+02:00",
+    },
+  ],
+  decisions: [
+    {
+      id: "decision-locked-overlap",
+      task_id: null,
+      reason_code: "locked_time_overlap_merged",
+      details: {},
+    },
+  ],
+};
+
 const noFitSnapshot: ScheduleSnapshot = {
   ...canonicalSnapshot,
   id: "snapshot-no-fit",
@@ -575,6 +616,46 @@ describe("rendered planner workspace", () => {
     expect(blocks[1]).toMatchObject({ kind: "task", top: 120, height: 90 });
   });
 
+  it("renders overlapping locked snapshot blocks in separate timeline lanes", async () => {
+    plannerApi.result = workspaceData({ snapshot: overlappingLockedSnapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const blocks = timelineBlocks(fixture);
+
+    expect(blocks).toEqual([
+      {
+        kind: "fixed_event",
+        top: 60,
+        height: 60,
+        laneIndex: 0,
+        laneCount: 2,
+        left: 0,
+        width: 50,
+      },
+      {
+        kind: "interruption",
+        top: 90,
+        height: 60,
+        laneIndex: 1,
+        laneCount: 2,
+        left: 50,
+        width: 50,
+      },
+      {
+        kind: "task",
+        top: 150,
+        height: 60,
+        laneIndex: 0,
+        laneCount: 1,
+        left: 0,
+        width: 100,
+      },
+    ]);
+    expect(blocks[1].top).toBeLessThan(blocks[0].top + blocks[0].height);
+    expect(blocks[1].left).toBeGreaterThanOrEqual(
+      blocks[0].left + blocks[0].width,
+    );
+  });
+
   it("generates a plan, shows pending state, and displays the returned snapshot", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const generated = {
@@ -690,6 +771,53 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("July 5, 2026");
     expect(text(fixture)).not.toContain("Generated schedule snapshot v4.");
     expect(query(fixture, "[data-testid='daily-timeline']")).toBeNull();
+  });
+
+  it("does not show a generate-plan error after the user changes days", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const generateResponse = new Subject<ScheduleSnapshot>();
+    plannerApi.generateResponse = generateResponse;
+    plannerApi.responses.set(
+      "2026-07-05",
+      of(
+        workspaceData({
+          selectedDate: "2026-07-05",
+          planningDays: [
+            {
+              id: "day-2",
+              local_date: "2026-07-05",
+              time_zone: "Europe/Brussels",
+              current_snapshot_id: null,
+              created_at: "2026-07-03T08:00:00Z",
+            },
+          ],
+          day: {
+            id: "day-2",
+            local_date: "2026-07-05",
+            time_zone: "Europe/Brussels",
+            current_snapshot_id: null,
+            created_at: "2026-07-03T08:00:00Z",
+          },
+          fixedEvents: [],
+          snapshot: null,
+        }),
+      ),
+    );
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    fixture.detectChanges();
+    routeParams.next(convertToParamMap({ date: "2026-07-05" }));
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    generateResponse.error(new HttpErrorResponse({ status: 503 }));
+    fixture.detectChanges();
+
+    expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
+    expect(text(fixture)).toContain("July 5, 2026");
+    expect(text(fixture)).not.toContain("scheduler is unavailable");
+    expect(text(fixture)).not.toContain("We could not generate the schedule");
   });
 
   it("requires a saved planning day before generating a plan", async () => {
@@ -1511,6 +1639,10 @@ function timelineBlocks<T>(fixture: ComponentFixture<T>): Array<{
   readonly kind: string;
   readonly top: number;
   readonly height: number;
+  readonly laneIndex: number;
+  readonly laneCount: number;
+  readonly left: number;
+  readonly width: number;
 }> {
   return Array.from(
     (fixture.nativeElement as HTMLElement).querySelectorAll(
@@ -1520,6 +1652,10 @@ function timelineBlocks<T>(fixture: ComponentFixture<T>): Array<{
     kind: element.getAttribute("data-kind") ?? "",
     top: Number(element.getAttribute("data-top-minutes") ?? "0"),
     height: Number(element.getAttribute("data-height-minutes") ?? "0"),
+    laneIndex: Number(element.getAttribute("data-lane-index") ?? "0"),
+    laneCount: Number(element.getAttribute("data-lane-count") ?? "1"),
+    left: Number(element.getAttribute("data-left-percent") ?? "0"),
+    width: Number(element.getAttribute("data-width-percent") ?? "100"),
   }));
 }
 

@@ -91,6 +91,10 @@ interface TimelineBlock {
   readonly heightPercent: number;
   readonly topMinutes: number;
   readonly heightMinutes: number;
+  readonly laneIndex: number;
+  readonly laneCount: number;
+  readonly leftPercent: number;
+  readonly widthPercent: number;
 }
 
 interface ScheduleSummary {
@@ -405,10 +409,13 @@ export class PlannerWorkspacePage implements OnInit {
         },
         error: (error: unknown) => {
           this.busyAction.set(null);
-          this.generatePlanState.set({
-            status: "error",
-            message: generatePlanErrorMessage(error),
-          });
+          const current = this.state();
+          if (current.status === "ready" && current.data.day?.id === day.id) {
+            this.generatePlanState.set({
+              status: "error",
+              message: generatePlanErrorMessage(error),
+            });
+          }
         },
       });
   }
@@ -469,7 +476,7 @@ export class PlannerWorkspacePage implements OnInit {
 
   protected itemClass(kind: string): string {
     const shared =
-      "absolute left-0 right-0 overflow-hidden rounded-md border border-mist-200 border-l-4 bg-white p-3 shadow-sm";
+      "absolute overflow-hidden rounded-md border border-mist-200 border-l-4 bg-white p-3 shadow-sm";
 
     switch (kind) {
       case "task":
@@ -503,11 +510,15 @@ export class PlannerWorkspacePage implements OnInit {
     const bounds = timelineBounds(snapshot, timeZone);
     const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
 
+    const laneLayout = timelineLaneLayout(snapshot.items, timeZone);
+
     return snapshot.items.map((item) => {
       const startMinutes = minutesFromIsoInZone(item.start_at, timeZone);
       const endMinutes = minutesFromIsoInZone(item.end_at, timeZone);
       const topMinutes = Math.max(0, startMinutes - bounds.startMinutes);
       const heightMinutes = Math.max(1, endMinutes - startMinutes);
+      const lanes = laneLayout.get(item.id) ?? { laneIndex: 0, laneCount: 1 };
+      const widthPercent = 100 / lanes.laneCount;
 
       return {
         item,
@@ -519,6 +530,10 @@ export class PlannerWorkspacePage implements OnInit {
         heightPercent: (heightMinutes / totalMinutes) * 100,
         topMinutes,
         heightMinutes,
+        laneIndex: lanes.laneIndex,
+        laneCount: lanes.laneCount,
+        leftPercent: lanes.laneIndex * widthPercent,
+        widthPercent,
       };
     });
   }
@@ -1098,6 +1113,81 @@ function timelineBounds(
   const endMinutes = Math.max(configuredEnd ?? 18 * 60, ...itemEnds);
 
   return { startMinutes, endMinutes };
+}
+
+function timelineLaneLayout(
+  items: readonly ScheduleItem[],
+  timeZone: string,
+): ReadonlyMap<
+  string,
+  { readonly laneIndex: number; readonly laneCount: number }
+> {
+  const sortedItems = items
+    .map((item, index) => ({
+      item,
+      index,
+      startMinutes: minutesFromIsoInZone(item.start_at, timeZone),
+      endMinutes: minutesFromIsoInZone(item.end_at, timeZone),
+    }))
+    .sort(
+      (a, b) =>
+        a.startMinutes - b.startMinutes ||
+        a.endMinutes - b.endMinutes ||
+        a.index - b.index,
+    );
+  const layout = new Map<string, { laneIndex: number; laneCount: number }>();
+  let active: Array<{
+    readonly laneIndex: number;
+    readonly endMinutes: number;
+  }> = [];
+  let groupIds: string[] = [];
+  let groupLaneCount = 0;
+
+  const closeGroup = () => {
+    if (groupIds.length === 0) {
+      return;
+    }
+
+    for (const id of groupIds) {
+      const existing = layout.get(id);
+      if (existing) {
+        layout.set(id, {
+          laneIndex: existing.laneIndex,
+          laneCount: Math.max(1, groupLaneCount),
+        });
+      }
+    }
+    groupIds = [];
+    groupLaneCount = 0;
+  };
+
+  for (const entry of sortedItems) {
+    const nextActive = active.filter(
+      (candidate) => candidate.endMinutes > entry.startMinutes,
+    );
+    if (nextActive.length === 0) {
+      closeGroup();
+    }
+    active = nextActive;
+
+    const usedLanes = new Set(active.map((candidate) => candidate.laneIndex));
+    let laneIndex = 0;
+    while (usedLanes.has(laneIndex)) {
+      laneIndex += 1;
+    }
+
+    layout.set(entry.item.id, { laneIndex, laneCount: 1 });
+    active.push({
+      laneIndex,
+      endMinutes: Math.max(entry.endMinutes, entry.startMinutes + 1),
+    });
+    groupIds.push(entry.item.id);
+    groupLaneCount = Math.max(groupLaneCount, active.length);
+  }
+
+  closeGroup();
+
+  return layout;
 }
 
 function configurationTimeMinutes(value: unknown): number | null {
