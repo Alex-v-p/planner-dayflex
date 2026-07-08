@@ -10,16 +10,27 @@ import {
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { FormsModule } from "@angular/forms";
 import { ActivatedRoute, Router } from "@angular/router";
-import { Subject, catchError, map, merge, of, switchMap, tap } from "rxjs";
+import {
+  Observable,
+  Subject,
+  catchError,
+  map,
+  merge,
+  of,
+  switchMap,
+  tap,
+} from "rxjs";
 
 import { AuthSessionService } from "../../core/auth/auth-session.service";
 import {
   FixedEvent,
+  FixedEventInputRequest,
   PlannerApiService,
   PlannerWorkspaceData,
   ScheduleItem,
   ScheduleSnapshot,
   Task,
+  TaskInputRequest,
 } from "./planner-api.service";
 
 type WorkspaceLoadState =
@@ -40,6 +51,29 @@ type WorkspaceLoadState =
       readonly message: string;
     };
 
+interface TaskFormModel {
+  readonly id: string | null;
+  readonly title: string;
+  readonly estimatedMinutes: string;
+  readonly priority: string;
+  readonly dueDate: string;
+  readonly earliestStartLocal: string;
+  readonly earliestStartTimeZone: string;
+  readonly splittingAllowed: boolean;
+  readonly minSegmentMinutes: string;
+}
+
+interface FixedEventFormModel {
+  readonly id: string | null;
+  readonly planningDayId: string | null;
+  readonly title: string;
+  readonly startLocal: string;
+  readonly endLocal: string;
+  readonly timeZone: string;
+}
+
+type FormErrors = Readonly<Record<string, string>>;
+
 @Component({
   selector: "pdf-planner-workspace-page",
   standalone: true,
@@ -53,6 +87,15 @@ export class PlannerWorkspacePage implements OnInit {
     selectedDate: todayLocalDate(),
   });
   protected readonly selectedDate = signal(todayLocalDate());
+  protected readonly taskForm = signal<TaskFormModel>(emptyTaskForm());
+  protected readonly fixedEventForm = signal<FixedEventFormModel>(
+    emptyFixedEventForm(),
+  );
+  protected readonly taskFormErrors = signal<FormErrors>({});
+  protected readonly fixedEventFormErrors = signal<FormErrors>({});
+  protected readonly taskFormMessage = signal("");
+  protected readonly fixedEventFormMessage = signal("");
+  protected readonly busyAction = signal<string | null>(null);
   protected readonly announcement = computed(() => {
     const state = this.state();
 
@@ -102,6 +145,14 @@ export class PlannerWorkspacePage implements OnInit {
       )
       .subscribe((state) => {
         this.state.set(state);
+        if (
+          state.status === "ready" &&
+          isBlankNewFixedEventForm(this.fixedEventForm())
+        ) {
+          this.fixedEventForm.set(
+            emptyFixedEventForm(state.data.day?.time_zone),
+          );
+        }
       });
   }
 
@@ -127,6 +178,152 @@ export class PlannerWorkspacePage implements OnInit {
     this.reloadRequests.next(this.state().selectedDate);
   }
 
+  protected updateTaskForm(patch: Partial<TaskFormModel>): void {
+    this.taskForm.update((form) => ({ ...form, ...patch }));
+  }
+
+  protected updateFixedEventForm(patch: Partial<FixedEventFormModel>): void {
+    this.fixedEventForm.update((form) => ({ ...form, ...patch }));
+  }
+
+  protected editTask(task: Task): void {
+    const timeZone =
+      currentWorkspaceDay(this.state())?.time_zone ?? guessTimeZone();
+    this.taskForm.set({
+      id: task.id,
+      title: task.title,
+      estimatedMinutes: String(task.estimated_minutes),
+      priority: String(task.priority),
+      dueDate: task.due_date ?? "",
+      earliestStartLocal:
+        task.earliest_start_at === null
+          ? ""
+          : toDateTimeLocalValue(task.earliest_start_at, timeZone),
+      earliestStartTimeZone: timeZone,
+      splittingAllowed: task.splitting_allowed,
+      minSegmentMinutes:
+        task.min_segment_minutes === null
+          ? ""
+          : String(task.min_segment_minutes),
+    });
+    this.taskFormErrors.set({});
+    this.taskFormMessage.set("");
+  }
+
+  protected resetTaskForm(): void {
+    this.taskForm.set(emptyTaskForm());
+    this.taskFormErrors.set({});
+    this.taskFormMessage.set("");
+  }
+
+  protected submitTask(): void {
+    const form = this.taskForm();
+    const result = buildTaskRequest(form);
+    if (!result.ok) {
+      this.taskFormErrors.set(result.errors);
+      this.taskFormMessage.set("Review the task details before saving.");
+      return;
+    }
+
+    const action = form.id === null ? "task:create" : `task:update:${form.id}`;
+    const request$ =
+      form.id === null
+        ? this.plannerApi.createTask(result.request)
+        : this.plannerApi.updateTask(form.id, result.request);
+
+    this.runMutation(action, request$, "task");
+  }
+
+  protected deleteTask(task: Task): void {
+    if (!window.confirm(`Delete "${task.title}" from active flexible tasks?`)) {
+      return;
+    }
+
+    this.runMutation(
+      `task:delete:${task.id}`,
+      this.plannerApi.deleteTask(task.id),
+      "task",
+    );
+  }
+
+  protected editFixedEvent(event: FixedEvent): void {
+    this.fixedEventForm.set({
+      id: event.id,
+      planningDayId: event.planning_day_id,
+      title: event.title,
+      startLocal: toDateTimeLocalValue(event.start_at, event.time_zone),
+      endLocal: toDateTimeLocalValue(event.end_at, event.time_zone),
+      timeZone: event.time_zone,
+    });
+    this.fixedEventFormErrors.set({});
+    this.fixedEventFormMessage.set("");
+  }
+
+  protected resetFixedEventForm(): void {
+    this.fixedEventForm.set(
+      emptyFixedEventForm(currentWorkspaceDay(this.state())?.time_zone),
+    );
+    this.fixedEventFormErrors.set({});
+    this.fixedEventFormMessage.set("");
+  }
+
+  protected submitFixedEvent(): void {
+    const form = this.fixedEventForm();
+    const result = buildFixedEventRequest(form);
+    if (!result.ok) {
+      this.fixedEventFormErrors.set(result.errors);
+      this.fixedEventFormMessage.set(
+        "Review the fixed event details before saving.",
+      );
+      return;
+    }
+
+    const state = this.state();
+    if (state.status !== "ready") {
+      this.fixedEventFormMessage.set("Planner data is still loading.");
+      return;
+    }
+
+    const request$ =
+      form.id === null
+        ? this.plannerApi.saveFixedEventForDate(
+            state.selectedDate,
+            state.data.day,
+            result.request,
+          )
+        : this.plannerApi.updateFixedEvent(
+            form.planningDayId ?? state.data.day?.id ?? "",
+            form.id,
+            result.request,
+          );
+
+    this.runMutation(
+      form.id === null ? "event:create" : `event:update:${form.id}`,
+      request$,
+      "fixedEvent",
+    );
+  }
+
+  protected deleteFixedEvent(event: FixedEvent): void {
+    if (!window.confirm(`Delete "${event.title}" from this planning day?`)) {
+      return;
+    }
+
+    this.runMutation(
+      `event:delete:${event.id}`,
+      this.plannerApi.deleteFixedEvent(event.planning_day_id, event.id),
+      "fixedEvent",
+    );
+  }
+
+  protected fieldError(errors: FormErrors, field: string): string {
+    return errors[field] ?? "";
+  }
+
+  protected isBusy(action: string): boolean {
+    return this.busyAction() === action;
+  }
+
   protected formatDateLabel(value: string): string {
     return formatDateLabel(value);
   }
@@ -145,6 +342,13 @@ export class PlannerWorkspacePage implements OnInit {
     planningDayTimeZone: string | undefined,
   ): string {
     return this.formatTimeRange(startAt, endAt, planningDayTimeZone ?? "UTC");
+  }
+
+  protected formatDateTime(
+    value: string,
+    planningDayTimeZone: string | undefined,
+  ): string {
+    return formatTime(value, planningDayTimeZone ?? "UTC");
   }
 
   protected itemLabel(
@@ -189,6 +393,34 @@ export class PlannerWorkspacePage implements OnInit {
 
   protected snapshotItemCount(snapshot: ScheduleSnapshot | null): number {
     return snapshot?.items.length ?? 0;
+  }
+
+  private runMutation<T>(
+    action: string,
+    request$: Observable<T>,
+    formKind: "task" | "fixedEvent",
+  ): void {
+    this.busyAction.set(action);
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.busyAction.set(null);
+        if (formKind === "task") {
+          this.resetTaskForm();
+        } else {
+          this.resetFixedEventForm();
+        }
+        this.reload();
+      },
+      error: (error: unknown) => {
+        this.busyAction.set(null);
+        const message = mutationErrorMessage(error);
+        if (formKind === "task") {
+          this.taskFormMessage.set(message);
+        } else {
+          this.fixedEventFormMessage.set(message);
+        }
+      },
+    });
   }
 }
 
@@ -278,4 +510,306 @@ function formatKindLabel(kind: string): string {
   return kind
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function emptyTaskForm(): TaskFormModel {
+  return {
+    id: null,
+    title: "",
+    estimatedMinutes: "",
+    priority: "3",
+    dueDate: "",
+    earliestStartLocal: "",
+    earliestStartTimeZone: guessTimeZone(),
+    splittingAllowed: false,
+    minSegmentMinutes: "",
+  };
+}
+
+function emptyFixedEventForm(timeZone?: string): FixedEventFormModel {
+  return {
+    id: null,
+    planningDayId: null,
+    title: "",
+    startLocal: "",
+    endLocal: "",
+    timeZone: normalizeTimeZone(timeZone ?? guessTimeZone()),
+  };
+}
+
+function isBlankNewFixedEventForm(form: FixedEventFormModel): boolean {
+  return (
+    form.id === null &&
+    form.planningDayId === null &&
+    form.title === "" &&
+    form.startLocal === "" &&
+    form.endLocal === ""
+  );
+}
+
+function buildTaskRequest(
+  form: TaskFormModel,
+): { ok: true; request: TaskInputRequest } | { ok: false; errors: FormErrors } {
+  const errors: Record<string, string> = {};
+  const title = form.title.trim();
+  const estimatedMinutes = Number(form.estimatedMinutes);
+  const priority = Number(form.priority);
+  const minSegmentMinutes =
+    form.minSegmentMinutes.trim() === ""
+      ? null
+      : Number(form.minSegmentMinutes);
+
+  if (title === "") {
+    errors["title"] = "Enter a task title.";
+  }
+  if (!Number.isInteger(estimatedMinutes) || estimatedMinutes < 1) {
+    errors["estimatedMinutes"] = "Estimate must be at least 1 minute.";
+  }
+  if (!Number.isInteger(priority) || priority < 1 || priority > 5) {
+    errors["priority"] = "Priority must be from 1 to 5.";
+  }
+  if (form.dueDate !== "" && !isValidDateInput(form.dueDate)) {
+    errors["dueDate"] = "Use a valid due date.";
+  }
+  const earliestStartTimeZone = normalizeTimeZone(form.earliestStartTimeZone);
+  if (
+    form.earliestStartLocal !== "" &&
+    !isValidTimeZone(earliestStartTimeZone)
+  ) {
+    errors["earliestStartTimeZone"] = "Use a valid IANA time zone.";
+  }
+  if (form.splittingAllowed) {
+    if (minSegmentMinutes === null) {
+      errors["minSegmentMinutes"] = "Enter the minimum split segment.";
+    } else if (!Number.isInteger(minSegmentMinutes) || minSegmentMinutes < 15) {
+      errors["minSegmentMinutes"] =
+        "Minimum segment must be at least 15 minutes.";
+    } else if (
+      Number.isInteger(estimatedMinutes) &&
+      minSegmentMinutes > estimatedMinutes
+    ) {
+      errors["minSegmentMinutes"] =
+        "Minimum segment cannot exceed the estimate.";
+    }
+  } else if (form.minSegmentMinutes.trim() !== "") {
+    errors["minSegmentMinutes"] =
+      "Clear minimum segment minutes when splitting is off.";
+  }
+
+  let earliestStartAt: string | null = null;
+  if (form.earliestStartLocal !== "" && !errors["earliestStartTimeZone"]) {
+    earliestStartAt = zonedLocalDateTimeToIso(
+      form.earliestStartLocal,
+      earliestStartTimeZone,
+    );
+    if (earliestStartAt === null) {
+      errors["earliestStartLocal"] = "Use a valid earliest start time.";
+    }
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { ok: false, errors };
+  }
+
+  return {
+    ok: true,
+    request: {
+      title,
+      estimated_minutes: estimatedMinutes,
+      priority,
+      due_date: form.dueDate === "" ? null : form.dueDate,
+      earliest_start_at: earliestStartAt,
+      splitting_allowed: form.splittingAllowed,
+      min_segment_minutes: form.splittingAllowed ? minSegmentMinutes : null,
+    },
+  };
+}
+
+function buildFixedEventRequest(
+  form: FixedEventFormModel,
+):
+  | { ok: true; request: FixedEventInputRequest }
+  | { ok: false; errors: FormErrors } {
+  const errors: Record<string, string> = {};
+  const title = form.title.trim();
+
+  if (title === "") {
+    errors["title"] = "Enter an event title.";
+  }
+  const timeZone = normalizeTimeZone(form.timeZone);
+  if (!isValidTimeZone(timeZone)) {
+    errors["timeZone"] = "Use a valid IANA time zone.";
+  }
+
+  const startAt = errors["timeZone"]
+    ? null
+    : zonedLocalDateTimeToIso(form.startLocal, timeZone);
+  const endAt = errors["timeZone"]
+    ? null
+    : zonedLocalDateTimeToIso(form.endLocal, timeZone);
+
+  if (startAt === null) {
+    errors["startLocal"] = "Enter a valid start time.";
+  }
+  if (endAt === null) {
+    errors["endLocal"] = "Enter a valid end time.";
+  }
+  if (
+    startAt !== null &&
+    endAt !== null &&
+    Date.parse(endAt) <= Date.parse(startAt)
+  ) {
+    errors["endLocal"] = "End time must be after start time.";
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { ok: false, errors };
+  }
+
+  if (startAt === null || endAt === null) {
+    return {
+      ok: false,
+      errors: {
+        startLocal: "Enter a valid start time.",
+        endLocal: "Enter a valid end time.",
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    request: {
+      title,
+      start_at: startAt,
+      end_at: endAt,
+      time_zone: timeZone,
+    },
+  };
+}
+
+function currentWorkspaceDay(state: WorkspaceLoadState) {
+  return state.status === "ready" ? state.data.day : null;
+}
+
+function guessTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function isValidTimeZone(value: string): boolean {
+  const timeZone = normalizeTimeZone(value);
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone }).format();
+    return timeZone !== "";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeTimeZone(value: string): string {
+  return value.trim();
+}
+
+function toDateTimeLocalValue(value: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(value));
+  const part = (type: string) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  const year = part("year");
+  const month = part("month");
+  const day = part("day");
+  const hours = part("hour");
+  const minutes = part("minute");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function zonedLocalDateTimeToIso(
+  value: string,
+  timeZone: string,
+): string | null {
+  const normalizedTimeZone = normalizeTimeZone(timeZone);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (match === null || !isValidTimeZone(normalizedTimeZone)) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hours = Number(match[4]);
+  const minutes = Number(match[5]);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hours > 23 ||
+    minutes > 59 ||
+    !isValidDateInput(`${match[1]}-${match[2]}-${match[3]}`)
+  ) {
+    return null;
+  }
+
+  const localAsUtc = Date.UTC(year, month - 1, day, hours, minutes);
+  let offsetMinutes = timeZoneOffsetMinutes(
+    new Date(localAsUtc),
+    normalizedTimeZone,
+  );
+  const candidate = new Date(localAsUtc - offsetMinutes * 60_000);
+  offsetMinutes = timeZoneOffsetMinutes(candidate, normalizedTimeZone);
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, "0");
+  const offsetRemainder = String(absoluteOffset % 60).padStart(2, "0");
+
+  return `${value}:00${sign}${offsetHours}:${offsetRemainder}`;
+}
+
+function timeZoneOffsetMinutes(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: string) =>
+    Number(parts.find((candidate) => candidate.type === type)?.value ?? "0");
+  const asUtc = Date.UTC(
+    part("year"),
+    part("month") - 1,
+    part("day"),
+    part("hour"),
+    part("minute"),
+    part("second"),
+  );
+  return Math.round((asUtc - date.getTime()) / 60_000);
+}
+
+function mutationErrorMessage(error: unknown): string {
+  if (error instanceof HttpErrorResponse) {
+    if (error.status === 409) {
+      return "That change conflicts with another saved event for the day.";
+    }
+    if (error.status === 422) {
+      return "The API could not accept those details. Review the form and try again.";
+    }
+    if (error.status === 401 || error.status === 403) {
+      return "Your session cannot save this change. Sign in again before continuing.";
+    }
+    if (error.status === 404) {
+      return "That planning item is no longer available. Refresh the workspace.";
+    }
+  }
+
+  return "We could not save that change. Try again when the API is available.";
 }

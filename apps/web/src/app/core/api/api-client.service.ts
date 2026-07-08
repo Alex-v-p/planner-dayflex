@@ -27,6 +27,18 @@ export class ApiClientService {
     });
   }
 
+  putJson<TRequest extends object, TResponse>(path: ApiPath, body: TRequest) {
+    return this.http.put<TResponse>(this.urlFor(path), body, {
+      withCredentials: true,
+    });
+  }
+
+  deleteEmpty(path: ApiPath) {
+    return this.http.delete<void>(this.urlFor(path), {
+      withCredentials: true,
+    });
+  }
+
   urlFor(path: ApiPath): string {
     return joinApiUrl(this.config.apiBaseUrl, path);
   }

@@ -2,7 +2,7 @@ import { HttpErrorResponse } from "@angular/common/http";
 import { ComponentFixture, TestBed } from "@angular/core/testing";
 import { ActivatedRoute, Router, convertToParamMap } from "@angular/router";
 import { BehaviorSubject, Observable, Subject, of, throwError } from "rxjs";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientService } from "../../core/api/api-client.service";
 import { AuthUser } from "../../core/auth/auth-contracts";
@@ -143,6 +143,108 @@ describe("planner workspace API contract", () => {
       snapshot: null,
     });
     expect(api.gets).toEqual(["/planning/days", "/planning/tasks"]);
+  });
+
+  it("creates a planning day before saving a fixed event on an empty selected date", async () => {
+    const api = new FakeApiClient();
+    const createdDay = {
+      id: "day-new",
+      local_date: selectedDate,
+      time_zone: "Europe/Brussels",
+      current_snapshot_id: null,
+      created_at: "2026-07-03T08:00:00Z",
+    };
+    api.responses.set("/planning/days", createdDay);
+    api.responses.set("/planning/days/day-new/fixed-events", fixedEvent);
+    await TestBed.configureTestingModule({
+      providers: [
+        PlannerApiService,
+        { provide: ApiClientService, useValue: api },
+      ],
+    }).compileComponents();
+
+    const event = await firstValue(
+      TestBed.inject(PlannerApiService).saveFixedEventForDate(
+        selectedDate,
+        null,
+        {
+          title: "Team meeting",
+          start_at: "2026-07-04T09:00:00+02:00",
+          end_at: "2026-07-04T10:00:00+02:00",
+          time_zone: "Europe/Brussels",
+        },
+      ),
+    );
+
+    expect(event).toEqual(fixedEvent);
+    expect(api.posts).toEqual([
+      {
+        path: "/planning/days",
+        body: { local_date: selectedDate, time_zone: "Europe/Brussels" },
+      },
+      {
+        path: "/planning/days/day-new/fixed-events",
+        body: {
+          title: "Team meeting",
+          start_at: "2026-07-04T09:00:00+02:00",
+          end_at: "2026-07-04T10:00:00+02:00",
+          time_zone: "Europe/Brussels",
+        },
+      },
+    ]);
+    expect(JSON.stringify(api.posts)).not.toContain("user-1");
+  });
+
+  it("uses authenticated owner-scoped mutation endpoint shapes", async () => {
+    const api = new FakeApiClient();
+    api.responses.set("/planning/tasks/task-1", task);
+    api.responses.set("/planning/days/day-1/fixed-events/event-1", fixedEvent);
+    api.responses.set("DELETE /planning/tasks/task-1", undefined);
+    api.responses.set(
+      "DELETE /planning/days/day-1/fixed-events/event-1",
+      undefined,
+    );
+    await TestBed.configureTestingModule({
+      providers: [
+        PlannerApiService,
+        { provide: ApiClientService, useValue: api },
+      ],
+    }).compileComponents();
+    const service = TestBed.inject(PlannerApiService);
+
+    await firstValue(
+      service.updateTask("task-1", {
+        title: "Write report",
+        estimated_minutes: 90,
+        priority: 5,
+        due_date: null,
+        earliest_start_at: null,
+        splitting_allowed: false,
+        min_segment_minutes: null,
+      }),
+    );
+    await firstValue(
+      service.updateFixedEvent("day-1", "event-1", {
+        title: "Team meeting",
+        start_at: "2026-07-04T09:00:00+02:00",
+        end_at: "2026-07-04T10:00:00+02:00",
+        time_zone: "Europe/Brussels",
+      }),
+    );
+    await firstValue(service.deleteTask("task-1"));
+    await firstValue(service.deleteFixedEvent("day-1", "event-1"));
+
+    expect(api.puts.map((call) => call.path)).toEqual([
+      "/planning/tasks/task-1",
+      "/planning/days/day-1/fixed-events/event-1",
+    ]);
+    expect(api.deletes).toEqual([
+      "/planning/tasks/task-1",
+      "/planning/days/day-1/fixed-events/event-1",
+    ]);
+    expect(
+      JSON.stringify({ puts: api.puts, deletes: api.deletes }),
+    ).not.toContain("user-1");
   });
 });
 
@@ -409,11 +511,157 @@ describe("rendered planner workspace", () => {
       (query(fixture, "#planner-date") as HTMLInputElement | null)?.value,
     ).toBe(today);
   });
+
+  it("blocks invalid task split settings before calling the API", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#task-title", "Draft outline");
+    setInput(fixture, "#task-estimate", "30");
+    setInput(fixture, "#task-priority", "3");
+    setCheckbox(fixture, "#task-splitting", true);
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Enter the minimum split segment.");
+    expect(plannerApi.createdTasks).toEqual([]);
+  });
+
+  it("defaults a new fixed event to the selected planning day's time zone", async () => {
+    plannerApi.result = workspaceData({
+      day: {
+        id: "day-1",
+        local_date: selectedDate,
+        time_zone: "America/New_York",
+        current_snapshot_id: null,
+        created_at: "2026-07-03T08:00:00Z",
+      },
+      fixedEvents: [],
+      snapshot: null,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    expect(inputValue(fixture, "#fixed-event-time-zone")).toBe(
+      "America/New_York",
+    );
+  });
+
+  it("trims fixed-event time zones before converting and submitting", async () => {
+    plannerApi.result = workspaceData({ fixedEvents: [], snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#fixed-event-title", "Trimmed event");
+    setInput(fixture, "#fixed-event-start", "2026-07-04T09:00");
+    setInput(fixture, "#fixed-event-end", "2026-07-04T10:00");
+    setInput(fixture, "#fixed-event-time-zone", " Europe/Brussels ");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+
+    expect(plannerApi.savedFixedEvents).toEqual([
+      {
+        selectedDateValue: selectedDate,
+        existingDay: workspaceData({ fixedEvents: [], snapshot: null }).day,
+        request: {
+          title: "Trimmed event",
+          start_at: "2026-07-04T09:00:00+02:00",
+          end_at: "2026-07-04T10:00:00+02:00",
+          time_zone: "Europe/Brussels",
+        },
+      },
+    ]);
+  });
+
+  it("edits a task, refreshes the workspace, and keeps user IDs out of payloads", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Edit", "Flexible tasks").click();
+    fixture.detectChanges();
+    setInput(fixture, "#task-title", "Write final report");
+    setInput(fixture, "#task-estimate", "75");
+    setInput(fixture, "#task-priority", "4");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.updatedTasks).toEqual([
+      {
+        id: "task-1",
+        request: {
+          title: "Write final report",
+          estimated_minutes: 75,
+          priority: 4,
+          due_date: null,
+          earliest_start_at: null,
+          splitting_allowed: false,
+          min_segment_minutes: null,
+        },
+      },
+    ]);
+    expect(JSON.stringify(plannerApi.updatedTasks)).not.toContain("user-1");
+    expect(plannerApi.loadedDates).toEqual([selectedDate, selectedDate]);
+  });
+
+  it("confirms deletion before removing a task and refreshing", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Delete", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+
+    expect(confirm).toHaveBeenCalledWith(
+      'Delete "Write report" from active flexible tasks?',
+    );
+    expect(plannerApi.deletedTasks).toEqual(["task-1"]);
+    expect(plannerApi.loadedDates).toEqual([selectedDate, selectedDate]);
+    confirm.mockRestore();
+  });
+
+  it("keeps a cancelled fixed-event deletion local", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Delete", "Fixed events").click();
+
+    expect(plannerApi.deletedFixedEvents).toEqual([]);
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
+    confirm.mockRestore();
+  });
+
+  it("surfaces fixed-event API conflicts inline without reloading", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    plannerApi.fixedEventMutationError = new HttpErrorResponse({
+      status: 409,
+      statusText: "Conflict",
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Edit", "Fixed events").click();
+    fixture.detectChanges();
+    setInput(fixture, "#fixed-event-title", "Overlap");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "That change conflicts with another saved event for the day.",
+    );
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
+  });
 });
 
 class FakeApiClient {
   readonly responses = new Map<string, unknown>();
   readonly gets: string[] = [];
+  readonly posts: Array<{ path: string; body: unknown }> = [];
+  readonly puts: Array<{ path: string; body: unknown }> = [];
+  readonly deletes: string[] = [];
 
   getJson<TResponse>(path: string): Observable<TResponse> {
     this.gets.push(path);
@@ -424,6 +672,43 @@ class FakeApiClient {
 
     return of(this.responses.get(path) as TResponse);
   }
+
+  postJson<TRequest, TResponse>(
+    path: string,
+    body: TRequest,
+  ): Observable<TResponse> {
+    this.posts.push({ path, body });
+
+    if (!this.responses.has(path)) {
+      throw new Error(`Unexpected POST ${path}`);
+    }
+
+    return of(this.responses.get(path) as TResponse);
+  }
+
+  putJson<TRequest, TResponse>(
+    path: string,
+    body: TRequest,
+  ): Observable<TResponse> {
+    this.puts.push({ path, body });
+
+    if (!this.responses.has(path)) {
+      throw new Error(`Unexpected PUT ${path}`);
+    }
+
+    return of(this.responses.get(path) as TResponse);
+  }
+
+  deleteEmpty(path: string): Observable<void> {
+    this.deletes.push(path);
+    const key = `DELETE ${path}`;
+
+    if (!this.responses.has(key)) {
+      throw new Error(`Unexpected DELETE ${path}`);
+    }
+
+    return of(this.responses.get(key) as void);
+  }
 }
 
 class FakePlannerApi {
@@ -431,6 +716,13 @@ class FakePlannerApi {
   error: unknown = null;
   readonly responses = new Map<string, Observable<PlannerWorkspaceData>>();
   readonly loadedDates: string[] = [];
+  readonly createdTasks: unknown[] = [];
+  readonly updatedTasks: unknown[] = [];
+  readonly deletedTasks: string[] = [];
+  readonly savedFixedEvents: unknown[] = [];
+  readonly updatedFixedEvents: unknown[] = [];
+  readonly deletedFixedEvents: unknown[] = [];
+  fixedEventMutationError: unknown = null;
 
   loadWorkspaceDate(date: string): Observable<PlannerWorkspaceData> {
     this.loadedDates.push(date);
@@ -445,6 +737,57 @@ class FakePlannerApi {
     }
 
     return of({ ...this.result, selectedDate: date });
+  }
+
+  createTask(request: unknown): Observable<Task> {
+    this.createdTasks.push(request);
+    return of({ ...task, ...(request as Partial<Task>) });
+  }
+
+  updateTask(id: string, request: unknown): Observable<Task> {
+    this.updatedTasks.push({ id, request });
+    return of({ ...task, id, ...(request as Partial<Task>) });
+  }
+
+  deleteTask(id: string): Observable<void> {
+    this.deletedTasks.push(id);
+    return of(undefined);
+  }
+
+  saveFixedEventForDate(
+    selectedDateValue: string,
+    existingDay: unknown,
+    request: unknown,
+  ): Observable<FixedEvent> {
+    this.savedFixedEvents.push({ selectedDateValue, existingDay, request });
+    if (this.fixedEventMutationError !== null) {
+      return throwError(() => this.fixedEventMutationError);
+    }
+    return of({ ...fixedEvent, ...(request as Partial<FixedEvent>) });
+  }
+
+  updateFixedEvent(
+    planningDayId: string,
+    fixedEventId: string,
+    request: unknown,
+  ): Observable<FixedEvent> {
+    this.updatedFixedEvents.push({ planningDayId, fixedEventId, request });
+    if (this.fixedEventMutationError !== null) {
+      return throwError(() => this.fixedEventMutationError);
+    }
+    return of({
+      ...fixedEvent,
+      id: fixedEventId,
+      ...(request as Partial<FixedEvent>),
+    });
+  }
+
+  deleteFixedEvent(
+    planningDayId: string,
+    fixedEventId: string,
+  ): Observable<void> {
+    this.deletedFixedEvents.push({ planningDayId, fixedEventId });
+    return of(undefined);
   }
 }
 
@@ -549,6 +892,64 @@ function query<T>(
   return fixture.nativeElement.querySelector(selector);
 }
 
+function setInput<T>(
+  fixture: ComponentFixture<T>,
+  selector: string,
+  value: string,
+): void {
+  const control = query(fixture, selector) as HTMLInputElement;
+  control.value = value;
+  control.dispatchEvent(new Event("input", { bubbles: true }));
+  fixture.detectChanges();
+}
+
+function inputValue<T>(fixture: ComponentFixture<T>, selector: string): string {
+  return (query(fixture, selector) as HTMLInputElement).value;
+}
+
+function setCheckbox<T>(
+  fixture: ComponentFixture<T>,
+  selector: string,
+  checked: boolean,
+): void {
+  const control = query(fixture, selector) as HTMLInputElement;
+  control.checked = checked;
+  control.dispatchEvent(new Event("change", { bubbles: true }));
+  fixture.detectChanges();
+}
+
+function formByLabel<T>(
+  fixture: ComponentFixture<T>,
+  label: string,
+): HTMLFormElement {
+  return query(fixture, `form[aria-label="${label}"]`) as HTMLFormElement;
+}
+
+function buttonByText<T>(
+  fixture: ComponentFixture<T>,
+  buttonText: string,
+  regionLabel: string,
+): HTMLButtonElement {
+  const region = query(
+    fixture,
+    `[aria-labelledby="${regionLabel === "Flexible tasks" ? "tasks-title" : "fixed-events-title"}"]`,
+  );
+  const buttons = Array.from(region?.querySelectorAll("button") ?? []);
+  const button = buttons.find((candidate) =>
+    candidate.textContent?.includes(buttonText),
+  );
+
+  if (!button) {
+    throw new Error(`Could not find ${buttonText} button in ${regionLabel}`);
+  }
+
+  return button as HTMLButtonElement;
+}
+
+function submitEvent(): SubmitEvent {
+  return new SubmitEvent("submit", { bubbles: true, cancelable: true });
+}
+
 function todayLocalDate(): string {
   const date = new Date();
   const year = date.getFullYear();
@@ -577,4 +978,8 @@ async function firstValue<T>(observable: Observable<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     observable.subscribe({ next: resolve, error: reject });
   });
+}
+
+async function nextMicrotask(): Promise<void> {
+  await Promise.resolve();
 }
