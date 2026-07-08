@@ -214,6 +214,12 @@ export class PlannerApiService {
     );
   }
 
+  generatePlan(planningDayId: string): Observable<ScheduleSnapshot> {
+    return this.api.postEmpty<ScheduleSnapshot>(
+      `/planning/days/${planningDayId}/generate-plan`,
+    );
+  }
+
   private createPlanningDay(
     request: PlanningDayCreateRequest,
   ): Observable<PlanningDay> {
