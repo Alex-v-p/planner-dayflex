@@ -13,6 +13,7 @@ import {
   PlannerWorkspaceData,
   ScheduleSnapshot,
   Task,
+  TaskProgress,
 } from "./planner-api.service";
 import { PlannerWorkspacePage } from "./planner-workspace.page";
 
@@ -48,6 +49,15 @@ const task: Task = {
   status: "active",
   created_at: "2026-07-03T08:00:00Z",
   updated_at: "2026-07-03T08:00:00Z",
+};
+
+const progressRecord: TaskProgress = {
+  id: "progress-1",
+  task_id: "task-1",
+  planning_day_id: "day-1",
+  completed_minutes: 45,
+  recorded_at: "2026-07-04T10:45:00+02:00",
+  created_at: "2026-07-04T08:45:00Z",
 };
 
 const snapshot: ScheduleSnapshot = {
@@ -215,6 +225,65 @@ const taskThatDoesNotFit: Task = {
   priority: 4,
 };
 
+const studyTask: Task = {
+  ...task,
+  id: "task-study",
+  title: "Study notes",
+  estimated_minutes: 90,
+  priority: 3,
+  splitting_allowed: true,
+  min_segment_minutes: 15,
+};
+
+const revisedStudySnapshot: ScheduleSnapshot = {
+  ...canonicalSnapshot,
+  id: "snapshot-revised",
+  version: 3,
+  items: [
+    {
+      id: "study-before-interruption",
+      kind: "task",
+      task_id: "task-study",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T13:00:00+02:00",
+      end_at: "2026-07-04T14:00:00+02:00",
+    },
+    {
+      id: "reported-interruption",
+      kind: "interruption",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: "interruption-2",
+      start_at: "2026-07-04T14:00:00+02:00",
+      end_at: "2026-07-04T15:15:00+02:00",
+    },
+    {
+      id: "study-after-interruption",
+      kind: "task",
+      task_id: "task-study",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T16:00:00+02:00",
+      end_at: "2026-07-04T16:30:00+02:00",
+    },
+  ],
+  decisions: [
+    {
+      id: "decision-moved-study",
+      task_id: "task-study",
+      reason_code: "moved_after_interruption",
+      details: {},
+    },
+    {
+      id: "decision-free-revised",
+      task_id: null,
+      reason_code: "designated_free_time",
+      details: {},
+    },
+  ],
+};
+
 describe("planner workspace API contract", () => {
   it("loads the selected day through authenticated user-scoped planning endpoints", async () => {
     const api = new FakeApiClient();
@@ -229,6 +298,7 @@ describe("planner workspace API contract", () => {
     ]);
     api.responses.set("/planning/tasks", [task]);
     api.responses.set("/planning/days/day-1/fixed-events", [fixedEvent]);
+    api.responses.set("/planning/days/day-1/task-progress", [progressRecord]);
     api.responses.set("/planning/days/day-1/schedule", snapshot);
     await TestBed.configureTestingModule({
       providers: [
@@ -244,11 +314,13 @@ describe("planner workspace API contract", () => {
     expect(data.day?.id).toBe("day-1");
     expect(data.fixedEvents).toEqual([fixedEvent]);
     expect(data.tasks).toEqual([task]);
+    expect(data.progress).toEqual([progressRecord]);
     expect(data.snapshot?.id).toBe("snapshot-1");
     expect(api.gets).toEqual([
       "/planning/days",
       "/planning/tasks",
       "/planning/days/day-1/fixed-events",
+      "/planning/days/day-1/task-progress",
       "/planning/days/day-1/schedule",
     ]);
     expect(api.gets.join("\n")).not.toContain("user-1");
@@ -275,6 +347,7 @@ describe("planner workspace API contract", () => {
       day: null,
       fixedEvents: [],
       tasks: [],
+      progress: [],
       snapshot: null,
     });
     expect(api.gets).toEqual(["/planning/days", "/planning/tasks"]);
@@ -402,6 +475,58 @@ describe("planner workspace API contract", () => {
     ]);
     expect(JSON.stringify(api.posts)).not.toContain("user-1");
   });
+
+  it("records task progress and reports interruptions through day-scoped endpoints", async () => {
+    const api = new FakeApiClient();
+    api.responses.set("/planning/days/day-1/task-progress", progressRecord);
+    api.responses.set("/planning/days/day-1/interruptions", canonicalSnapshot);
+    await TestBed.configureTestingModule({
+      providers: [
+        PlannerApiService,
+        { provide: ApiClientService, useValue: api },
+      ],
+    }).compileComponents();
+    const service = TestBed.inject(PlannerApiService);
+
+    const progress = await firstValue(
+      service.recordTaskProgress("day-1", {
+        task_id: "task-1",
+        completed_minutes: 45,
+        recorded_at: "2026-07-04T10:45:00+02:00",
+      }),
+    );
+    const revised = await firstValue(
+      service.reportInterruption("day-1", {
+        start_at: "2026-07-04T14:00:00+02:00",
+        end_at: "2026-07-04T15:15:00+02:00",
+        time_zone: "Europe/Brussels",
+        reported_at: "2026-07-04T14:00:00+02:00",
+      }),
+    );
+
+    expect(progress).toEqual(progressRecord);
+    expect(revised).toEqual(canonicalSnapshot);
+    expect(api.posts).toEqual([
+      {
+        path: "/planning/days/day-1/task-progress",
+        body: {
+          task_id: "task-1",
+          completed_minutes: 45,
+          recorded_at: "2026-07-04T10:45:00+02:00",
+        },
+      },
+      {
+        path: "/planning/days/day-1/interruptions",
+        body: {
+          start_at: "2026-07-04T14:00:00+02:00",
+          end_at: "2026-07-04T15:15:00+02:00",
+          time_zone: "Europe/Brussels",
+          reported_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+    ]);
+    expect(JSON.stringify(api.posts)).not.toContain("user-1");
+  });
 });
 
 describe("rendered planner workspace", () => {
@@ -484,6 +609,145 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("Snapshot");
     expect(text(fixture)).toContain("None");
     expect(announcement(fixture)).toContain("Planner workspace loaded");
+  });
+
+  it("records partial study progress and replaces the visible plan after an interruption", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [task, studyTask],
+      snapshot: canonicalSnapshot,
+    });
+    plannerApi.interruptionResponse = of(revisedStudySnapshot);
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#progress-minutes", "60");
+    setInput(fixture, "#progress-recorded", "2026-07-04T14:00");
+    setInput(fixture, "#progress-time-zone", "Europe/Brussels");
+    const progressTask = query(fixture, "#progress-task") as HTMLSelectElement;
+    progressTask.value = "task-study";
+    progressTask.dispatchEvent(new Event("change", { bubbles: true }));
+    formByLabel(fixture, "Record task progress").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.recordedProgress).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          task_id: "task-study",
+          completed_minutes: 60,
+          recorded_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+    ]);
+    expect(text(fixture)).toContain("Study notes");
+    expect(text(fixture)).toContain("1 hr completed");
+    expect(text(fixture)).toContain("30 min remaining");
+
+    setInput(fixture, "#interruption-start", "2026-07-04T14:00");
+    setInput(fixture, "#interruption-end", "2026-07-04T15:15");
+    setInput(fixture, "#interruption-zone", "Europe/Brussels");
+    setInput(fixture, "#interruption-reported", "2026-07-04T14:00");
+    formByLabel(fixture, "Report interruption").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.reportedInterruptions).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          start_at: "2026-07-04T14:00:00+02:00",
+          end_at: "2026-07-04T15:15:00+02:00",
+          time_zone: "Europe/Brussels",
+          reported_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+    ]);
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
+    expect(text(fixture)).toContain("Moved work");
+    expect(text(fixture)).toContain(
+      "Study notes was moved after reported unavailable time.",
+    );
+    expect(text(fixture)).toContain(
+      "Revised schedule snapshot v3 is now shown.",
+    );
+    expect(text(fixture)).toContain("v3");
+    expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
+      "task",
+      "interruption",
+      "task",
+    ]);
+  });
+
+  it("marks unfinished work complete and removes it from progress choices", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Mark complete", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.recordedProgress).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          task_id: "task-1",
+          completed_minutes: 90,
+          recorded_at: expect.stringMatching(
+            /^20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/,
+          ),
+        },
+      },
+    ]);
+    const progressTask = query(fixture, "#progress-task") as HTMLSelectElement;
+    expect(text(fixture)).toContain("Progress saved");
+    expect(text(fixture)).toContain("Completed history");
+    expect(text(fixture)).toContain("1 hr 30 min completed");
+    expect(text(fixture)).toContain("0 min remaining");
+    expect(progressTask.textContent).not.toContain("Write report");
+    expect(() =>
+      buttonByText(fixture, "Mark complete", "Flexible tasks"),
+    ).toThrow();
+  });
+
+  it("blocks invalid interruption intervals before requesting recovery", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-start", "2026-07-04T15:15");
+    setInput(fixture, "#interruption-end", "2026-07-04T14:00");
+    setInput(fixture, "#interruption-zone", "Europe/Brussels");
+    setInput(fixture, "#interruption-reported", "2026-07-04T15:15");
+    formByLabel(fixture, "Report interruption").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.reportedInterruptions).toEqual([]);
+    expect(text(fixture)).toContain(
+      "Review the interruption details before submitting.",
+    );
+    expect(text(fixture)).toContain("End time must be after start time.");
+    expect(inputAriaInvalid(fixture, "#interruption-end")).toBe("true");
+  });
+
+  it("shows completed history without offering completed work for more progress", async () => {
+    plannerApi.result = workspaceData({
+      progress: [{ ...progressRecord, completed_minutes: 90 }],
+      snapshot: canonicalSnapshot,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const progressTask = query(fixture, "#progress-task") as HTMLSelectElement;
+
+    expect(text(fixture)).toContain("Completed history");
+    expect(text(fixture)).toContain("Write report");
+    expect(text(fixture)).toContain("Completed");
+    expect(progressTask.textContent).not.toContain("Write report");
+    expect(() =>
+      buttonByText(fixture, "Mark complete", "Flexible tasks"),
+    ).toThrow();
   });
 
   it("renders schedule and fixed-event times in their retained IANA zones", async () => {
@@ -1357,10 +1621,15 @@ class FakePlannerApi {
   readonly updatedFixedEvents: unknown[] = [];
   readonly deletedFixedEvents: unknown[] = [];
   readonly generatedPlanningDayIds: string[] = [];
+  readonly recordedProgress: unknown[] = [];
+  readonly reportedInterruptions: unknown[] = [];
   taskMutationError: unknown = null;
   fixedEventMutationError: unknown = null;
   generateError: unknown = null;
   generateResponse: Observable<ScheduleSnapshot> | null = null;
+  progressError: unknown = null;
+  interruptionError: unknown = null;
+  interruptionResponse: Observable<ScheduleSnapshot> | null = null;
 
   loadWorkspaceDate(date: string): Observable<PlannerWorkspaceData> {
     this.loadedDates.push(date);
@@ -1444,6 +1713,36 @@ class FakePlannerApi {
     }
     return of(snapshot);
   }
+
+  recordTaskProgress(
+    planningDayId: string,
+    request: unknown,
+  ): Observable<TaskProgress> {
+    this.recordedProgress.push({ planningDayId, request });
+    if (this.progressError !== null) {
+      return throwError(() => this.progressError);
+    }
+    return of({
+      ...progressRecord,
+      id: `progress-${this.recordedProgress.length}`,
+      planning_day_id: planningDayId,
+      ...(request as Partial<TaskProgress>),
+    });
+  }
+
+  reportInterruption(
+    planningDayId: string,
+    request: unknown,
+  ): Observable<ScheduleSnapshot> {
+    this.reportedInterruptions.push({ planningDayId, request });
+    if (this.interruptionResponse !== null) {
+      return this.interruptionResponse;
+    }
+    if (this.interruptionError !== null) {
+      return throwError(() => this.interruptionError);
+    }
+    return of({ ...canonicalSnapshot, id: "snapshot-revised", version: 3 });
+  }
 }
 
 class FakeRouter {
@@ -1509,6 +1808,7 @@ function workspaceData(
     },
     fixedEvents: [fixedEvent],
     tasks: [task],
+    progress: [],
     snapshot: null,
     ...overrides,
   };
@@ -1630,6 +1930,10 @@ function regionIdForLabel(regionLabel: string): string {
       return "fixed-events-title";
     case "Generate schedule":
       return "recovery-title";
+    case "Work progress":
+      return "progress-title";
+    case "Report interruption":
+      return "interruption-title";
     default:
       throw new Error(`Unknown region label ${regionLabel}`);
   }
