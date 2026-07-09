@@ -735,6 +735,7 @@ describe("rendered planner workspace", () => {
 
   it("shows completed history without offering completed work for more progress", async () => {
     plannerApi.result = workspaceData({
+      tasks: [{ ...task, completed_minutes: 90, remaining_minutes: 0 }],
       progress: [{ ...progressRecord, completed_minutes: 90 }],
       snapshot: canonicalSnapshot,
     });
@@ -748,6 +749,21 @@ describe("rendered planner workspace", () => {
     expect(() =>
       buttonByText(fixture, "Mark complete", "Flexible tasks"),
     ).toThrow();
+  });
+
+  it("does not offer work completed on another planning day", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [{ ...task, completed_minutes: 90, remaining_minutes: 0 }],
+      progress: [],
+      snapshot: canonicalSnapshot,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const progressTask = query(fixture, "#progress-task") as HTMLSelectElement;
+
+    expect(text(fixture)).toContain("0 min remaining");
+    expect(text(fixture)).toContain("Completed");
+    expect(text(fixture)).not.toContain("Completed history");
+    expect(progressTask.textContent).not.toContain("Write report");
   });
 
   it("renders schedule and fixed-event times in their retained IANA zones", async () => {

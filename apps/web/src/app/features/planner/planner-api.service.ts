@@ -33,6 +33,8 @@ export interface Task {
   readonly splitting_allowed: boolean;
   readonly min_segment_minutes: number | null;
   readonly status: string;
+  readonly completed_minutes?: number;
+  readonly remaining_minutes?: number;
   readonly created_at: string;
   readonly updated_at: string;
 }

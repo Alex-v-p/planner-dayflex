@@ -911,6 +911,11 @@ export class PlannerWorkspacePage implements OnInit {
         ...current,
         data: {
           ...current.data,
+          tasks: current.data.tasks.map((task) =>
+            task.id === progress.task_id
+              ? taskWithAppliedProgress(task, progress.completed_minutes)
+              : task,
+          ),
           progress: [...current.data.progress, progress].sort(compareProgress),
         },
       };
@@ -1713,10 +1718,33 @@ function remainingTaskMinutes(
   task: Task,
   progress: readonly TaskProgress[],
 ): number {
+  if (task.remaining_minutes !== undefined) {
+    return task.remaining_minutes;
+  }
+
   return Math.max(
     0,
     task.estimated_minutes - completedTaskMinutes(task.id, progress),
   );
+}
+
+function taskWithAppliedProgress(task: Task, completedMinutes: number): Task {
+  if (
+    task.completed_minutes === undefined ||
+    task.remaining_minutes === undefined
+  ) {
+    return task;
+  }
+
+  const nextCompletedMinutes = task.completed_minutes + completedMinutes;
+  return {
+    ...task,
+    completed_minutes: nextCompletedMinutes,
+    remaining_minutes: Math.max(
+      0,
+      task.estimated_minutes - nextCompletedMinutes,
+    ),
+  };
 }
 
 function totalCompletedMinutes(progress: readonly TaskProgress[]): number {

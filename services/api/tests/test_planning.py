@@ -495,8 +495,6 @@ def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
         set(progress) for progress in scheduler_client.schedule_request["task_progress"]
     ] == [
         {"task_id", "completed_minutes", "recorded_at"},
-        {"task_id", "completed_minutes", "recorded_at"},
-        {"task_id", "completed_minutes", "recorded_at"},
     ]
     assert [
         (
@@ -506,8 +504,6 @@ def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
         )
         for progress in scheduler_client.schedule_request["task_progress"]
     ] == [
-        (tasks["Reply to inbox"], 45, "2026-06-22T08:45:00+02:00"),
-        (tasks["Write report"], 90, "2026-06-22T11:30:00+02:00"),
         (tasks["Study notes"], 60, "2026-06-22T14:00:00+02:00"),
     ]
     assert [
@@ -670,6 +666,64 @@ def test_task_progress_is_user_scoped_and_cannot_exceed_estimate(
     assert duplicate_excess.status_code == 409
     assert cross_user_day.status_code == 404
     assert cross_user_task.status_code == 404
+
+
+def test_completed_task_progress_is_authoritative_across_planning_days(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 45,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+
+    completed = client.post(
+        f"/planning/days/{day_a['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 45,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    )
+    extra_on_next_day = client.post(
+        f"/planning/days/{day_b['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 1,
+            "recorded_at": "2026-07-02T09:00:00+02:00",
+        },
+    )
+    listed_tasks = client.get("/planning/tasks")
+    day_b_progress = client.get(f"/planning/days/{day_b['id']}/task-progress")
+
+    scheduler_client = CapturingSchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+    generated = client.post(f"/planning/days/{day_b['id']}/generate-plan")
+
+    assert completed.status_code == 201
+    assert extra_on_next_day.status_code == 409
+    assert listed_tasks.status_code == 200
+    assert listed_tasks.json()[0]["completed_minutes"] == 45
+    assert listed_tasks.json()[0]["remaining_minutes"] == 0
+    assert day_b_progress.status_code == 200
+    assert day_b_progress.json() == []
+    assert generated.status_code == 201
+    assert scheduler_client.request["tasks"] == []
+    assert scheduler_client.request["task_progress"] == []
 
 
 def test_task_progress_list_is_ordered_empty_and_user_scoped(

@@ -287,10 +287,7 @@ class PlanningService:
             session.scalar(
                 select(
                     func.coalesce(func.sum(TaskProgress.completed_minutes), 0)
-                ).where(
-                    TaskProgress.planning_day_id == planning_day_id,
-                    TaskProgress.task_id == task.id,
-                )
+                ).where(TaskProgress.task_id == task.id)
             )
             or 0
         )
@@ -330,8 +327,14 @@ class PlanningService:
         )
         fixed_events = self._list_fixed_events_for_day(session, planning_day_id)
         interruptions = self._list_interruptions_for_day(session, planning_day_id)
-        tasks = self._list_active_tasks_for_user(session, user_id)
-        task_progress = self._list_task_progress_for_day(session, planning_day_id)
+        tasks = [
+            task
+            for task in self._list_active_tasks_for_user(session, user_id)
+            if task.remaining_minutes > 0
+        ]
+        task_progress = self._list_task_progress_for_tasks(
+            session, [task.id for task in tasks]
+        )
         preferences = session.get(UserPreferences, user_id)
         configuration = _scheduler_configuration(preferences)
         request = _scheduler_request(
@@ -404,8 +407,14 @@ class PlanningService:
 
         fixed_events = self._list_fixed_events_for_day(session, planning_day_id)
         interruptions = self._list_interruptions_for_day(session, planning_day_id)
-        tasks = self._list_active_tasks_for_user(session, user_id)
-        task_progress = self._list_task_progress_for_day(session, planning_day_id)
+        tasks = [
+            task
+            for task in self._list_active_tasks_for_user(session, user_id)
+            if task.remaining_minutes > 0
+        ]
+        task_progress = self._list_task_progress_for_tasks(
+            session, [task.id for task in tasks]
+        )
         preferences = session.get(UserPreferences, user_id)
         configuration = _scheduler_configuration(preferences)
         schedule_request = _scheduler_request(
@@ -574,6 +583,21 @@ class PlanningService:
             for progress in session.scalars(
                 select(TaskProgress)
                 .where(TaskProgress.planning_day_id == planning_day_id)
+                .order_by(TaskProgress.recorded_at, TaskProgress.created_at)
+            )
+        ]
+
+    def _list_task_progress_for_tasks(
+        self, session: Session, task_ids: list[str]
+    ) -> list[TaskProgress]:
+        if not task_ids:
+            return []
+
+        return [
+            _normalize_task_progress(progress)
+            for progress in session.scalars(
+                select(TaskProgress)
+                .where(TaskProgress.task_id.in_(task_ids))
                 .order_by(TaskProgress.recorded_at, TaskProgress.created_at)
             )
         ]
