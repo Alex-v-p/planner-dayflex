@@ -307,8 +307,7 @@ def list_task_progress(
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
     return [
-        TaskProgressResponse.model_validate(progress)
-        for progress in progress_records
+        TaskProgressResponse.model_validate(progress) for progress in progress_records
     ]
 
 
