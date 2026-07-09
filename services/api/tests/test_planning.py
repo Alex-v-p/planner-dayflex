@@ -726,6 +726,119 @@ def test_completed_task_progress_is_authoritative_across_planning_days(
     assert scheduler_client.request["task_progress"] == []
 
 
+def test_prior_day_partial_progress_reduces_generated_plan_estimate(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 60,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    progress = client.post(
+        f"/planning/days/{day_a['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 30,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    )
+    scheduler_client = CapturingSchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+
+    generated = client.post(f"/planning/days/{day_b['id']}/generate-plan")
+    listed_tasks = client.get("/planning/tasks")
+
+    assert progress.status_code == 201
+    assert generated.status_code == 201
+    assert listed_tasks.json()[0]["completed_minutes"] == 30
+    assert listed_tasks.json()[0]["remaining_minutes"] == 30
+    assert scheduler_client.request["task_progress"] == []
+    assert scheduler_client.request["tasks"][0]["id"] == task["id"]
+    assert scheduler_client.request["tasks"][0]["estimated_minutes"] == 30
+
+
+def test_reschedule_preserves_only_selected_day_progress_after_prior_progress(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 60,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    prior_progress = client.post(
+        f"/planning/days/{day_a['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 20,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    )
+    scheduler_client = CapturingSchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+    generated = client.post(f"/planning/days/{day_b['id']}/generate-plan")
+    current_day_progress = client.post(
+        f"/planning/days/{day_b['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 10,
+            "recorded_at": "2026-07-02T09:00:00+02:00",
+        },
+    )
+
+    revised = client.post(
+        f"/planning/days/{day_b['id']}/interruptions",
+        json={
+            "start_at": "2026-07-02T10:00:00+02:00",
+            "end_at": "2026-07-02T10:30:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-07-02T10:00:00+02:00",
+        },
+    )
+
+    assert prior_progress.status_code == 201
+    assert generated.status_code == 201
+    assert current_day_progress.status_code == 201
+    assert revised.status_code == 201
+    assert scheduler_client.request["tasks"][0]["id"] == task["id"]
+    assert scheduler_client.request["tasks"][0]["estimated_minutes"] == 40
+    assert [
+        (
+            progress["task_id"],
+            progress["completed_minutes"],
+            progress["recorded_at"],
+        )
+        for progress in scheduler_client.request["task_progress"]
+    ] == [(task["id"], 10, "2026-07-02T09:00:00+02:00")]
+
+
 def test_task_progress_list_is_ordered_empty_and_user_scoped(
     client: TestClient,
 ) -> None:

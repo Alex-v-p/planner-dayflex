@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
@@ -327,13 +327,11 @@ class PlanningService:
         )
         fixed_events = self._list_fixed_events_for_day(session, planning_day_id)
         interruptions = self._list_interruptions_for_day(session, planning_day_id)
-        tasks = [
-            task
-            for task in self._list_active_tasks_for_user(session, user_id)
-            if task.remaining_minutes > 0
-        ]
-        task_progress = self._list_task_progress_for_tasks(
-            session, [task.id for task in tasks]
+        scheduler_inputs = _scheduler_task_inputs(
+            self._list_active_tasks_for_user(session, user_id),
+            self._list_task_progress_for_user(session, user_id),
+            planning_day_id,
+            preserve_selected_day_progress=False,
         )
         preferences = session.get(UserPreferences, user_id)
         configuration = _scheduler_configuration(preferences)
@@ -341,8 +339,8 @@ class PlanningService:
             planning_day,
             fixed_events,
             interruptions,
-            tasks,
-            task_progress,
+            scheduler_inputs.tasks,
+            scheduler_inputs.task_progress,
             configuration,
         )
 
@@ -356,7 +354,9 @@ class PlanningService:
             raise SchedulerUnavailablePlanningError from error
 
         try:
-            _validate_scheduler_result(result, tasks, fixed_events, interruptions)
+            _validate_scheduler_result(
+                result, scheduler_inputs.tasks, fixed_events, interruptions
+            )
             snapshot = self._persist_schedule_snapshot(
                 session,
                 planning_day,
@@ -407,13 +407,11 @@ class PlanningService:
 
         fixed_events = self._list_fixed_events_for_day(session, planning_day_id)
         interruptions = self._list_interruptions_for_day(session, planning_day_id)
-        tasks = [
-            task
-            for task in self._list_active_tasks_for_user(session, user_id)
-            if task.remaining_minutes > 0
-        ]
-        task_progress = self._list_task_progress_for_tasks(
-            session, [task.id for task in tasks]
+        scheduler_inputs = _scheduler_task_inputs(
+            self._list_active_tasks_for_user(session, user_id),
+            self._list_task_progress_for_user(session, user_id),
+            planning_day_id,
+            preserve_selected_day_progress=True,
         )
         preferences = session.get(UserPreferences, user_id)
         configuration = _scheduler_configuration(preferences)
@@ -421,8 +419,8 @@ class PlanningService:
             planning_day,
             fixed_events,
             interruptions,
-            tasks,
-            task_progress,
+            scheduler_inputs.tasks,
+            scheduler_inputs.task_progress,
             configuration,
             current_at=interruption.start_at,
         )
@@ -439,7 +437,9 @@ class PlanningService:
             raise SchedulerUnavailablePlanningError from error
 
         try:
-            _validate_scheduler_result(result, tasks, fixed_events, interruptions)
+            _validate_scheduler_result(
+                result, scheduler_inputs.tasks, fixed_events, interruptions
+            )
             snapshot = self._persist_schedule_snapshot(
                 session,
                 planning_day,
@@ -587,17 +587,15 @@ class PlanningService:
             )
         ]
 
-    def _list_task_progress_for_tasks(
-        self, session: Session, task_ids: list[str]
+    def _list_task_progress_for_user(
+        self, session: Session, user_id: str
     ) -> list[TaskProgress]:
-        if not task_ids:
-            return []
-
         return [
             _normalize_task_progress(progress)
             for progress in session.scalars(
                 select(TaskProgress)
-                .where(TaskProgress.task_id.in_(task_ids))
+                .join(Task, TaskProgress.task_id == Task.id)
+                .where(Task.user_id == user_id)
                 .order_by(TaskProgress.recorded_at, TaskProgress.created_at)
             )
         ]
@@ -743,6 +741,78 @@ def _normalize_interruption(interruption: Interruption) -> Interruption:
 def _normalize_schedule_snapshot(snapshot: ScheduleSnapshot) -> ScheduleSnapshot:
     snapshot.created_at = _as_utc(snapshot.created_at)
     return snapshot
+
+
+@dataclass(frozen=True)
+class SchedulerTaskInputs:
+    tasks: list[SchedulerTask]
+    task_progress: list[TaskProgress]
+
+
+@dataclass(frozen=True)
+class SchedulerTask:
+    id: str
+    title: str
+    estimated_minutes: int
+    priority: int
+    created_at: datetime
+    due_date: date | None
+    earliest_start_at: datetime | None
+    splitting_allowed: bool
+
+
+def _scheduler_task_inputs(
+    tasks: list[Task],
+    progress_records: list[TaskProgress],
+    planning_day_id: str,
+    *,
+    preserve_selected_day_progress: bool,
+) -> SchedulerTaskInputs:
+    progress_by_task: dict[str, list[TaskProgress]] = {}
+    for progress in progress_records:
+        progress_by_task.setdefault(progress.task_id, []).append(progress)
+
+    scheduler_tasks: list[SchedulerTask] = []
+    scheduler_progress: list[TaskProgress] = []
+    for task in tasks:
+        task_progress = progress_by_task.get(task.id, [])
+        selected_day_progress = [
+            progress
+            for progress in task_progress
+            if progress.planning_day_id == planning_day_id
+        ]
+        preserved_progress = (
+            selected_day_progress if preserve_selected_day_progress else []
+        )
+        preserved_progress_ids = {progress.id for progress in preserved_progress}
+        preserved_completed = sum(
+            progress.completed_minutes for progress in preserved_progress
+        )
+        completed_before_scheduler = sum(
+            progress.completed_minutes
+            for progress in task_progress
+            if progress.id not in preserved_progress_ids
+        )
+        remaining_estimate = task.estimated_minutes - completed_before_scheduler
+
+        if remaining_estimate <= preserved_completed:
+            continue
+
+        scheduler_tasks.append(
+            SchedulerTask(
+                id=task.id,
+                title=task.title,
+                estimated_minutes=max(1, remaining_estimate),
+                priority=task.priority,
+                created_at=task.created_at,
+                due_date=task.due_date,
+                earliest_start_at=task.earliest_start_at,
+                splitting_allowed=task.splitting_allowed,
+            )
+        )
+        scheduler_progress.extend(preserved_progress)
+
+    return SchedulerTaskInputs(tasks=scheduler_tasks, task_progress=scheduler_progress)
 
 
 def _scheduler_configuration(preferences: UserPreferences | None) -> dict[str, object]:
