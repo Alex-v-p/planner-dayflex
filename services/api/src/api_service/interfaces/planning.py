@@ -12,6 +12,7 @@ from api_service.application.planning import (
     PlanningConflictError,
     PlanningResourceNotFoundError,
     PlanningService,
+    PlanningValidationError,
     SchedulerRejectedPlanningInputsError,
     SchedulerUnavailablePlanningError,
 )
@@ -372,6 +373,11 @@ def report_interruption(
         )
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
+    except PlanningValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(error),
+        ) from error
     except SchedulerRejectedPlanningInputsError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

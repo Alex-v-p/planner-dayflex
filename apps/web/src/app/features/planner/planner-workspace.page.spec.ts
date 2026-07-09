@@ -760,6 +760,7 @@ describe("rendered planner workspace", () => {
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
     const progressTask = query(fixture, "#progress-task") as HTMLSelectElement;
 
+    expect(text(fixture)).toContain("1 hr 30 min completed");
     expect(text(fixture)).toContain("0 min remaining");
     expect(text(fixture)).toContain("Completed");
     expect(text(fixture)).not.toContain("Completed history");

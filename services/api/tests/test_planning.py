@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
+from threading import Barrier
+from unittest.mock import Mock
+
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import select
-from unittest.mock import Mock
 
 from api_service.application.planning import (
+    PlanningConflictError,
     PlanningResourceNotFoundError,
     PlanningService,
 )
+from api_service.contracts.planning import TaskProgressCreateRequest
 from api_service.database import Database
 from api_service.domain.auth import SESSION_COOKIE_NAME
 from api_service.infrastructure.models import (
@@ -726,6 +731,81 @@ def test_completed_task_progress_is_authoritative_across_planning_days(
     assert scheduler_client.request["task_progress"] == []
 
 
+def test_concurrent_cross_day_progress_cannot_exceed_task_estimate(
+    client: TestClient, database: Database
+) -> None:
+    registered = register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 45,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    user_id = registered["user"]["id"]
+    barrier = Barrier(2)
+
+    def record_progress(planning_day_id: str, recorded_at: str) -> str:
+        barrier.wait(timeout=2)
+        session_iterator = database.session()
+        session = next(session_iterator)
+        try:
+            PlanningService().record_task_progress(
+                session,
+                user_id,
+                planning_day_id,
+                TaskProgressCreateRequest(
+                    task_id=task["id"],
+                    completed_minutes=30,
+                    recorded_at=datetime.fromisoformat(recorded_at),
+                ),
+            )
+            return "created"
+        except PlanningConflictError:
+            return "conflict"
+        finally:
+            session_iterator.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = sorted(
+            [
+                future.result()
+                for future in [
+                    executor.submit(
+                        record_progress, day_a["id"], "2026-07-01T09:00:00+02:00"
+                    ),
+                    executor.submit(
+                        record_progress, day_b["id"], "2026-07-02T09:00:00+02:00"
+                    ),
+                ]
+            ]
+        )
+
+    listed_tasks = client.get("/planning/tasks")
+    progress_a = client.get(f"/planning/days/{day_a['id']}/task-progress")
+    progress_b = client.get(f"/planning/days/{day_b['id']}/task-progress")
+
+    assert results == ["conflict", "created"]
+    assert listed_tasks.json()[0]["completed_minutes"] == 30
+    assert listed_tasks.json()[0]["remaining_minutes"] == 15
+    assert (
+        sum(record["completed_minutes"] for record in progress_a.json())
+        + sum(record["completed_minutes"] for record in progress_b.json())
+        == 30
+    )
+
+
 def test_prior_day_partial_progress_reduces_generated_plan_estimate(
     client: TestClient,
 ) -> None:
@@ -927,6 +1007,47 @@ def test_invalid_interruption_inputs_are_rejected(client: TestClient) -> None:
     assert no_snapshot.status_code == 404
     assert backwards.status_code == 422
     assert naive.status_code == 422
+
+
+def test_interruption_interval_must_belong_to_selected_planning_day(
+    client: TestClient, database: Database
+) -> None:
+    register(client, "alice")
+    day = create_day(client)
+    scheduler_client = CapturingSchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+    generated = client.post(f"/planning/days/{day['id']}/generate-plan")
+
+    yesterday = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-06-30T23:30:00+02:00",
+            "end_at": "2026-07-01T00:30:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-07-01T00:30:00+02:00",
+        },
+    )
+    tomorrow = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-07-02T09:00:00+02:00",
+            "end_at": "2026-07-02T09:30:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-07-02T09:30:00+02:00",
+        },
+    )
+
+    assert generated.status_code == 201
+    assert yesterday.status_code == 422
+    assert yesterday.json() == {
+        "detail": "Interruption interval must belong to the selected planning day."
+    }
+    assert tomorrow.status_code == 422
+    assert tomorrow.json() == {
+        "detail": "Interruption interval must belong to the selected planning day."
+    }
+    with next(database.session()) as session:
+        assert session.scalars(select(Interruption)).all() == []
 
 
 def test_generate_twice_preserves_history_and_advances_latest(

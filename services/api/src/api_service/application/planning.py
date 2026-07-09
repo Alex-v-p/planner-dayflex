@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
+from threading import Lock
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
@@ -46,6 +49,10 @@ class PlanningResourceNotFoundError(Exception):
 
 class PlanningConflictError(Exception):
     """Raised when a request conflicts with existing planning inputs."""
+
+
+class PlanningValidationError(Exception):
+    """Raised when planning inputs are structurally valid but out of scope."""
 
 
 class SchedulerUnavailablePlanningError(Exception):
@@ -281,31 +288,32 @@ class PlanningService:
         planning_day_id: str,
         request: TaskProgressCreateRequest,
     ) -> TaskProgress:
-        self._get_planning_day_for_update(session, user_id, planning_day_id)
-        task = self._get_active_task(session, user_id, request.task_id)
-        completed_so_far = (
-            session.scalar(
-                select(
-                    func.coalesce(func.sum(TaskProgress.completed_minutes), 0)
-                ).where(TaskProgress.task_id == task.id)
+        with _task_progress_write_lock(request.task_id):
+            self._get_planning_day_for_update(session, user_id, planning_day_id)
+            task = self._get_active_task_for_update(session, user_id, request.task_id)
+            completed_so_far = (
+                session.scalar(
+                    select(
+                        func.coalesce(func.sum(TaskProgress.completed_minutes), 0)
+                    ).where(TaskProgress.task_id == task.id)
+                )
+                or 0
             )
-            or 0
-        )
-        if completed_so_far + request.completed_minutes > task.estimated_minutes:
-            raise PlanningConflictError("Task progress cannot exceed the estimate.")
-        now = _utc_now()
-        progress = TaskProgress(
-            id=str(uuid4()),
-            task_id=task.id,
-            planning_day_id=planning_day_id,
-            completed_minutes=request.completed_minutes,
-            recorded_at=_as_utc(request.recorded_at),
-            created_at=now,
-        )
-        session.add(progress)
-        session.commit()
-        session.refresh(progress)
-        return _normalize_task_progress(progress)
+            if completed_so_far + request.completed_minutes > task.estimated_minutes:
+                raise PlanningConflictError("Task progress cannot exceed the estimate.")
+            now = _utc_now()
+            progress = TaskProgress(
+                id=str(uuid4()),
+                task_id=task.id,
+                planning_day_id=planning_day_id,
+                completed_minutes=request.completed_minutes,
+                recorded_at=_as_utc(request.recorded_at),
+                created_at=now,
+            )
+            session.add(progress)
+            session.commit()
+            session.refresh(progress)
+            return _normalize_task_progress(progress)
 
     def list_task_progress(
         self, session: Session, user_id: str, planning_day_id: str
@@ -386,6 +394,7 @@ class PlanningService:
         planning_day = self._get_planning_day_for_update(
             session, user_id, planning_day_id
         )
+        _ensure_interruption_belongs_to_planning_day(planning_day, request)
         if planning_day.current_snapshot_id is None:
             raise PlanningResourceNotFoundError
 
@@ -526,6 +535,22 @@ class PlanningService:
                 Task.user_id == user_id,
                 Task.status == "active",
             )
+        )
+        if task is None:
+            raise PlanningResourceNotFoundError
+        return task
+
+    def _get_active_task_for_update(
+        self, session: Session, user_id: str, task_id: str
+    ) -> Task:
+        task = session.scalar(
+            select(Task)
+            .where(
+                Task.id == task_id,
+                Task.user_id == user_id,
+                Task.status == "active",
+            )
+            .with_for_update()
         )
         if task is None:
             raise PlanningResourceNotFoundError
@@ -697,6 +722,18 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+_task_progress_locks_guard = Lock()
+_task_progress_locks: dict[str, Lock] = {}
+
+
+@contextmanager
+def _task_progress_write_lock(task_id: str) -> Iterator[None]:
+    with _task_progress_locks_guard:
+        task_lock = _task_progress_locks.setdefault(task_id, Lock())
+    with task_lock:
+        yield
+
+
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
@@ -736,6 +773,19 @@ def _normalize_interruption(interruption: Interruption) -> Interruption:
     interruption.reported_at = _as_utc(interruption.reported_at)
     interruption.created_at = _as_utc(interruption.created_at)
     return interruption
+
+
+def _ensure_interruption_belongs_to_planning_day(
+    planning_day: PlanningDay,
+    request: InterruptionCreateRequest,
+) -> None:
+    time_zone = ZoneInfo(planning_day.time_zone)
+    start_date = request.start_at.astimezone(time_zone).date()
+    end_date = request.end_at.astimezone(time_zone).date()
+    if start_date != planning_day.local_date or end_date != planning_day.local_date:
+        raise PlanningValidationError(
+            "Interruption interval must belong to the selected planning day."
+        )
 
 
 def _normalize_schedule_snapshot(snapshot: ScheduleSnapshot) -> ScheduleSnapshot:

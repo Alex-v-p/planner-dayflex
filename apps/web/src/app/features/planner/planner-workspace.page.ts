@@ -646,7 +646,7 @@ export class PlannerWorkspacePage implements OnInit {
     task: Task,
     progress: readonly TaskProgress[],
   ): number {
-    return completedTaskMinutes(task.id, progress);
+    return task.completed_minutes ?? completedTaskMinutes(task.id, progress);
   }
 
   protected remainingMinutesForTask(
