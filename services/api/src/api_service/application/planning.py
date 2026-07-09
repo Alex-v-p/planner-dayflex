@@ -310,6 +310,12 @@ class PlanningService:
         session.refresh(progress)
         return _normalize_task_progress(progress)
 
+    def list_task_progress(
+        self, session: Session, user_id: str, planning_day_id: str
+    ) -> list[TaskProgress]:
+        self.get_planning_day(session, user_id, planning_day_id)
+        return self._list_task_progress_for_day(session, planning_day_id)
+
     def generate_plan(
         self,
         session: Session,

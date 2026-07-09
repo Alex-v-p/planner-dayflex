@@ -672,6 +672,59 @@ def test_task_progress_is_user_scoped_and_cannot_exceed_estimate(
     assert cross_user_task.status_code == 404
 
 
+def test_task_progress_list_is_ordered_empty_and_user_scoped(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day = create_day(client)
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare",
+            "estimated_minutes": 60,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+
+    empty = client.get(f"/planning/days/{day['id']}/task-progress")
+    later = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 15,
+            "recorded_at": "2026-07-01T10:00:00+02:00",
+        },
+    ).json()
+    earlier = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 30,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    ).json()
+    listed = client.get(f"/planning/days/{day['id']}/task-progress")
+
+    client.cookies.clear()
+    register(client, "bob")
+    cross_user = client.get(f"/planning/days/{day['id']}/task-progress")
+    bob_day = create_day(client)
+    bob_empty = client.get(f"/planning/days/{bob_day['id']}/task-progress")
+
+    assert empty.status_code == 200
+    assert empty.json() == []
+    assert listed.status_code == 200
+    assert [progress["id"] for progress in listed.json()] == [
+        earlier["id"],
+        later["id"],
+    ]
+    assert cross_user.status_code == 404
+    assert bob_empty.status_code == 200
+    assert bob_empty.json() == []
+
+
 def test_invalid_interruption_inputs_are_rejected(client: TestClient) -> None:
     register(client, "alice")
     day = create_day(client)
@@ -1722,6 +1775,7 @@ def test_planning_routes_require_authentication(client: TestClient) -> None:
                 "recorded_at": "2026-07-01T09:00:00+02:00",
             },
         ),
+        client.get("/planning/days/day-id/task-progress"),
         client.post(
             "/planning/days/day-id/interruptions",
             json={
