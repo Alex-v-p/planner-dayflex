@@ -258,22 +258,28 @@ class PlanningService:
     def update_task(
         self, session: Session, user_id: str, task_id: str, request: TaskUpdateRequest
     ) -> Task:
-        task = self._get_active_task(session, user_id, task_id)
-        task.title = request.title
-        task.estimated_minutes = request.estimated_minutes
-        task.priority = request.priority
-        task.due_date = request.due_date
-        task.earliest_start_at = (
-            _as_utc(request.earliest_start_at)
-            if request.earliest_start_at is not None
-            else None
-        )
-        task.splitting_allowed = request.splitting_allowed
-        task.min_segment_minutes = request.min_segment_minutes
-        task.updated_at = _utc_now()
-        session.commit()
-        session.refresh(task)
-        return _normalize_task(task)
+        with _task_progress_write_lock(task_id):
+            task = self._get_active_task_for_update(session, user_id, task_id)
+            completed_so_far = _completed_minutes_for_task(session, task.id)
+            if request.estimated_minutes < completed_so_far:
+                raise PlanningConflictError(
+                    "Task estimate cannot be lower than recorded progress."
+                )
+            task.title = request.title
+            task.estimated_minutes = request.estimated_minutes
+            task.priority = request.priority
+            task.due_date = request.due_date
+            task.earliest_start_at = (
+                _as_utc(request.earliest_start_at)
+                if request.earliest_start_at is not None
+                else None
+            )
+            task.splitting_allowed = request.splitting_allowed
+            task.min_segment_minutes = request.min_segment_minutes
+            task.updated_at = _utc_now()
+            session.commit()
+            session.refresh(task)
+            return _normalize_task(task)
 
     def remove_task(self, session: Session, user_id: str, task_id: str) -> None:
         task = self._get_active_task(session, user_id, task_id)
@@ -291,14 +297,7 @@ class PlanningService:
         with _task_progress_write_lock(request.task_id):
             self._get_planning_day_for_update(session, user_id, planning_day_id)
             task = self._get_active_task_for_update(session, user_id, request.task_id)
-            completed_so_far = (
-                session.scalar(
-                    select(
-                        func.coalesce(func.sum(TaskProgress.completed_minutes), 0)
-                    ).where(TaskProgress.task_id == task.id)
-                )
-                or 0
-            )
+            completed_so_far = _completed_minutes_for_task(session, task.id)
             if completed_so_far + request.completed_minutes > task.estimated_minutes:
                 raise PlanningConflictError("Task progress cannot exceed the estimate.")
             now = _utc_now()
@@ -732,6 +731,17 @@ def _task_progress_write_lock(task_id: str) -> Iterator[None]:
         task_lock = _task_progress_locks.setdefault(task_id, Lock())
     with task_lock:
         yield
+
+
+def _completed_minutes_for_task(session: Session, task_id: str) -> int:
+    return (
+        session.scalar(
+            select(func.coalesce(func.sum(TaskProgress.completed_minutes), 0)).where(
+                TaskProgress.task_id == task_id
+            )
+        )
+        or 0
+    )
 
 
 def _as_utc(value: datetime) -> datetime:

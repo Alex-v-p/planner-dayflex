@@ -252,6 +252,8 @@ def update_task(
         task = planning_service.update_task(session, user.id, task_id, request)
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
+    except PlanningConflictError as error:
+        raise _conflict(str(error)) from error
     return TaskResponse.model_validate(task)
 
 

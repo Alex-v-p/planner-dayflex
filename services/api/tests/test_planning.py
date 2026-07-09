@@ -731,6 +731,70 @@ def test_completed_task_progress_is_authoritative_across_planning_days(
     assert scheduler_client.request["task_progress"] == []
 
 
+def test_task_update_cannot_lower_estimate_below_cross_day_progress(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 90,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    first_progress = client.post(
+        f"/planning/days/{day_a['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 30,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    )
+    second_progress = client.post(
+        f"/planning/days/{day_b['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 20,
+            "recorded_at": "2026-07-02T09:00:00+02:00",
+        },
+    )
+
+    lowered = client.put(
+        f"/planning/tasks/{task['id']}",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 45,
+            "priority": 3,
+            "due_date": None,
+            "earliest_start_at": None,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    )
+    listed_tasks = client.get("/planning/tasks")
+
+    assert first_progress.status_code == 201
+    assert second_progress.status_code == 201
+    assert lowered.status_code == 409
+    assert lowered.json() == {
+        "detail": "Task estimate cannot be lower than recorded progress."
+    }
+    assert listed_tasks.json()[0]["estimated_minutes"] == 90
+    assert listed_tasks.json()[0]["completed_minutes"] == 50
+    assert listed_tasks.json()[0]["remaining_minutes"] == 40
+
+
 def test_concurrent_cross_day_progress_cannot_exceed_task_estimate(
     client: TestClient, database: Database
 ) -> None:
