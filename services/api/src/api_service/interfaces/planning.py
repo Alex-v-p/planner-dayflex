@@ -18,6 +18,7 @@ from api_service.application.planning import (
 )
 from api_service.config import Settings
 from api_service.contracts.planning import (
+    FreeTimeRangeResponse,
     FixedEventCreateRequest,
     FixedEventResponse,
     FixedEventUpdateRequest,
@@ -149,6 +150,49 @@ def get_month_overview(
         user.id,
         start_date,
         next_month - timedelta(days=1),
+    )
+
+
+@router.get("/free-times", response_model=FreeTimeRangeResponse)
+def find_free_times(
+    start_date: str = Query(
+        ...,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="First local date in the inclusive free-time search range.",
+    ),
+    end_date: str = Query(
+        ...,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="Last local date in the inclusive free-time search range.",
+    ),
+    minimum_minutes: int = Query(
+        30,
+        ge=1,
+        le=1440,
+        description="Minimum useful free-time window duration in minutes.",
+    ),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> FreeTimeRangeResponse:
+    """Find persisted designated free-time windows in current daily snapshots."""
+    parsed_start_date = _date_only_query(start_date, "start_date")
+    parsed_end_date = _date_only_query(end_date, "end_date")
+    if parsed_start_date > parsed_end_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_date must be on or before end_date.",
+        )
+    if (parsed_end_date - parsed_start_date).days > 30:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Free-time search range cannot exceed 31 days.",
+        )
+    return planning_service.find_free_times(
+        session,
+        user.id,
+        parsed_start_date,
+        parsed_end_date,
+        minimum_minutes,
     )
 
 
@@ -511,6 +555,22 @@ def _conflict(detail: str) -> HTTPException:
 
 def _get_scheduler_client(request: Request) -> SchedulerClient:
     return request.app.state.scheduler_client
+
+
+def _date_only_query(value: str, field_name: str) -> date:
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name} must be a valid date.",
+        ) from error
+    if parsed.isoformat() != value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name} must be a date without a time.",
+        )
+    return parsed
 
 
 def _snapshot_response(snapshot: object) -> ScheduleSnapshotResponse:

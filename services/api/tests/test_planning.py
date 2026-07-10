@@ -798,6 +798,198 @@ def test_overview_ranges_cover_date_boundaries_and_reject_invalid_dates(
     assert client.get("/planning/overviews/month?month=not-a-date").status_code == 422
 
 
+def test_free_time_finder_filters_current_snapshot_windows_by_range_and_minimum(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    useful_day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        free_time_result("2026-07-01", "09:00:00", "10:30:00")
+    )
+    first_snapshot = client.post(f"/planning/days/{useful_day['id']}/generate-plan")
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        free_time_result("2026-07-01", "11:00:00", "11:45:00")
+    )
+    current_snapshot = client.post(f"/planning/days/{useful_day['id']}/generate-plan")
+    short_day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        free_time_result("2026-07-02", "14:00:00", "14:20:00")
+    )
+    short_snapshot = client.post(f"/planning/days/{short_day['id']}/generate-plan")
+    empty_saved_day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-03", "time_zone": "Europe/Brussels"},
+    ).json()
+
+    result = client.get(
+        "/planning/free-times?"
+        "start_date=2026-07-01&end_date=2026-07-04&minimum_minutes=30"
+    )
+
+    assert first_snapshot.status_code == 201
+    assert current_snapshot.status_code == 201
+    assert short_snapshot.status_code == 201
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["start_date"] == "2026-07-01"
+    assert payload["end_date"] == "2026-07-04"
+    assert payload["minimum_minutes"] == 30
+    assert [day["status"] for day in payload["days"]] == [
+        "has_free_time",
+        "no_useful_free_time",
+        "no_generated_plan",
+        "no_generated_plan",
+    ]
+    useful_result = payload["days"][0]
+    assert useful_result["planning_day_id"] == useful_day["id"]
+    assert useful_result["snapshot_id"] == current_snapshot.json()["id"]
+    assert useful_result["snapshot_version"] == 2
+    assert useful_result["snapshot_created_at"] == current_snapshot.json()["created_at"]
+    assert useful_result["windows"] == [
+        {
+            "local_date": "2026-07-01",
+            "planning_day_id": useful_day["id"],
+            "time_zone": "Europe/Brussels",
+            "snapshot_id": current_snapshot.json()["id"],
+            "snapshot_version": 2,
+            "snapshot_created_at": current_snapshot.json()["created_at"],
+            "schedule_item_id": current_snapshot.json()["items"][0]["id"],
+            "start_at": "2026-07-01T11:00:00+02:00",
+            "end_at": "2026-07-01T11:45:00+02:00",
+            "duration_minutes": 45,
+        }
+    ]
+    assert (
+        first_snapshot.json()["items"][0]["id"]
+        != useful_result["windows"][0]["schedule_item_id"]
+    )
+    assert payload["days"][1]["planning_day_id"] == short_day["id"]
+    assert payload["days"][1]["snapshot_id"] == short_snapshot.json()["id"]
+    assert payload["days"][1]["windows"] == []
+    assert payload["days"][2]["planning_day_id"] == empty_saved_day["id"]
+    assert payload["days"][2]["snapshot_id"] is None
+    assert payload["days"][3]["planning_day_id"] is None
+
+
+def test_free_time_finder_ignores_non_designated_schedule_items(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        {
+            "items": [
+                {
+                    "kind": "buffer",
+                    "interval": {
+                        "start": "2026-07-01T09:00:00+02:00",
+                        "end": "2026-07-01T10:00:00+02:00",
+                    },
+                    "task_id": None,
+                },
+                {
+                    "kind": "designated_free_time",
+                    "interval": {
+                        "start": "2026-07-01T11:00:00+02:00",
+                        "end": "2026-07-01T11:30:00+02:00",
+                    },
+                    "task_id": None,
+                },
+            ],
+            "decisions": [decision("designated_free_time")],
+            "warnings": [],
+        }
+    )
+    snapshot = client.post(f"/planning/days/{day['id']}/generate-plan")
+
+    result = client.get(
+        "/planning/free-times?"
+        "start_date=2026-07-01&end_date=2026-07-01&minimum_minutes=30"
+    )
+
+    assert snapshot.status_code == 201
+    assert result.status_code == 200
+    schedule_items = snapshot.json()["items"]
+    assert [item["kind"] for item in schedule_items] == [
+        "buffer",
+        "designated_free_time",
+    ]
+    windows = result.json()["days"][0]["windows"]
+    assert [window["schedule_item_id"] for window in windows] == [
+        schedule_items[1]["id"]
+    ]
+
+
+def test_free_time_finder_is_scoped_to_authenticated_user(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    alice_day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+
+    client.cookies.clear()
+    register(client, "bob")
+    bob_day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        free_time_result("2026-07-01", "09:00:00", "10:00:00")
+    )
+    bob_snapshot = client.post(f"/planning/days/{bob_day['id']}/generate-plan")
+
+    client.cookies.clear()
+    login(client, "alice")
+    result = client.get(
+        "/planning/free-times?"
+        "start_date=2026-07-01&end_date=2026-07-01&minimum_minutes=30"
+    )
+
+    assert bob_snapshot.status_code == 201
+    assert result.status_code == 200
+    assert result.json()["days"] == [
+        {
+            "local_date": "2026-07-01",
+            "planning_day_id": alice_day["id"],
+            "time_zone": "Europe/Brussels",
+            "status": "no_generated_plan",
+            "snapshot_id": None,
+            "snapshot_version": None,
+            "snapshot_created_at": None,
+            "windows": [],
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "start_date=2026-07-02&end_date=2026-07-01&minimum_minutes=30",
+        "start_date=2026-07-01&end_date=2026-08-01&minimum_minutes=30",
+        "start_date=2026-07-01T09:00:00&end_date=2026-07-02&minimum_minutes=30",
+        "start_date=2026-07-01&end_date=2026-07-02&minimum_minutes=0",
+        "start_date=2026-07-01&end_date=2026-07-02&minimum_minutes=1441",
+    ],
+)
+def test_free_time_finder_validates_filters(client: TestClient, query: str) -> None:
+    register(client, "alice")
+
+    response = client.get(f"/planning/free-times?{query}")
+
+    assert response.status_code == 422
+
+
 def test_task_progress_is_user_scoped_and_cannot_exceed_estimate(
     client: TestClient,
 ) -> None:
@@ -2304,6 +2496,10 @@ def test_planning_routes_require_authentication(client: TestClient) -> None:
         client.get("/planning/days"),
         client.get("/planning/overviews/week?start_date=2026-07-01"),
         client.get("/planning/overviews/month?month=2026-07-01"),
+        client.get(
+            "/planning/free-times?"
+            "start_date=2026-07-01&end_date=2026-07-01&minimum_minutes=30"
+        ),
         client.post("/planning/days/day-id/generate-plan"),
         client.post(
             "/planning/days/day-id/task-progress",
@@ -2628,6 +2824,25 @@ def item(
 
 def decision(reason_code: str, task_id: str | None = None) -> dict[str, object]:
     return {"reason_code": reason_code, "task_id": task_id, "details": {}}
+
+
+def free_time_result(
+    local_date: str, start_time: str, end_time: str
+) -> dict[str, object]:
+    return {
+        "items": [
+            {
+                "kind": "designated_free_time",
+                "interval": {
+                    "start": f"{local_date}T{start_time}+02:00",
+                    "end": f"{local_date}T{end_time}+02:00",
+                },
+                "task_id": None,
+            }
+        ],
+        "decisions": [decision("designated_free_time")],
+        "warnings": [],
+    }
 
 
 def assert_generate_plan_503_without_snapshot(

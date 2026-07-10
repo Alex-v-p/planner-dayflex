@@ -15,6 +15,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api_service.contracts.planning import (
+    FreeTimeDayResponse,
+    FreeTimeRangeResponse,
+    FreeTimeWindowResponse,
     FixedEventCreateRequest,
     InterruptionCreateRequest,
     FixedEventUpdateRequest,
@@ -221,6 +224,81 @@ class PlanningService:
             start_date=start_date,
             end_date=end_date,
             days=summaries,
+        )
+
+    def find_free_times(
+        self,
+        session: Session,
+        user_id: str,
+        start_date: date,
+        end_date: date,
+        minimum_minutes: int,
+    ) -> FreeTimeRangeResponse:
+        planning_days = {
+            planning_day.local_date: _normalize_planning_day(planning_day)
+            for planning_day in session.scalars(
+                select(PlanningDay)
+                .where(
+                    PlanningDay.user_id == user_id,
+                    PlanningDay.local_date >= start_date,
+                    PlanningDay.local_date <= end_date,
+                )
+                .order_by(PlanningDay.local_date)
+            )
+        }
+        snapshot_ids = [
+            planning_day.current_snapshot_id
+            for planning_day in planning_days.values()
+            if planning_day.current_snapshot_id is not None
+        ]
+        snapshots = _snapshots_by_id(session, snapshot_ids)
+        windows_by_snapshot = _free_time_windows_by_snapshot(
+            session, snapshot_ids, minimum_minutes
+        )
+
+        days: list[FreeTimeDayResponse] = []
+        current_date = start_date
+        while current_date <= end_date:
+            planning_day = planning_days.get(current_date)
+            snapshot = (
+                snapshots.get(planning_day.current_snapshot_id)
+                if planning_day is not None
+                and planning_day.current_snapshot_id is not None
+                else None
+            )
+            windows = (
+                [
+                    _free_time_window_response(planning_day, snapshot, item)
+                    for item in windows_by_snapshot.get(snapshot.id, [])
+                ]
+                if planning_day is not None and snapshot is not None
+                else []
+            )
+            if snapshot is None:
+                status = "no_generated_plan"
+            elif windows:
+                status = "has_free_time"
+            else:
+                status = "no_useful_free_time"
+            days.append(
+                FreeTimeDayResponse(
+                    local_date=current_date,
+                    planning_day_id=planning_day.id if planning_day else None,
+                    time_zone=planning_day.time_zone if planning_day else None,
+                    status=status,
+                    snapshot_id=snapshot.id if snapshot else None,
+                    snapshot_version=snapshot.version if snapshot else None,
+                    snapshot_created_at=snapshot.created_at if snapshot else None,
+                    windows=windows,
+                )
+            )
+            current_date += timedelta(days=1)
+
+        return FreeTimeRangeResponse(
+            start_date=start_date,
+            end_date=end_date,
+            minimum_minutes=minimum_minutes,
+            days=days,
         )
 
     def create_fixed_event(
@@ -1215,6 +1293,45 @@ def _schedule_minutes_by_snapshot(
             snapshot_id, 0
         ) + _duration_minutes(start_at, end_at)
     return minutes_by_snapshot
+
+
+def _free_time_windows_by_snapshot(
+    session: Session, snapshot_ids: list[str], minimum_minutes: int
+) -> dict[str, list[ScheduleItem]]:
+    if not snapshot_ids:
+        return {}
+    windows_by_snapshot: dict[str, list[ScheduleItem]] = {}
+    for item in session.scalars(
+        select(ScheduleItem)
+        .where(
+            ScheduleItem.snapshot_id.in_(snapshot_ids),
+            ScheduleItem.kind == "designated_free_time",
+        )
+        .order_by(ScheduleItem.start_at, ScheduleItem.position)
+    ):
+        if _duration_minutes(item.start_at, item.end_at) >= minimum_minutes:
+            windows_by_snapshot.setdefault(item.snapshot_id, []).append(item)
+    return windows_by_snapshot
+
+
+def _free_time_window_response(
+    planning_day: PlanningDay, snapshot: ScheduleSnapshot, item: ScheduleItem
+) -> FreeTimeWindowResponse:
+    time_zone = ZoneInfo(planning_day.time_zone)
+    start_at = _as_utc(item.start_at)
+    end_at = _as_utc(item.end_at)
+    return FreeTimeWindowResponse(
+        local_date=planning_day.local_date,
+        planning_day_id=planning_day.id,
+        time_zone=planning_day.time_zone,
+        snapshot_id=snapshot.id,
+        snapshot_version=snapshot.version,
+        snapshot_created_at=snapshot.created_at,
+        schedule_item_id=item.id,
+        start_at=start_at.astimezone(time_zone),
+        end_at=end_at.astimezone(time_zone),
+        duration_minutes=_duration_minutes(start_at, end_at),
+    )
 
 
 def _decision_counts_by_snapshot(

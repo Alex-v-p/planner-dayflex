@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Self
+from typing import Literal, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -379,6 +379,43 @@ class PlanningRangeSummaryResponse(BaseModel):
     start_date: date
     end_date: date
     days: list[PlanningDaySummaryResponse]
+
+
+class FreeTimeWindowResponse(BaseModel):
+    """One persisted designated free-time window from a current snapshot."""
+
+    local_date: date
+    planning_day_id: str
+    time_zone: str
+    snapshot_id: str
+    snapshot_version: int
+    snapshot_created_at: datetime
+    schedule_item_id: str
+    start_at: datetime
+    end_at: datetime
+    duration_minutes: int
+
+
+class FreeTimeDayResponse(BaseModel):
+    """Free-time finder result for one requested local date."""
+
+    local_date: date
+    planning_day_id: str | None
+    time_zone: str | None
+    status: Literal["no_generated_plan", "no_useful_free_time", "has_free_time"]
+    snapshot_id: str | None
+    snapshot_version: int | None
+    snapshot_created_at: datetime | None
+    windows: list[FreeTimeWindowResponse]
+
+
+class FreeTimeRangeResponse(BaseModel):
+    """Browser-facing free-time finder response for a date range."""
+
+    start_date: date
+    end_date: date
+    minimum_minutes: int
+    days: list[FreeTimeDayResponse]
 
 
 def _valid_time_zone(value: str) -> str:
