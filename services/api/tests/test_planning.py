@@ -763,6 +763,41 @@ def test_week_and_month_overviews_summarize_current_snapshots_and_user_inputs(
     assert month.json()["days"][0] == planned_summary
 
 
+def test_overview_ranges_cover_date_boundaries_and_reject_invalid_dates(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+
+    week = client.get("/planning/overviews/week?start_date=2025-12-29")
+    leap_month = client.get("/planning/overviews/month?month=2024-02-20")
+
+    assert week.status_code == 200
+    assert week.json()["start_date"] == "2025-12-29"
+    assert week.json()["end_date"] == "2026-01-04"
+    assert [day["local_date"] for day in week.json()["days"]] == [
+        "2025-12-29",
+        "2025-12-30",
+        "2025-12-31",
+        "2026-01-01",
+        "2026-01-02",
+        "2026-01-03",
+        "2026-01-04",
+    ]
+    assert {day["status"] for day in week.json()["days"]} == {"empty"}
+
+    assert leap_month.status_code == 200
+    assert leap_month.json()["start_date"] == "2024-02-01"
+    assert leap_month.json()["end_date"] == "2024-02-29"
+    assert len(leap_month.json()["days"]) == 29
+    assert leap_month.json()["days"][0]["local_date"] == "2024-02-01"
+    assert leap_month.json()["days"][-1]["local_date"] == "2024-02-29"
+
+    assert (
+        client.get("/planning/overviews/week?start_date=2026-02-30").status_code == 422
+    )
+    assert client.get("/planning/overviews/month?month=not-a-date").status_code == 422
+
+
 def test_task_progress_is_user_scoped_and_cannot_exceed_estimate(
     client: TestClient,
 ) -> None:

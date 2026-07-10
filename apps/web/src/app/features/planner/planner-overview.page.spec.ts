@@ -123,8 +123,8 @@ describe("rendered planner overviews", () => {
       linkByAriaLabel(
         fixture,
         "Open planner workspace for Jul 1, 2026, Snapshot v2",
-      ),
-    ).not.toBeNull();
+      )?.getAttribute("href"),
+    ).toBe("/planner?date=2026-07-01");
     expect(announcement(fixture)).toContain("Week overview loaded");
   });
 
@@ -224,8 +224,13 @@ class FakeRouter {
     return Promise.resolve(true);
   }
 
-  createUrlTree(commands: readonly unknown[]): string {
-    return commands.join("/");
+  createUrlTree(
+    commands: readonly unknown[],
+    options?: { queryParams?: Record<string, string> },
+  ): string {
+    const path = commands.join("/");
+    const queryParams = new URLSearchParams(options?.queryParams).toString();
+    return queryParams ? `${path}?${queryParams}` : path;
   }
 
   serializeUrl(url: unknown): string {
