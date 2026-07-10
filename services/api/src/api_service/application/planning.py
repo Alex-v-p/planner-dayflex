@@ -211,9 +211,7 @@ class PlanningService:
                         deferred_counts.get(snapshot.id, 0) if snapshot else 0
                     ),
                     has_useful_free_time=(
-                        free_time_minutes.get(snapshot.id, 0) > 0
-                        if snapshot
-                        else False
+                        free_time_minutes.get(snapshot.id, 0) > 0 if snapshot else False
                     ),
                 )
             )
@@ -1179,8 +1177,9 @@ def _interruption_minutes_by_planning_day(
         return {}
     minutes_by_day: dict[str, int] = {}
     for planning_day_id, start_at, end_at in session.execute(
-        select(Interruption.planning_day_id, Interruption.start_at, Interruption.end_at)
-        .where(Interruption.planning_day_id.in_(planning_day_ids))
+        select(
+            Interruption.planning_day_id, Interruption.start_at, Interruption.end_at
+        ).where(Interruption.planning_day_id.in_(planning_day_ids))
     ):
         minutes_by_day[planning_day_id] = minutes_by_day.get(planning_day_id, 0) + (
             _duration_minutes(start_at, end_at)
@@ -1208,8 +1207,9 @@ def _schedule_minutes_by_snapshot(
         return {}
     minutes_by_snapshot: dict[str, int] = {}
     for snapshot_id, start_at, end_at in session.execute(
-        select(ScheduleItem.snapshot_id, ScheduleItem.start_at, ScheduleItem.end_at)
-        .where(ScheduleItem.snapshot_id.in_(snapshot_ids), ScheduleItem.kind == kind)
+        select(
+            ScheduleItem.snapshot_id, ScheduleItem.start_at, ScheduleItem.end_at
+        ).where(ScheduleItem.snapshot_id.in_(snapshot_ids), ScheduleItem.kind == kind)
     ):
         minutes_by_snapshot[snapshot_id] = minutes_by_snapshot.get(
             snapshot_id, 0
