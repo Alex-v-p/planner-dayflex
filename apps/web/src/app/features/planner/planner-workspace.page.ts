@@ -32,6 +32,9 @@ import {
   ScheduleSnapshot,
   Task,
   TaskInputRequest,
+  TaskProgress,
+  TaskProgressCreateRequest,
+  InterruptionCreateRequest,
 } from "./planner-api.service";
 
 type WorkspaceLoadState =
@@ -73,6 +76,20 @@ interface FixedEventFormModel {
   readonly timeZone: string;
 }
 
+interface ProgressFormModel {
+  readonly taskId: string;
+  readonly completedMinutes: string;
+  readonly recordedLocal: string;
+  readonly timeZone: string;
+}
+
+interface InterruptionFormModel {
+  readonly startLocal: string;
+  readonly endLocal: string;
+  readonly timeZone: string;
+  readonly reportedLocal: string;
+}
+
 type FormErrors = Readonly<Record<string, string>>;
 
 type GeneratePlanState =
@@ -80,6 +97,8 @@ type GeneratePlanState =
   | { readonly status: "pending"; readonly message: string }
   | { readonly status: "success"; readonly message: string }
   | { readonly status: "error"; readonly message: string };
+
+type RecoveryMutationState = GeneratePlanState;
 
 interface TimelineBlock {
   readonly item: ScheduleItem;
@@ -120,10 +139,25 @@ export class PlannerWorkspacePage implements OnInit {
   protected readonly fixedEventForm = signal<FixedEventFormModel>(
     emptyFixedEventForm(),
   );
+  protected readonly progressForm =
+    signal<ProgressFormModel>(emptyProgressForm());
+  protected readonly interruptionForm = signal<InterruptionFormModel>(
+    emptyInterruptionForm(),
+  );
   protected readonly taskFormErrors = signal<FormErrors>({});
   protected readonly fixedEventFormErrors = signal<FormErrors>({});
+  protected readonly progressFormErrors = signal<FormErrors>({});
+  protected readonly interruptionFormErrors = signal<FormErrors>({});
   protected readonly taskFormMessage = signal("");
   protected readonly fixedEventFormMessage = signal("");
+  protected readonly progressState = signal<RecoveryMutationState>({
+    status: "idle",
+    message: "",
+  });
+  protected readonly interruptionState = signal<RecoveryMutationState>({
+    status: "idle",
+    message: "",
+  });
   protected readonly generatePlanState = signal<GeneratePlanState>({
     status: "idle",
     message: "",
@@ -162,6 +196,8 @@ export class PlannerWorkspacePage implements OnInit {
         tap((selectedDate) => {
           this.state.set({ status: "loading", selectedDate });
           this.generatePlanState.set({ status: "idle", message: "" });
+          this.progressState.set({ status: "idle", message: "" });
+          this.interruptionState.set({ status: "idle", message: "" });
         }),
         switchMap((selectedDate) =>
           this.plannerApi.loadWorkspaceDate(selectedDate).pipe(
@@ -186,6 +222,15 @@ export class PlannerWorkspacePage implements OnInit {
           this.fixedEventForm.set(
             emptyFixedEventForm(state.data.day?.time_zone),
           );
+        }
+        if (state.status === "ready") {
+          const timeZone = state.data.day?.time_zone ?? guessTimeZone();
+          if (isBlankProgressForm(this.progressForm())) {
+            this.progressForm.set(emptyProgressForm(timeZone));
+          }
+          if (isBlankInterruptionForm(this.interruptionForm())) {
+            this.interruptionForm.set(emptyInterruptionForm(timeZone));
+          }
         }
       });
   }
@@ -218,6 +263,16 @@ export class PlannerWorkspacePage implements OnInit {
 
   protected updateFixedEventForm(patch: Partial<FixedEventFormModel>): void {
     this.fixedEventForm.update((form) => ({ ...form, ...patch }));
+  }
+
+  protected updateProgressForm(patch: Partial<ProgressFormModel>): void {
+    this.progressForm.update((form) => ({ ...form, ...patch }));
+  }
+
+  protected updateInterruptionForm(
+    patch: Partial<InterruptionFormModel>,
+  ): void {
+    this.interruptionForm.update((form) => ({ ...form, ...patch }));
   }
 
   protected editTask(task: Task): void {
@@ -420,6 +475,205 @@ export class PlannerWorkspacePage implements OnInit {
       });
   }
 
+  protected submitTaskProgress(): void {
+    const state = this.state();
+    if (state.status !== "ready" || state.data.day === null) {
+      this.progressState.set({
+        status: "error",
+        message: "Open a saved planning day before recording progress.",
+      });
+      return;
+    }
+
+    const result = buildProgressRequest(
+      this.progressForm(),
+      state.data.tasks,
+      state.data.progress,
+    );
+    if (!result.ok) {
+      this.progressFormErrors.set(result.errors);
+      this.progressState.set({
+        status: "error",
+        message: "Review the progress details before saving.",
+      });
+      return;
+    }
+
+    const day = state.data.day;
+    const action = "progress:record";
+    this.busyAction.set(action);
+    this.progressFormErrors.set({});
+    this.progressState.set({
+      status: "pending",
+      message: "Recording completed work.",
+    });
+    this.plannerApi
+      .recordTaskProgress(day.id, result.request)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (progress) => {
+          this.busyAction.set(null);
+          this.applyProgress(progress);
+          this.progressForm.set(emptyProgressForm(day.time_zone));
+          this.progressState.set({
+            status: "success",
+            message: "Progress saved. Completed work stays in history.",
+          });
+        },
+        error: (error: unknown) => {
+          this.busyAction.set(null);
+          this.progressState.set({
+            status: "error",
+            message: progressErrorMessage(error),
+          });
+        },
+      });
+  }
+
+  protected markTaskComplete(task: Task): void {
+    const state = this.state();
+    if (state.status !== "ready" || state.data.day === null) {
+      return;
+    }
+
+    const remainingMinutes = remainingTaskMinutes(task, state.data.progress);
+    if (remainingMinutes <= 0) {
+      return;
+    }
+
+    const timeZone = state.data.day.time_zone;
+    this.progressForm.set({
+      taskId: task.id,
+      completedMinutes: String(remainingMinutes),
+      recordedLocal: currentDateTimeLocalValue(timeZone),
+      timeZone,
+    });
+    this.submitTaskProgress();
+  }
+
+  protected submitInterruption(): void {
+    const state = this.state();
+    if (state.status !== "ready" || state.data.day === null) {
+      this.interruptionState.set({
+        status: "error",
+        message: "Open a saved planning day before reporting unavailable time.",
+      });
+      return;
+    }
+    if (state.data.snapshot === null) {
+      this.interruptionState.set({
+        status: "error",
+        message: "Generate a schedule before reporting an interruption.",
+      });
+      return;
+    }
+
+    const result = buildInterruptionRequest(this.interruptionForm());
+    if (!result.ok) {
+      this.interruptionFormErrors.set(result.errors);
+      this.interruptionState.set({
+        status: "error",
+        message: "Review the interruption details before submitting.",
+      });
+      return;
+    }
+
+    const day = state.data.day;
+    const action = "interruption:report";
+    this.busyAction.set(action);
+    this.interruptionFormErrors.set({});
+    this.interruptionState.set({
+      status: "pending",
+      message: "Saving unavailable time and revising the remaining plan.",
+    });
+    this.plannerApi
+      .reportInterruption(day.id, result.request)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (snapshot) => {
+          this.busyAction.set(null);
+          let applied = false;
+          this.state.update((current) => {
+            if (current.status === "ready" && current.data.day?.id === day.id) {
+              applied = true;
+              return {
+                ...current,
+                data: {
+                  ...current.data,
+                  day: {
+                    ...current.data.day,
+                    current_snapshot_id: snapshot.id,
+                  },
+                  snapshot,
+                },
+              };
+            }
+            return current;
+          });
+          if (applied) {
+            this.interruptionForm.set(emptyInterruptionForm(day.time_zone));
+            this.interruptionState.set({
+              status: "success",
+              message: `Revised schedule snapshot v${snapshot.version} is now shown.`,
+            });
+          }
+        },
+        error: (error: unknown) => {
+          this.busyAction.set(null);
+          this.interruptionState.set({
+            status: "error",
+            message: interruptionErrorMessage(error),
+          });
+        },
+      });
+  }
+
+  protected unfinishedTasks(
+    tasks: readonly Task[],
+    progress: readonly TaskProgress[],
+  ): readonly Task[] {
+    return tasks.filter((task) => remainingTaskMinutes(task, progress) > 0);
+  }
+
+  protected completedTasks(
+    tasks: readonly Task[],
+    progress: readonly TaskProgress[],
+  ): readonly Task[] {
+    return tasks.filter((task) => remainingTaskMinutes(task, progress) <= 0);
+  }
+
+  protected completedMinutesForTask(
+    task: Task,
+    progress: readonly TaskProgress[],
+  ): number {
+    return task.completed_minutes ?? completedTaskMinutes(task.id, progress);
+  }
+
+  protected remainingMinutesForTask(
+    task: Task,
+    progress: readonly TaskProgress[],
+  ): number {
+    return remainingTaskMinutes(task, progress);
+  }
+
+  protected progressRecordsForTask(
+    task: Task,
+    progress: readonly TaskProgress[],
+  ): readonly TaskProgress[] {
+    return progress.filter((record) => record.task_id === task.id);
+  }
+
+  protected taskTitleForProgress(
+    record: TaskProgress,
+    tasks: readonly Task[],
+  ): string {
+    return tasks.find((task) => task.id === record.task_id)?.title ?? "Task";
+  }
+
+  protected totalCompletedMinutes(progress: readonly TaskProgress[]): number {
+    return totalCompletedMinutes(progress);
+  }
+
   protected fieldError(errors: FormErrors, field: string): string {
     return errors[field] ?? "";
   }
@@ -578,6 +832,19 @@ export class PlannerWorkspacePage implements OnInit {
       }));
   }
 
+  protected movedDecisions(
+    snapshot: ScheduleSnapshot,
+    tasks: readonly Task[],
+  ): ReadonlyArray<ScheduleDecision & { readonly taskTitle: string }> {
+    return snapshot.decisions
+      .filter((decision) => decision.reason_code === "moved_after_interruption")
+      .map((decision) => ({
+        ...decision,
+        taskTitle:
+          tasks.find((task) => task.id === decision.task_id)?.title ?? "Work",
+      }));
+  }
+
   protected decisionText(
     decision: ScheduleDecision,
     tasks: readonly Task[],
@@ -629,6 +896,30 @@ export class PlannerWorkspacePage implements OnInit {
     const hours = Math.floor(minutes / 60);
     const remainder = minutes % 60;
     return remainder === 0 ? `${hours} hr` : `${hours} hr ${remainder} min`;
+  }
+
+  private applyProgress(progress: TaskProgress): void {
+    this.state.update((current) => {
+      if (
+        current.status !== "ready" ||
+        current.data.day?.id !== progress.planning_day_id
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          tasks: current.data.tasks.map((task) =>
+            task.id === progress.task_id
+              ? taskWithAppliedProgress(task, progress.completed_minutes)
+              : task,
+          ),
+          progress: [...current.data.progress, progress].sort(compareProgress),
+        },
+      };
+    });
   }
 
   private runMutation<T>(
@@ -780,6 +1071,26 @@ function emptyFixedEventForm(timeZone?: string): FixedEventFormModel {
   };
 }
 
+function emptyProgressForm(timeZone?: string): ProgressFormModel {
+  const normalizedTimeZone = normalizeTimeZone(timeZone ?? guessTimeZone());
+  return {
+    taskId: "",
+    completedMinutes: "",
+    recordedLocal: currentDateTimeLocalValue(normalizedTimeZone),
+    timeZone: normalizedTimeZone,
+  };
+}
+
+function emptyInterruptionForm(timeZone?: string): InterruptionFormModel {
+  const normalizedTimeZone = normalizeTimeZone(timeZone ?? guessTimeZone());
+  return {
+    startLocal: "",
+    endLocal: "",
+    timeZone: normalizedTimeZone,
+    reportedLocal: currentDateTimeLocalValue(normalizedTimeZone),
+  };
+}
+
 function isBlankNewFixedEventForm(form: FixedEventFormModel): boolean {
   return (
     form.id === null &&
@@ -788,6 +1099,14 @@ function isBlankNewFixedEventForm(form: FixedEventFormModel): boolean {
     form.startLocal === "" &&
     form.endLocal === ""
   );
+}
+
+function isBlankProgressForm(form: ProgressFormModel): boolean {
+  return form.taskId === "" && form.completedMinutes === "";
+}
+
+function isBlankInterruptionForm(form: InterruptionFormModel): boolean {
+  return form.startLocal === "" && form.endLocal === "";
 }
 
 function buildTaskRequest(
@@ -930,6 +1249,120 @@ function buildFixedEventRequest(
   };
 }
 
+function buildProgressRequest(
+  form: ProgressFormModel,
+  tasks: readonly Task[],
+  progress: readonly TaskProgress[],
+):
+  | { ok: true; request: TaskProgressCreateRequest }
+  | { ok: false; errors: FormErrors } {
+  const errors: Record<string, string> = {};
+  const task = tasks.find((candidate) => candidate.id === form.taskId);
+  const completedMinutes = Number(form.completedMinutes);
+
+  if (task === undefined) {
+    errors["taskId"] = "Choose unfinished work.";
+  } else {
+    const remainingMinutes = remainingTaskMinutes(task, progress);
+    if (remainingMinutes <= 0) {
+      errors["taskId"] = "This work is already complete.";
+    } else if (
+      !Number.isInteger(completedMinutes) ||
+      completedMinutes < 1 ||
+      completedMinutes > remainingMinutes
+    ) {
+      errors["completedMinutes"] = `Use 1 to ${remainingMinutes} minutes.`;
+    }
+  }
+
+  const timeZone = normalizeTimeZone(form.timeZone);
+  if (!isValidTimeZone(timeZone)) {
+    errors["timeZone"] = "Use a valid IANA time zone.";
+  }
+
+  const recordedAt = errors["timeZone"]
+    ? null
+    : zonedLocalDateTimeToIso(form.recordedLocal, timeZone);
+  if (recordedAt === null) {
+    errors["recordedLocal"] = "Enter a valid recorded time.";
+  }
+
+  if (
+    Object.keys(errors).length > 0 ||
+    task === undefined ||
+    recordedAt === null
+  ) {
+    return { ok: false, errors };
+  }
+
+  return {
+    ok: true,
+    request: {
+      task_id: task.id,
+      completed_minutes: completedMinutes,
+      recorded_at: recordedAt,
+    },
+  };
+}
+
+function buildInterruptionRequest(
+  form: InterruptionFormModel,
+):
+  | { ok: true; request: InterruptionCreateRequest }
+  | { ok: false; errors: FormErrors } {
+  const errors: Record<string, string> = {};
+  const timeZone = normalizeTimeZone(form.timeZone);
+  if (!isValidTimeZone(timeZone)) {
+    errors["timeZone"] = "Use a valid IANA time zone.";
+  }
+
+  const startAt = errors["timeZone"]
+    ? null
+    : zonedLocalDateTimeToIso(form.startLocal, timeZone);
+  const endAt = errors["timeZone"]
+    ? null
+    : zonedLocalDateTimeToIso(form.endLocal, timeZone);
+  const reportedAt = errors["timeZone"]
+    ? null
+    : zonedLocalDateTimeToIso(form.reportedLocal, timeZone);
+
+  if (startAt === null) {
+    errors["startLocal"] = "Enter a valid start time.";
+  }
+  if (endAt === null) {
+    errors["endLocal"] = "Enter a valid end time.";
+  }
+  if (reportedAt === null) {
+    errors["reportedLocal"] = "Enter a valid reported time.";
+  }
+  if (
+    startAt !== null &&
+    endAt !== null &&
+    Date.parse(endAt) <= Date.parse(startAt)
+  ) {
+    errors["endLocal"] = "End time must be after start time.";
+  }
+
+  if (
+    Object.keys(errors).length > 0 ||
+    startAt === null ||
+    endAt === null ||
+    reportedAt === null
+  ) {
+    return { ok: false, errors };
+  }
+
+  return {
+    ok: true,
+    request: {
+      start_at: startAt,
+      end_at: endAt,
+      time_zone: timeZone,
+      reported_at: reportedAt,
+    },
+  };
+}
+
 function currentWorkspaceDay(state: WorkspaceLoadState) {
   return state.status === "ready" ? state.data.day : null;
 }
@@ -970,6 +1403,10 @@ function toDateTimeLocalValue(value: string, timeZone: string): string {
   const hours = part("hour");
   const minutes = part("minute");
   return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function currentDateTimeLocalValue(timeZone: string): string {
+  return toDateTimeLocalValue(new Date().toISOString(), timeZone);
 }
 
 function zonedLocalDateTimeToIso(
@@ -1074,6 +1511,44 @@ function generatePlanErrorMessage(error: unknown): string {
   }
 
   return "We could not generate the schedule. Saved inputs are unchanged; try again when the API is available.";
+}
+
+function progressErrorMessage(error: unknown): string {
+  if (error instanceof HttpErrorResponse) {
+    if (error.status === 409) {
+      return "That progress would exceed the task estimate. Refresh the workspace if another update was saved.";
+    }
+    if (error.status === 422) {
+      return "The API could not accept that progress. Review the minutes and recorded time.";
+    }
+    if (error.status === 401 || error.status === 403) {
+      return "Your session cannot save progress. Sign in again before continuing.";
+    }
+    if (error.status === 404) {
+      return "That planning day or task is no longer available. Refresh the workspace.";
+    }
+  }
+
+  return "We could not save progress. Your details are still here; try again when the API is available.";
+}
+
+function interruptionErrorMessage(error: unknown): string {
+  if (error instanceof HttpErrorResponse) {
+    if (error.status === 422) {
+      return "The API could not accept that interruption. Review the start, end, and time zone.";
+    }
+    if (error.status === 503) {
+      return "The scheduler is unavailable right now. Saved progress is unchanged; try again when scheduling is available.";
+    }
+    if (error.status === 401 || error.status === 403) {
+      return "Your session cannot revise this schedule. Sign in again before continuing.";
+    }
+    if (error.status === 404) {
+      return "Generate a schedule for this day before reporting an interruption.";
+    }
+  }
+
+  return "We could not revise the schedule. Your interruption details are still here; try again when the API is available.";
 }
 
 function itemMarker(kind: string): string {
@@ -1228,6 +1703,63 @@ function minutesByKind(snapshot: ScheduleSnapshot, kind: string): number {
         ),
       0,
     );
+}
+
+function completedTaskMinutes(
+  taskId: string,
+  progress: readonly TaskProgress[],
+): number {
+  return progress
+    .filter((record) => record.task_id === taskId)
+    .reduce((total, record) => total + record.completed_minutes, 0);
+}
+
+function remainingTaskMinutes(
+  task: Task,
+  progress: readonly TaskProgress[],
+): number {
+  if (task.remaining_minutes !== undefined) {
+    return task.remaining_minutes;
+  }
+
+  return Math.max(
+    0,
+    task.estimated_minutes - completedTaskMinutes(task.id, progress),
+  );
+}
+
+function taskWithAppliedProgress(task: Task, completedMinutes: number): Task {
+  if (
+    task.completed_minutes === undefined ||
+    task.remaining_minutes === undefined
+  ) {
+    return task;
+  }
+
+  const nextCompletedMinutes = task.completed_minutes + completedMinutes;
+  return {
+    ...task,
+    completed_minutes: nextCompletedMinutes,
+    remaining_minutes: Math.max(
+      0,
+      task.estimated_minutes - nextCompletedMinutes,
+    ),
+  };
+}
+
+function totalCompletedMinutes(progress: readonly TaskProgress[]): number {
+  return progress.reduce(
+    (total, record) => total + record.completed_minutes,
+    0,
+  );
+}
+
+function compareProgress(a: TaskProgress, b: TaskProgress): number {
+  return (
+    Date.parse(a.recorded_at) - Date.parse(b.recorded_at) ||
+    Date.parse(a.created_at) - Date.parse(b.created_at) ||
+    a.id.localeCompare(b.id)
+  );
 }
 
 function isDeferredReasonCode(reasonCode: string): boolean {

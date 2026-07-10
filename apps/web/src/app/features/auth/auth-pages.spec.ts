@@ -390,6 +390,7 @@ class FakePlannerApi {
       day: null,
       fixedEvents: [],
       tasks: [],
+      progress: [],
       snapshot: null,
     });
   }

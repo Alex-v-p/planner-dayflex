@@ -33,6 +33,8 @@ export interface Task {
   readonly splitting_allowed: boolean;
   readonly min_segment_minutes: number | null;
   readonly status: string;
+  readonly completed_minutes?: number;
+  readonly remaining_minutes?: number;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -65,12 +67,22 @@ export interface ScheduleSnapshot {
   readonly decisions: readonly ScheduleDecision[];
 }
 
+export interface TaskProgress {
+  readonly id: string;
+  readonly task_id: string;
+  readonly planning_day_id: string;
+  readonly completed_minutes: number;
+  readonly recorded_at: string;
+  readonly created_at: string;
+}
+
 export interface PlannerWorkspaceData {
   readonly selectedDate: string;
   readonly planningDays: readonly PlanningDay[];
   readonly day: PlanningDay | null;
   readonly fixedEvents: readonly FixedEvent[];
   readonly tasks: readonly Task[];
+  readonly progress: readonly TaskProgress[];
   readonly snapshot: ScheduleSnapshot | null;
 }
 
@@ -96,6 +108,19 @@ export interface FixedEventInputRequest {
   readonly time_zone: string;
 }
 
+export interface TaskProgressCreateRequest {
+  readonly task_id: string;
+  readonly completed_minutes: number;
+  readonly recorded_at: string;
+}
+
+export interface InterruptionCreateRequest {
+  readonly start_at: string;
+  readonly end_at: string;
+  readonly time_zone: string;
+  readonly reported_at: string;
+}
+
 @Injectable({ providedIn: "root" })
 export class PlannerApiService {
   private readonly api = inject(ApiClientService);
@@ -118,6 +143,7 @@ export class PlannerApiService {
             day,
             fixedEvents: [],
             tasks,
+            progress: [],
             snapshot: null,
           });
         }
@@ -126,14 +152,18 @@ export class PlannerApiService {
           fixedEvents: this.api.getJson<FixedEvent[]>(
             `/planning/days/${day.id}/fixed-events`,
           ),
+          progress: this.api.getJson<TaskProgress[]>(
+            `/planning/days/${day.id}/task-progress`,
+          ),
           snapshot: this.loadLatestSnapshot(day),
         }).pipe(
-          map(({ fixedEvents, snapshot }) => ({
+          map(({ fixedEvents, progress, snapshot }) => ({
             selectedDate,
             planningDays,
             day,
             fixedEvents,
             tasks,
+            progress,
             snapshot,
           })),
         );
@@ -217,6 +247,26 @@ export class PlannerApiService {
   generatePlan(planningDayId: string): Observable<ScheduleSnapshot> {
     return this.api.postEmpty<ScheduleSnapshot>(
       `/planning/days/${planningDayId}/generate-plan`,
+    );
+  }
+
+  recordTaskProgress(
+    planningDayId: string,
+    request: TaskProgressCreateRequest,
+  ): Observable<TaskProgress> {
+    return this.api.postJson<TaskProgressCreateRequest, TaskProgress>(
+      `/planning/days/${planningDayId}/task-progress`,
+      request,
+    );
+  }
+
+  reportInterruption(
+    planningDayId: string,
+    request: InterruptionCreateRequest,
+  ): Observable<ScheduleSnapshot> {
+    return this.api.postJson<InterruptionCreateRequest, ScheduleSnapshot>(
+      `/planning/days/${planningDayId}/interruptions`,
+      request,
     );
   }
 

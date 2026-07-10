@@ -195,6 +195,16 @@ class Task(Base):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def completed_minutes(self) -> int:
+        """Total completed work recorded for this task across planning days."""
+        return sum(progress.completed_minutes for progress in self.progress_records)
+
+    @property
+    def remaining_minutes(self) -> int:
+        """Remaining estimate after all recorded progress for this task."""
+        return max(0, self.estimated_minutes - self.completed_minutes)
+
     __table_args__ = (
         CheckConstraint(
             "estimated_minutes > 0",

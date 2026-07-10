@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
+from threading import Lock
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
@@ -46,6 +49,10 @@ class PlanningResourceNotFoundError(Exception):
 
 class PlanningConflictError(Exception):
     """Raised when a request conflicts with existing planning inputs."""
+
+
+class PlanningValidationError(Exception):
+    """Raised when planning inputs are structurally valid but out of scope."""
 
 
 class SchedulerUnavailablePlanningError(Exception):
@@ -251,22 +258,28 @@ class PlanningService:
     def update_task(
         self, session: Session, user_id: str, task_id: str, request: TaskUpdateRequest
     ) -> Task:
-        task = self._get_active_task(session, user_id, task_id)
-        task.title = request.title
-        task.estimated_minutes = request.estimated_minutes
-        task.priority = request.priority
-        task.due_date = request.due_date
-        task.earliest_start_at = (
-            _as_utc(request.earliest_start_at)
-            if request.earliest_start_at is not None
-            else None
-        )
-        task.splitting_allowed = request.splitting_allowed
-        task.min_segment_minutes = request.min_segment_minutes
-        task.updated_at = _utc_now()
-        session.commit()
-        session.refresh(task)
-        return _normalize_task(task)
+        with _task_progress_write_lock(task_id):
+            task = self._get_active_task_for_update(session, user_id, task_id)
+            completed_so_far = _completed_minutes_for_task(session, task.id)
+            if request.estimated_minutes < completed_so_far:
+                raise PlanningConflictError(
+                    "Task estimate cannot be lower than recorded progress."
+                )
+            task.title = request.title
+            task.estimated_minutes = request.estimated_minutes
+            task.priority = request.priority
+            task.due_date = request.due_date
+            task.earliest_start_at = (
+                _as_utc(request.earliest_start_at)
+                if request.earliest_start_at is not None
+                else None
+            )
+            task.splitting_allowed = request.splitting_allowed
+            task.min_segment_minutes = request.min_segment_minutes
+            task.updated_at = _utc_now()
+            session.commit()
+            session.refresh(task)
+            return _normalize_task(task)
 
     def remove_task(self, session: Session, user_id: str, task_id: str) -> None:
         task = self._get_active_task(session, user_id, task_id)
@@ -281,34 +294,31 @@ class PlanningService:
         planning_day_id: str,
         request: TaskProgressCreateRequest,
     ) -> TaskProgress:
-        self._get_planning_day_for_update(session, user_id, planning_day_id)
-        task = self._get_active_task(session, user_id, request.task_id)
-        completed_so_far = (
-            session.scalar(
-                select(
-                    func.coalesce(func.sum(TaskProgress.completed_minutes), 0)
-                ).where(
-                    TaskProgress.planning_day_id == planning_day_id,
-                    TaskProgress.task_id == task.id,
-                )
+        with _task_progress_write_lock(request.task_id):
+            self._get_planning_day_for_update(session, user_id, planning_day_id)
+            task = self._get_active_task_for_update(session, user_id, request.task_id)
+            completed_so_far = _completed_minutes_for_task(session, task.id)
+            if completed_so_far + request.completed_minutes > task.estimated_minutes:
+                raise PlanningConflictError("Task progress cannot exceed the estimate.")
+            now = _utc_now()
+            progress = TaskProgress(
+                id=str(uuid4()),
+                task_id=task.id,
+                planning_day_id=planning_day_id,
+                completed_minutes=request.completed_minutes,
+                recorded_at=_as_utc(request.recorded_at),
+                created_at=now,
             )
-            or 0
-        )
-        if completed_so_far + request.completed_minutes > task.estimated_minutes:
-            raise PlanningConflictError("Task progress cannot exceed the estimate.")
-        now = _utc_now()
-        progress = TaskProgress(
-            id=str(uuid4()),
-            task_id=task.id,
-            planning_day_id=planning_day_id,
-            completed_minutes=request.completed_minutes,
-            recorded_at=_as_utc(request.recorded_at),
-            created_at=now,
-        )
-        session.add(progress)
-        session.commit()
-        session.refresh(progress)
-        return _normalize_task_progress(progress)
+            session.add(progress)
+            session.commit()
+            session.refresh(progress)
+            return _normalize_task_progress(progress)
+
+    def list_task_progress(
+        self, session: Session, user_id: str, planning_day_id: str
+    ) -> list[TaskProgress]:
+        self.get_planning_day(session, user_id, planning_day_id)
+        return self._list_task_progress_for_day(session, planning_day_id)
 
     def generate_plan(
         self,
@@ -324,16 +334,20 @@ class PlanningService:
         )
         fixed_events = self._list_fixed_events_for_day(session, planning_day_id)
         interruptions = self._list_interruptions_for_day(session, planning_day_id)
-        tasks = self._list_active_tasks_for_user(session, user_id)
-        task_progress = self._list_task_progress_for_day(session, planning_day_id)
+        scheduler_inputs = _scheduler_task_inputs(
+            self._list_active_tasks_for_user(session, user_id),
+            self._list_task_progress_for_user(session, user_id),
+            planning_day_id,
+            preserve_selected_day_progress=False,
+        )
         preferences = session.get(UserPreferences, user_id)
         configuration = _scheduler_configuration(preferences)
         request = _scheduler_request(
             planning_day,
             fixed_events,
             interruptions,
-            tasks,
-            task_progress,
+            scheduler_inputs.tasks,
+            scheduler_inputs.task_progress,
             configuration,
         )
 
@@ -347,7 +361,9 @@ class PlanningService:
             raise SchedulerUnavailablePlanningError from error
 
         try:
-            _validate_scheduler_result(result, tasks, fixed_events, interruptions)
+            _validate_scheduler_result(
+                result, scheduler_inputs.tasks, fixed_events, interruptions
+            )
             snapshot = self._persist_schedule_snapshot(
                 session,
                 planning_day,
@@ -377,6 +393,7 @@ class PlanningService:
         planning_day = self._get_planning_day_for_update(
             session, user_id, planning_day_id
         )
+        _ensure_interruption_belongs_to_planning_day(planning_day, request)
         if planning_day.current_snapshot_id is None:
             raise PlanningResourceNotFoundError
 
@@ -398,16 +415,20 @@ class PlanningService:
 
         fixed_events = self._list_fixed_events_for_day(session, planning_day_id)
         interruptions = self._list_interruptions_for_day(session, planning_day_id)
-        tasks = self._list_active_tasks_for_user(session, user_id)
-        task_progress = self._list_task_progress_for_day(session, planning_day_id)
+        scheduler_inputs = _scheduler_task_inputs(
+            self._list_active_tasks_for_user(session, user_id),
+            self._list_task_progress_for_user(session, user_id),
+            planning_day_id,
+            preserve_selected_day_progress=True,
+        )
         preferences = session.get(UserPreferences, user_id)
         configuration = _scheduler_configuration(preferences)
         schedule_request = _scheduler_request(
             planning_day,
             fixed_events,
             interruptions,
-            tasks,
-            task_progress,
+            scheduler_inputs.tasks,
+            scheduler_inputs.task_progress,
             configuration,
             current_at=interruption.start_at,
         )
@@ -424,7 +445,9 @@ class PlanningService:
             raise SchedulerUnavailablePlanningError from error
 
         try:
-            _validate_scheduler_result(result, tasks, fixed_events, interruptions)
+            _validate_scheduler_result(
+                result, scheduler_inputs.tasks, fixed_events, interruptions
+            )
             snapshot = self._persist_schedule_snapshot(
                 session,
                 planning_day,
@@ -516,6 +539,22 @@ class PlanningService:
             raise PlanningResourceNotFoundError
         return task
 
+    def _get_active_task_for_update(
+        self, session: Session, user_id: str, task_id: str
+    ) -> Task:
+        task = session.scalar(
+            select(Task)
+            .where(
+                Task.id == task_id,
+                Task.user_id == user_id,
+                Task.status == "active",
+            )
+            .with_for_update()
+        )
+        if task is None:
+            raise PlanningResourceNotFoundError
+        return task
+
     def _ensure_no_fixed_event_overlap(
         self,
         session: Session,
@@ -568,6 +607,19 @@ class PlanningService:
             for progress in session.scalars(
                 select(TaskProgress)
                 .where(TaskProgress.planning_day_id == planning_day_id)
+                .order_by(TaskProgress.recorded_at, TaskProgress.created_at)
+            )
+        ]
+
+    def _list_task_progress_for_user(
+        self, session: Session, user_id: str
+    ) -> list[TaskProgress]:
+        return [
+            _normalize_task_progress(progress)
+            for progress in session.scalars(
+                select(TaskProgress)
+                .join(Task, TaskProgress.task_id == Task.id)
+                .where(Task.user_id == user_id)
                 .order_by(TaskProgress.recorded_at, TaskProgress.created_at)
             )
         ]
@@ -669,6 +721,29 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+_task_progress_locks_guard = Lock()
+_task_progress_locks: dict[str, Lock] = {}
+
+
+@contextmanager
+def _task_progress_write_lock(task_id: str) -> Iterator[None]:
+    with _task_progress_locks_guard:
+        task_lock = _task_progress_locks.setdefault(task_id, Lock())
+    with task_lock:
+        yield
+
+
+def _completed_minutes_for_task(session: Session, task_id: str) -> int:
+    return (
+        session.scalar(
+            select(func.coalesce(func.sum(TaskProgress.completed_minutes), 0)).where(
+                TaskProgress.task_id == task_id
+            )
+        )
+        or 0
+    )
+
+
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
@@ -710,9 +785,94 @@ def _normalize_interruption(interruption: Interruption) -> Interruption:
     return interruption
 
 
+def _ensure_interruption_belongs_to_planning_day(
+    planning_day: PlanningDay,
+    request: InterruptionCreateRequest,
+) -> None:
+    time_zone = ZoneInfo(planning_day.time_zone)
+    start_date = request.start_at.astimezone(time_zone).date()
+    end_date = request.end_at.astimezone(time_zone).date()
+    if start_date != planning_day.local_date or end_date != planning_day.local_date:
+        raise PlanningValidationError(
+            "Interruption interval must belong to the selected planning day."
+        )
+
+
 def _normalize_schedule_snapshot(snapshot: ScheduleSnapshot) -> ScheduleSnapshot:
     snapshot.created_at = _as_utc(snapshot.created_at)
     return snapshot
+
+
+@dataclass(frozen=True)
+class SchedulerTaskInputs:
+    tasks: list[SchedulerTask]
+    task_progress: list[TaskProgress]
+
+
+@dataclass(frozen=True)
+class SchedulerTask:
+    id: str
+    title: str
+    estimated_minutes: int
+    priority: int
+    created_at: datetime
+    due_date: date | None
+    earliest_start_at: datetime | None
+    splitting_allowed: bool
+
+
+def _scheduler_task_inputs(
+    tasks: list[Task],
+    progress_records: list[TaskProgress],
+    planning_day_id: str,
+    *,
+    preserve_selected_day_progress: bool,
+) -> SchedulerTaskInputs:
+    progress_by_task: dict[str, list[TaskProgress]] = {}
+    for progress in progress_records:
+        progress_by_task.setdefault(progress.task_id, []).append(progress)
+
+    scheduler_tasks: list[SchedulerTask] = []
+    scheduler_progress: list[TaskProgress] = []
+    for task in tasks:
+        task_progress = progress_by_task.get(task.id, [])
+        selected_day_progress = [
+            progress
+            for progress in task_progress
+            if progress.planning_day_id == planning_day_id
+        ]
+        preserved_progress = (
+            selected_day_progress if preserve_selected_day_progress else []
+        )
+        preserved_progress_ids = {progress.id for progress in preserved_progress}
+        preserved_completed = sum(
+            progress.completed_minutes for progress in preserved_progress
+        )
+        completed_before_scheduler = sum(
+            progress.completed_minutes
+            for progress in task_progress
+            if progress.id not in preserved_progress_ids
+        )
+        remaining_estimate = task.estimated_minutes - completed_before_scheduler
+
+        if remaining_estimate <= preserved_completed:
+            continue
+
+        scheduler_tasks.append(
+            SchedulerTask(
+                id=task.id,
+                title=task.title,
+                estimated_minutes=max(1, remaining_estimate),
+                priority=task.priority,
+                created_at=task.created_at,
+                due_date=task.due_date,
+                earliest_start_at=task.earliest_start_at,
+                splitting_allowed=task.splitting_allowed,
+            )
+        )
+        scheduler_progress.extend(preserved_progress)
+
+    return SchedulerTaskInputs(tasks=scheduler_tasks, task_progress=scheduler_progress)
 
 
 def _scheduler_configuration(preferences: UserPreferences | None) -> dict[str, object]:

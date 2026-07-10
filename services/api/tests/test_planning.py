@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
+from threading import Barrier
+from unittest.mock import Mock
+
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import select
-from unittest.mock import Mock
 
 from api_service.application.planning import (
+    PlanningConflictError,
     PlanningResourceNotFoundError,
     PlanningService,
 )
+from api_service.contracts.planning import TaskProgressCreateRequest
 from api_service.database import Database
 from api_service.domain.auth import SESSION_COOKIE_NAME
 from api_service.infrastructure.models import (
@@ -495,8 +500,6 @@ def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
         set(progress) for progress in scheduler_client.schedule_request["task_progress"]
     ] == [
         {"task_id", "completed_minutes", "recorded_at"},
-        {"task_id", "completed_minutes", "recorded_at"},
-        {"task_id", "completed_minutes", "recorded_at"},
     ]
     assert [
         (
@@ -506,8 +509,6 @@ def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
         )
         for progress in scheduler_client.schedule_request["task_progress"]
     ] == [
-        (tasks["Reply to inbox"], 45, "2026-06-22T08:45:00+02:00"),
-        (tasks["Write report"], 90, "2026-06-22T11:30:00+02:00"),
         (tasks["Study notes"], 60, "2026-06-22T14:00:00+02:00"),
     ]
     assert [
@@ -672,6 +673,369 @@ def test_task_progress_is_user_scoped_and_cannot_exceed_estimate(
     assert cross_user_task.status_code == 404
 
 
+def test_completed_task_progress_is_authoritative_across_planning_days(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 45,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+
+    completed = client.post(
+        f"/planning/days/{day_a['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 45,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    )
+    extra_on_next_day = client.post(
+        f"/planning/days/{day_b['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 1,
+            "recorded_at": "2026-07-02T09:00:00+02:00",
+        },
+    )
+    listed_tasks = client.get("/planning/tasks")
+    day_b_progress = client.get(f"/planning/days/{day_b['id']}/task-progress")
+
+    scheduler_client = CapturingSchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+    generated = client.post(f"/planning/days/{day_b['id']}/generate-plan")
+
+    assert completed.status_code == 201
+    assert extra_on_next_day.status_code == 409
+    assert listed_tasks.status_code == 200
+    assert listed_tasks.json()[0]["completed_minutes"] == 45
+    assert listed_tasks.json()[0]["remaining_minutes"] == 0
+    assert day_b_progress.status_code == 200
+    assert day_b_progress.json() == []
+    assert generated.status_code == 201
+    assert scheduler_client.request["tasks"] == []
+    assert scheduler_client.request["task_progress"] == []
+
+
+def test_task_update_cannot_lower_estimate_below_cross_day_progress(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 90,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    first_progress = client.post(
+        f"/planning/days/{day_a['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 30,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    )
+    second_progress = client.post(
+        f"/planning/days/{day_b['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 20,
+            "recorded_at": "2026-07-02T09:00:00+02:00",
+        },
+    )
+
+    lowered = client.put(
+        f"/planning/tasks/{task['id']}",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 45,
+            "priority": 3,
+            "due_date": None,
+            "earliest_start_at": None,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    )
+    listed_tasks = client.get("/planning/tasks")
+
+    assert first_progress.status_code == 201
+    assert second_progress.status_code == 201
+    assert lowered.status_code == 409
+    assert lowered.json() == {
+        "detail": "Task estimate cannot be lower than recorded progress."
+    }
+    assert listed_tasks.json()[0]["estimated_minutes"] == 90
+    assert listed_tasks.json()[0]["completed_minutes"] == 50
+    assert listed_tasks.json()[0]["remaining_minutes"] == 40
+
+
+def test_concurrent_cross_day_progress_cannot_exceed_task_estimate(
+    client: TestClient, database: Database
+) -> None:
+    registered = register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 45,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    user_id = registered["user"]["id"]
+    barrier = Barrier(2)
+
+    def record_progress(planning_day_id: str, recorded_at: str) -> str:
+        barrier.wait(timeout=2)
+        session_iterator = database.session()
+        session = next(session_iterator)
+        try:
+            PlanningService().record_task_progress(
+                session,
+                user_id,
+                planning_day_id,
+                TaskProgressCreateRequest(
+                    task_id=task["id"],
+                    completed_minutes=30,
+                    recorded_at=datetime.fromisoformat(recorded_at),
+                ),
+            )
+            return "created"
+        except PlanningConflictError:
+            return "conflict"
+        finally:
+            session_iterator.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = sorted(
+            [
+                future.result()
+                for future in [
+                    executor.submit(
+                        record_progress, day_a["id"], "2026-07-01T09:00:00+02:00"
+                    ),
+                    executor.submit(
+                        record_progress, day_b["id"], "2026-07-02T09:00:00+02:00"
+                    ),
+                ]
+            ]
+        )
+
+    listed_tasks = client.get("/planning/tasks")
+    progress_a = client.get(f"/planning/days/{day_a['id']}/task-progress")
+    progress_b = client.get(f"/planning/days/{day_b['id']}/task-progress")
+
+    assert results == ["conflict", "created"]
+    assert listed_tasks.json()[0]["completed_minutes"] == 30
+    assert listed_tasks.json()[0]["remaining_minutes"] == 15
+    assert (
+        sum(record["completed_minutes"] for record in progress_a.json())
+        + sum(record["completed_minutes"] for record in progress_b.json())
+        == 30
+    )
+
+
+def test_prior_day_partial_progress_reduces_generated_plan_estimate(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 60,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    progress = client.post(
+        f"/planning/days/{day_a['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 30,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    )
+    scheduler_client = CapturingSchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+
+    generated = client.post(f"/planning/days/{day_b['id']}/generate-plan")
+    listed_tasks = client.get("/planning/tasks")
+
+    assert progress.status_code == 201
+    assert generated.status_code == 201
+    assert listed_tasks.json()[0]["completed_minutes"] == 30
+    assert listed_tasks.json()[0]["remaining_minutes"] == 30
+    assert scheduler_client.request["task_progress"] == []
+    assert scheduler_client.request["tasks"][0]["id"] == task["id"]
+    assert scheduler_client.request["tasks"][0]["estimated_minutes"] == 30
+
+
+def test_reschedule_preserves_only_selected_day_progress_after_prior_progress(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day_a = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    day_b = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare launch notes",
+            "estimated_minutes": 60,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    prior_progress = client.post(
+        f"/planning/days/{day_a['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 20,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    )
+    scheduler_client = CapturingSchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+    generated = client.post(f"/planning/days/{day_b['id']}/generate-plan")
+    current_day_progress = client.post(
+        f"/planning/days/{day_b['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 10,
+            "recorded_at": "2026-07-02T09:00:00+02:00",
+        },
+    )
+
+    revised = client.post(
+        f"/planning/days/{day_b['id']}/interruptions",
+        json={
+            "start_at": "2026-07-02T10:00:00+02:00",
+            "end_at": "2026-07-02T10:30:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-07-02T10:00:00+02:00",
+        },
+    )
+
+    assert prior_progress.status_code == 201
+    assert generated.status_code == 201
+    assert current_day_progress.status_code == 201
+    assert revised.status_code == 201
+    assert scheduler_client.request["tasks"][0]["id"] == task["id"]
+    assert scheduler_client.request["tasks"][0]["estimated_minutes"] == 40
+    assert [
+        (
+            progress["task_id"],
+            progress["completed_minutes"],
+            progress["recorded_at"],
+        )
+        for progress in scheduler_client.request["task_progress"]
+    ] == [(task["id"], 10, "2026-07-02T09:00:00+02:00")]
+
+
+def test_task_progress_list_is_ordered_empty_and_user_scoped(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    day = create_day(client)
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Prepare",
+            "estimated_minutes": 60,
+            "priority": 3,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+
+    empty = client.get(f"/planning/days/{day['id']}/task-progress")
+    later = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 15,
+            "recorded_at": "2026-07-01T10:00:00+02:00",
+        },
+    ).json()
+    earlier = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": task["id"],
+            "completed_minutes": 30,
+            "recorded_at": "2026-07-01T09:00:00+02:00",
+        },
+    ).json()
+    listed = client.get(f"/planning/days/{day['id']}/task-progress")
+
+    client.cookies.clear()
+    register(client, "bob")
+    cross_user = client.get(f"/planning/days/{day['id']}/task-progress")
+    bob_day = create_day(client)
+    bob_empty = client.get(f"/planning/days/{bob_day['id']}/task-progress")
+
+    assert empty.status_code == 200
+    assert empty.json() == []
+    assert listed.status_code == 200
+    assert [progress["id"] for progress in listed.json()] == [
+        earlier["id"],
+        later["id"],
+    ]
+    assert cross_user.status_code == 404
+    assert bob_empty.status_code == 200
+    assert bob_empty.json() == []
+
+
 def test_invalid_interruption_inputs_are_rejected(client: TestClient) -> None:
     register(client, "alice")
     day = create_day(client)
@@ -707,6 +1071,47 @@ def test_invalid_interruption_inputs_are_rejected(client: TestClient) -> None:
     assert no_snapshot.status_code == 404
     assert backwards.status_code == 422
     assert naive.status_code == 422
+
+
+def test_interruption_interval_must_belong_to_selected_planning_day(
+    client: TestClient, database: Database
+) -> None:
+    register(client, "alice")
+    day = create_day(client)
+    scheduler_client = CapturingSchedulerClient()
+    client.app.state.scheduler_client = scheduler_client
+    generated = client.post(f"/planning/days/{day['id']}/generate-plan")
+
+    yesterday = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-06-30T23:30:00+02:00",
+            "end_at": "2026-07-01T00:30:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-07-01T00:30:00+02:00",
+        },
+    )
+    tomorrow = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-07-02T09:00:00+02:00",
+            "end_at": "2026-07-02T09:30:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-07-02T09:30:00+02:00",
+        },
+    )
+
+    assert generated.status_code == 201
+    assert yesterday.status_code == 422
+    assert yesterday.json() == {
+        "detail": "Interruption interval must belong to the selected planning day."
+    }
+    assert tomorrow.status_code == 422
+    assert tomorrow.json() == {
+        "detail": "Interruption interval must belong to the selected planning day."
+    }
+    with next(database.session()) as session:
+        assert session.scalars(select(Interruption)).all() == []
 
 
 def test_generate_twice_preserves_history_and_advances_latest(
@@ -1722,6 +2127,7 @@ def test_planning_routes_require_authentication(client: TestClient) -> None:
                 "recorded_at": "2026-07-01T09:00:00+02:00",
             },
         ),
+        client.get("/planning/days/day-id/task-progress"),
         client.post(
             "/planning/days/day-id/interruptions",
             json={

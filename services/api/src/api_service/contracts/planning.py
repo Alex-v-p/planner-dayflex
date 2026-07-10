@@ -252,6 +252,8 @@ class TaskResponse(BaseModel):
     splitting_allowed: bool
     min_segment_minutes: int | None
     status: str
+    completed_minutes: int
+    remaining_minutes: int
     created_at: datetime
     updated_at: datetime
 

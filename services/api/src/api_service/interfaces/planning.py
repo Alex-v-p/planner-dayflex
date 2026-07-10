@@ -12,6 +12,7 @@ from api_service.application.planning import (
     PlanningConflictError,
     PlanningResourceNotFoundError,
     PlanningService,
+    PlanningValidationError,
     SchedulerRejectedPlanningInputsError,
     SchedulerUnavailablePlanningError,
 )
@@ -251,6 +252,8 @@ def update_task(
         task = planning_service.update_task(session, user.id, task_id, request)
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
+    except PlanningConflictError as error:
+        raise _conflict(str(error)) from error
     return TaskResponse.model_validate(task)
 
 
@@ -288,6 +291,27 @@ def record_task_progress(
     except PlanningConflictError as error:
         raise _conflict(str(error)) from error
     return TaskProgressResponse.model_validate(progress)
+
+
+@router.get(
+    "/days/{planning_day_id}/task-progress",
+    response_model=list[TaskProgressResponse],
+)
+def list_task_progress(
+    planning_day_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> list[TaskProgressResponse]:
+    """List immutable task progress records for a user-owned planning day."""
+    try:
+        progress_records = planning_service.list_task_progress(
+            session, user.id, planning_day_id
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    return [
+        TaskProgressResponse.model_validate(progress) for progress in progress_records
+    ]
 
 
 @router.post(
@@ -351,6 +375,11 @@ def report_interruption(
         )
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
+    except PlanningValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(error),
+        ) from error
     except SchedulerRejectedPlanningInputsError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
