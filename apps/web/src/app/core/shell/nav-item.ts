@@ -30,4 +30,9 @@ export const SHELL_NAV_ITEMS: readonly ShellNavItem[] = [
     path: "/planner/month",
     ariaLabel: "Open planner month overview",
   },
+  {
+    label: "Free time",
+    path: "/free-times",
+    ariaLabel: "Open free-time finder",
+  },
 ];

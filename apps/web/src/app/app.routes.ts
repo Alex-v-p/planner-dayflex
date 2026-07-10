@@ -9,6 +9,7 @@ import { NotFoundPage } from "./core/pages/not-found.page";
 import { StatusPage } from "./core/pages/status.page";
 import { SignInPage } from "./features/auth/sign-in.page";
 import { RegisterPage } from "./features/auth/register.page";
+import { FreeTimesPage } from "./features/free-times/free-times.page";
 import { PlannerOverviewPage } from "./features/planner/planner-overview.page";
 import { PlannerWorkspacePage } from "./features/planner/planner-workspace.page";
 
@@ -49,6 +50,12 @@ export const routes: Routes = [
     canActivate: [requireAuthenticatedUser],
     title: "Planner month overview",
     data: { overviewMode: "month" },
+  },
+  {
+    path: "free-times",
+    component: FreeTimesPage,
+    canActivate: [requireAuthenticatedUser],
+    title: "Free-time finder",
   },
   {
     path: "planner",
