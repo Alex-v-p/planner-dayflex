@@ -20,4 +20,14 @@ export const SHELL_NAV_ITEMS: readonly ShellNavItem[] = [
     path: "/planner",
     ariaLabel: "Open planner workspace",
   },
+  {
+    label: "Week",
+    path: "/planner/week",
+    ariaLabel: "Open planner week overview",
+  },
+  {
+    label: "Month",
+    path: "/planner/month",
+    ariaLabel: "Open planner month overview",
+  },
 ];

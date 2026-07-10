@@ -614,6 +614,155 @@ def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
         ] == first_item_times
 
 
+def test_week_and_month_overviews_summarize_current_snapshots_and_user_inputs(
+    client: TestClient, database: Database
+) -> None:
+    register(client, "alice")
+    planned_day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
+    ).json()
+    fixed_event = client.post(
+        f"/planning/days/{planned_day['id']}/fixed-events",
+        json=fixed_event_payload("Focus", "2026-07-01T09:00:00+02:00", "10:00:00"),
+    ).json()
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Write summary",
+            "estimated_minutes": 60,
+            "priority": 4,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        {
+            "items": [
+                {
+                    "kind": "fixed_event",
+                    "interval": {
+                        "start": "2026-07-01T09:00:00+02:00",
+                        "end": "2026-07-01T10:00:00+02:00",
+                    },
+                    "task_id": None,
+                },
+                {
+                    "kind": "task",
+                    "interval": {
+                        "start": "2026-07-01T10:00:00+02:00",
+                        "end": "2026-07-01T11:00:00+02:00",
+                    },
+                    "task_id": task["id"],
+                },
+                {
+                    "kind": "designated_free_time",
+                    "interval": {
+                        "start": "2026-07-01T16:00:00+02:00",
+                        "end": "2026-07-01T18:00:00+02:00",
+                    },
+                    "task_id": None,
+                },
+            ],
+            "decisions": [
+                decision("placed_in_earliest_valid_window", task["id"]),
+                decision("insufficient_remaining_day_time", task["id"]),
+                decision("designated_free_time"),
+            ],
+            "warnings": [],
+        }
+    )
+    generated = client.post(f"/planning/days/{planned_day['id']}/generate-plan")
+    incomplete_day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-02", "time_zone": "Europe/Brussels"},
+    ).json()
+    incomplete_event = client.post(
+        f"/planning/days/{incomplete_day['id']}/fixed-events",
+        json=fixed_event_payload("Call", "2026-07-01T12:00:00+02:00", "13:00:00"),
+    )
+    with next(database.session()) as session:
+        session.add(
+            Interruption(
+                id="interruption-summary",
+                planning_day_id=planned_day["id"],
+                start_at=datetime(2026, 7, 1, 14, 0, tzinfo=UTC),
+                end_at=datetime(2026, 7, 1, 14, 45, tzinfo=UTC),
+                time_zone="Europe/Brussels",
+                reported_at=datetime(2026, 7, 1, 14, 0, tzinfo=UTC),
+                created_at=datetime(2026, 7, 1, 14, 0, tzinfo=UTC),
+            )
+        )
+        session.commit()
+
+    assert fixed_event["id"]
+    assert generated.status_code == 201
+    assert incomplete_event.status_code == 201
+
+    client.cookies.clear()
+    register(client, "bob")
+    bob_day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-07-03", "time_zone": "Europe/Brussels"},
+    ).json()
+    client.post(
+        f"/planning/days/{bob_day['id']}/fixed-events",
+        json=fixed_event_payload("Private", "2026-07-01T15:00:00+02:00", "16:00:00"),
+    )
+
+    client.cookies.clear()
+    login(client, "alice")
+    week = client.get("/planning/overviews/week?start_date=2026-06-29")
+    month = client.get("/planning/overviews/month?month=2026-07-01")
+
+    assert week.status_code == 200
+    assert week.json()["start_date"] == "2026-06-29"
+    assert week.json()["end_date"] == "2026-07-05"
+    assert [day["local_date"] for day in week.json()["days"]] == [
+        "2026-06-29",
+        "2026-06-30",
+        "2026-07-01",
+        "2026-07-02",
+        "2026-07-03",
+        "2026-07-04",
+        "2026-07-05",
+    ]
+    planned_summary = week.json()["days"][2]
+    assert planned_summary == {
+        "local_date": "2026-07-01",
+        "planning_day_id": planned_day["id"],
+        "time_zone": "Europe/Brussels",
+        "status": "planned",
+        "snapshot_id": generated.json()["id"],
+        "snapshot_version": 1,
+        "planned_minutes": 60,
+        "fixed_event_count": 1,
+        "interruption_minutes": 45,
+        "unscheduled_deferred_count": 1,
+        "has_useful_free_time": True,
+    }
+    assert week.json()["days"][3] == {
+        "local_date": "2026-07-02",
+        "planning_day_id": incomplete_day["id"],
+        "time_zone": "Europe/Brussels",
+        "status": "incomplete",
+        "snapshot_id": None,
+        "snapshot_version": None,
+        "planned_minutes": 0,
+        "fixed_event_count": 1,
+        "interruption_minutes": 0,
+        "unscheduled_deferred_count": 0,
+        "has_useful_free_time": False,
+    }
+    assert week.json()["days"][4]["status"] == "empty"
+    assert week.json()["days"][4]["fixed_event_count"] == 0
+    assert month.status_code == 200
+    assert month.json()["start_date"] == "2026-07-01"
+    assert month.json()["end_date"] == "2026-07-31"
+    assert len(month.json()["days"]) == 31
+    assert month.json()["days"][0] == planned_summary
+
+
 def test_task_progress_is_user_scoped_and_cannot_exceed_estimate(
     client: TestClient,
 ) -> None:
@@ -2118,6 +2267,8 @@ def test_planning_routes_require_authentication(client: TestClient) -> None:
             json={"local_date": "2026-07-01", "time_zone": "Europe/Brussels"},
         ),
         client.get("/planning/days"),
+        client.get("/planning/overviews/week?start_date=2026-07-01"),
+        client.get("/planning/overviews/month?month=2026-07-01"),
         client.post("/planning/days/day-id/generate-plan"),
         client.post(
             "/planning/days/day-id/task-progress",

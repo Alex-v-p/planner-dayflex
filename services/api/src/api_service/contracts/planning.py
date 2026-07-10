@@ -357,6 +357,30 @@ class ScheduleSnapshotSummaryResponse(BaseModel):
     scheduler_version: str
 
 
+class PlanningDaySummaryResponse(BaseModel):
+    """One day in a week or month planning overview."""
+
+    local_date: date
+    planning_day_id: str | None
+    time_zone: str | None
+    status: str
+    snapshot_id: str | None
+    snapshot_version: int | None
+    planned_minutes: int
+    fixed_event_count: int
+    interruption_minutes: int
+    unscheduled_deferred_count: int
+    has_useful_free_time: bool
+
+
+class PlanningRangeSummaryResponse(BaseModel):
+    """Browser-facing saved-plan summary for a contiguous local date range."""
+
+    start_date: date
+    end_date: date
+    days: list[PlanningDaySummaryResponse]
+
+
 def _valid_time_zone(value: str) -> str:
     stripped = value.strip()
     try:

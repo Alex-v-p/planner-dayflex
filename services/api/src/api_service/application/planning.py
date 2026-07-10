@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from threading import Lock
 from zoneinfo import ZoneInfo
 from uuid import uuid4
@@ -18,7 +18,9 @@ from api_service.contracts.planning import (
     FixedEventCreateRequest,
     InterruptionCreateRequest,
     FixedEventUpdateRequest,
+    PlanningDaySummaryResponse,
     PlanningDayCreateRequest,
+    PlanningRangeSummaryResponse,
     TaskProgressCreateRequest,
     TaskCreateRequest,
     TaskUpdateRequest,
@@ -136,6 +138,92 @@ class PlanningService:
             )
         )
         return [_normalize_planning_day(planning_day) for planning_day in planning_days]
+
+    def summarize_planning_range(
+        self, session: Session, user_id: str, start_date: date, end_date: date
+    ) -> PlanningRangeSummaryResponse:
+        planning_days = {
+            planning_day.local_date: _normalize_planning_day(planning_day)
+            for planning_day in session.scalars(
+                select(PlanningDay)
+                .where(
+                    PlanningDay.user_id == user_id,
+                    PlanningDay.local_date >= start_date,
+                    PlanningDay.local_date <= end_date,
+                )
+                .order_by(PlanningDay.local_date)
+            )
+        }
+        planning_day_ids = [planning_day.id for planning_day in planning_days.values()]
+        snapshot_ids = [
+            planning_day.current_snapshot_id
+            for planning_day in planning_days.values()
+            if planning_day.current_snapshot_id is not None
+        ]
+
+        fixed_event_counts = _counts_by_planning_day(
+            session, FixedEvent.planning_day_id, planning_day_ids
+        )
+        interruption_minutes = _interruption_minutes_by_planning_day(
+            session, planning_day_ids
+        )
+        snapshots = _snapshots_by_id(session, snapshot_ids)
+        planned_minutes = _schedule_minutes_by_snapshot(session, snapshot_ids, "task")
+        free_time_minutes = _schedule_minutes_by_snapshot(
+            session, snapshot_ids, "designated_free_time"
+        )
+        deferred_counts = _decision_counts_by_snapshot(
+            session, snapshot_ids, DEFERRED_DECISION_REASON_CODES
+        )
+
+        summaries: list[PlanningDaySummaryResponse] = []
+        current_date = start_date
+        while current_date <= end_date:
+            planning_day = planning_days.get(current_date)
+            snapshot = (
+                snapshots.get(planning_day.current_snapshot_id)
+                if planning_day is not None
+                and planning_day.current_snapshot_id is not None
+                else None
+            )
+            summaries.append(
+                PlanningDaySummaryResponse(
+                    local_date=current_date,
+                    planning_day_id=planning_day.id if planning_day else None,
+                    time_zone=planning_day.time_zone if planning_day else None,
+                    status=_summary_status(planning_day),
+                    snapshot_id=snapshot.id if snapshot else None,
+                    snapshot_version=snapshot.version if snapshot else None,
+                    planned_minutes=(
+                        planned_minutes.get(snapshot.id, 0) if snapshot else 0
+                    ),
+                    fixed_event_count=(
+                        fixed_event_counts.get(planning_day.id, 0)
+                        if planning_day
+                        else 0
+                    ),
+                    interruption_minutes=(
+                        interruption_minutes.get(planning_day.id, 0)
+                        if planning_day
+                        else 0
+                    ),
+                    unscheduled_deferred_count=(
+                        deferred_counts.get(snapshot.id, 0) if snapshot else 0
+                    ),
+                    has_useful_free_time=(
+                        free_time_minutes.get(snapshot.id, 0) > 0
+                        if snapshot
+                        else False
+                    ),
+                )
+            )
+            current_date += timedelta(days=1)
+
+        return PlanningRangeSummaryResponse(
+            start_date=start_date,
+            end_date=end_date,
+            days=summaries,
+        )
 
     def create_fixed_event(
         self,
@@ -1051,6 +1139,104 @@ ALLOWED_SCHEDULER_DECISION_REASON_CODES = {
 ALLOWED_SCHEDULER_WARNING_CODES = {
     "locked_time_overlap_merged",
 }
+
+DEFERRED_DECISION_REASON_CODES = {
+    "blocked_by_fixed_event",
+    "blocked_by_interruption",
+    "missed_before_current_time",
+    "insufficient_time_before_deadline",
+    "insufficient_remaining_day_time",
+}
+
+
+def _summary_status(planning_day: PlanningDay | None) -> str:
+    if planning_day is None:
+        return "empty"
+    if planning_day.current_snapshot_id is None:
+        return "incomplete"
+    return "planned"
+
+
+def _counts_by_planning_day(
+    session: Session, planning_day_column: object, planning_day_ids: list[str]
+) -> dict[str, int]:
+    if not planning_day_ids:
+        return {}
+    return {
+        planning_day_id: count
+        for planning_day_id, count in session.execute(
+            select(planning_day_column, func.count())
+            .where(planning_day_column.in_(planning_day_ids))
+            .group_by(planning_day_column)
+        )
+    }
+
+
+def _interruption_minutes_by_planning_day(
+    session: Session, planning_day_ids: list[str]
+) -> dict[str, int]:
+    if not planning_day_ids:
+        return {}
+    minutes_by_day: dict[str, int] = {}
+    for planning_day_id, start_at, end_at in session.execute(
+        select(Interruption.planning_day_id, Interruption.start_at, Interruption.end_at)
+        .where(Interruption.planning_day_id.in_(planning_day_ids))
+    ):
+        minutes_by_day[planning_day_id] = minutes_by_day.get(planning_day_id, 0) + (
+            _duration_minutes(start_at, end_at)
+        )
+    return minutes_by_day
+
+
+def _snapshots_by_id(
+    session: Session, snapshot_ids: list[str]
+) -> dict[str, ScheduleSnapshot]:
+    if not snapshot_ids:
+        return {}
+    return {
+        snapshot.id: _normalize_schedule_snapshot(snapshot)
+        for snapshot in session.scalars(
+            select(ScheduleSnapshot).where(ScheduleSnapshot.id.in_(snapshot_ids))
+        )
+    }
+
+
+def _schedule_minutes_by_snapshot(
+    session: Session, snapshot_ids: list[str], kind: str
+) -> dict[str, int]:
+    if not snapshot_ids:
+        return {}
+    minutes_by_snapshot: dict[str, int] = {}
+    for snapshot_id, start_at, end_at in session.execute(
+        select(ScheduleItem.snapshot_id, ScheduleItem.start_at, ScheduleItem.end_at)
+        .where(ScheduleItem.snapshot_id.in_(snapshot_ids), ScheduleItem.kind == kind)
+    ):
+        minutes_by_snapshot[snapshot_id] = minutes_by_snapshot.get(
+            snapshot_id, 0
+        ) + _duration_minutes(start_at, end_at)
+    return minutes_by_snapshot
+
+
+def _decision_counts_by_snapshot(
+    session: Session, snapshot_ids: list[str], reason_codes: set[str]
+) -> dict[str, int]:
+    if not snapshot_ids:
+        return {}
+    return {
+        snapshot_id: count
+        for snapshot_id, count in session.execute(
+            select(ScheduleDecision.snapshot_id, func.count())
+            .where(
+                ScheduleDecision.snapshot_id.in_(snapshot_ids),
+                ScheduleDecision.reason_code.in_(reason_codes),
+            )
+            .group_by(ScheduleDecision.snapshot_id)
+        )
+    }
+
+
+def _duration_minutes(start_at: datetime, end_at: datetime) -> int:
+    return max(0, round((_as_utc(end_at) - _as_utc(start_at)).total_seconds() / 60))
 
 
 def _validate_scheduler_result(

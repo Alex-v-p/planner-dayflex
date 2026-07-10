@@ -67,6 +67,26 @@ export interface ScheduleSnapshot {
   readonly decisions: readonly ScheduleDecision[];
 }
 
+export interface PlanningDaySummary {
+  readonly local_date: string;
+  readonly planning_day_id: string | null;
+  readonly time_zone: string | null;
+  readonly status: "empty" | "incomplete" | "planned";
+  readonly snapshot_id: string | null;
+  readonly snapshot_version: number | null;
+  readonly planned_minutes: number;
+  readonly fixed_event_count: number;
+  readonly interruption_minutes: number;
+  readonly unscheduled_deferred_count: number;
+  readonly has_useful_free_time: boolean;
+}
+
+export interface PlanningRangeSummary {
+  readonly start_date: string;
+  readonly end_date: string;
+  readonly days: readonly PlanningDaySummary[];
+}
+
 export interface TaskProgress {
   readonly id: string;
   readonly task_id: string;
@@ -124,6 +144,18 @@ export interface InterruptionCreateRequest {
 @Injectable({ providedIn: "root" })
 export class PlannerApiService {
   private readonly api = inject(ApiClientService);
+
+  loadWeekOverview(startDate: string): Observable<PlanningRangeSummary> {
+    return this.api.getJson<PlanningRangeSummary>(
+      `/planning/overviews/week?start_date=${encodeURIComponent(startDate)}`,
+    );
+  }
+
+  loadMonthOverview(monthDate: string): Observable<PlanningRangeSummary> {
+    return this.api.getJson<PlanningRangeSummary>(
+      `/planning/overviews/month?month=${encodeURIComponent(monthDate)}`,
+    );
+  }
 
   loadWorkspaceDate(selectedDate: string): Observable<PlannerWorkspaceData> {
     return forkJoin({
