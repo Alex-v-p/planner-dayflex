@@ -20,6 +20,10 @@ import {
 
 type OverviewMode = "week" | "month";
 
+type OverviewCell =
+  | { readonly kind: "padding"; readonly id: string; readonly label: string }
+  | { readonly kind: "day"; readonly day: PlanningDaySummary };
+
 type OverviewState =
   | { readonly status: "loading"; readonly anchorDate: string }
   | {
@@ -191,6 +195,37 @@ export class PlannerOverviewPage implements OnInit {
       ? "mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-7"
       : "mt-5 grid gap-3 md:grid-cols-7";
   }
+
+  protected overviewCells(
+    summary: PlanningRangeSummary,
+  ): readonly OverviewCell[] {
+    const dayCells: OverviewCell[] = summary.days.map((day) => ({
+      kind: "day",
+      day,
+    }));
+
+    if (this.mode() !== "month") {
+      return dayCells;
+    }
+
+    const leadingPadding = mondayFirstWeekdayIndex(summary.start_date);
+    const trailingPadding = (7 - ((leadingPadding + dayCells.length) % 7)) % 7;
+    const leadingCells = Array.from({ length: leadingPadding }, (_, index) => ({
+      kind: "padding" as const,
+      id: `leading-${index}`,
+      label: "Leading empty calendar cell",
+    }));
+    const trailingCells = Array.from(
+      { length: trailingPadding },
+      (_, index) => ({
+        kind: "padding" as const,
+        id: `trailing-${index}`,
+        label: "Trailing empty calendar cell",
+      }),
+    );
+
+    return [...leadingCells, ...dayCells, ...trailingCells];
+  }
 }
 
 function overviewErrorState(anchorDate: string, error: unknown): OverviewState {
@@ -221,9 +256,13 @@ function overviewErrorState(anchorDate: string, error: unknown): OverviewState {
 
 function startOfWeek(value: string): string {
   const date = dateFromLocalDate(value);
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const mondayOffset = -mondayFirstWeekdayIndex(value);
   return localDateFromDate(addUtcDays(date, mondayOffset));
+}
+
+function mondayFirstWeekdayIndex(value: string): number {
+  const day = dateFromLocalDate(value).getUTCDay();
+  return day === 0 ? 6 : day - 1;
 }
 
 function startOfMonth(value: string): string {

@@ -144,6 +144,31 @@ describe("rendered planner overviews", () => {
     expect(text(fixture)).toContain("Jul 1, 2026 to Jul 31, 2026");
   });
 
+  it("pads month grids so month dates align to Monday-first weekday columns", async () => {
+    routeData.next({ overviewMode: "month" });
+    queryParamMap.next(convertToParamMap({ date: "2026-07-20" }));
+
+    const fixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+    const cells = overviewGridCells(fixture);
+
+    expect(cells).toHaveLength(35);
+    expect(cells.slice(0, 2).map((cell) => cell.kind)).toEqual([
+      "padding",
+      "padding",
+    ]);
+    expect(cells[2]).toEqual({ kind: "day", date: "2026-07-01" });
+    expect(cells[32]).toEqual({ kind: "day", date: "2026-07-31" });
+    expect(cells.slice(33).map((cell) => cell.kind)).toEqual([
+      "padding",
+      "padding",
+    ]);
+  });
+
   it("navigates between ranges without embedding a user id", async () => {
     const fixture = await renderOverview(
       routeData,
@@ -317,6 +342,22 @@ function buttonByText<T>(
   }
 
   return button as HTMLButtonElement;
+}
+
+function overviewGridCells<T>(
+  fixture: ComponentFixture<T>,
+): Array<
+  | { readonly kind: "padding"; readonly date?: undefined }
+  | { readonly kind: "day"; readonly date: string }
+> {
+  return Array.from(
+    (fixture.nativeElement as HTMLElement).querySelector(
+      "[data-testid='overview-grid']",
+    )?.children ?? [],
+  ).map((element) => {
+    const date = element.getAttribute("data-date");
+    return date === null ? { kind: "padding" } : { kind: "day", date };
+  });
 }
 
 async function firstValue<T>(observable: Observable<T>): Promise<T> {

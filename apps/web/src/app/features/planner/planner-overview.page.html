@@ -137,12 +137,22 @@
     </div>
 
     <div [class]="gridClass()" data-testid="overview-grid">
-      @for (day of view.summary.days; track day.local_date) {
+      @for (cell of overviewCells(view.summary); track cell.kind === "day" ?
+      cell.day.local_date : cell.id) { @if (cell.kind === "padding") {
+      <div
+        class="hidden min-h-64 rounded-lg border border-transparent lg:block"
+        aria-hidden="true"
+        data-testid="overview-padding-cell"
+        [attr.data-padding-label]="cell.label"
+      ></div>
+      } @else {
       <a
-        [routerLink]="dayLink(day)"
-        [queryParams]="{ date: day.local_date }"
+        [routerLink]="dayLink(cell.day)"
+        [queryParams]="{ date: cell.day.local_date }"
         class="block min-h-64 rounded-lg border border-mist-200 p-4 text-left transition hover:border-meadow-600 hover:bg-mist-50 focus-visible:shadow-focus"
-        [attr.aria-label]="'Open planner workspace for ' + formatDateLabel(day.local_date) + ', ' + statusLabel(day)"
+        [attr.aria-label]="'Open planner workspace for ' + formatDateLabel(cell.day.local_date) + ', ' + statusLabel(cell.day)"
+        data-testid="overview-day-cell"
+        [attr.data-date]="cell.day.local_date"
       >
         <article class="flex h-full flex-col">
           <div class="flex items-start justify-between gap-3">
@@ -150,54 +160,54 @@
               <p
                 class="text-sm font-semibold uppercase tracking-normal text-ink-600"
               >
-                {{ dayName(day.local_date) }}
+                {{ dayName(cell.day.local_date) }}
               </p>
               <p class="mt-1 text-2xl font-semibold text-ink-950">
-                {{ dayNumber(day.local_date) }}
+                {{ dayNumber(cell.day.local_date) }}
               </p>
             </div>
             <span
               class="rounded-md border px-2 py-1 text-xs font-semibold"
-              [class.border-meadow-600]="day.status === 'planned'"
-              [class.text-meadow-700]="day.status === 'planned'"
-              [class.border-mist-300]="day.status !== 'planned'"
-              [class.text-ink-600]="day.status !== 'planned'"
+              [class.border-meadow-600]="cell.day.status === 'planned'"
+              [class.text-meadow-700]="cell.day.status === 'planned'"
+              [class.border-mist-300]="cell.day.status !== 'planned'"
+              [class.text-ink-600]="cell.day.status !== 'planned'"
             >
-              {{ statusLabel(day) }}
+              {{ statusLabel(cell.day) }}
             </span>
           </div>
 
-          @if (hasAnySignal(day)) {
+          @if (hasAnySignal(cell.day)) {
           <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
             <div>
               <dt class="text-ink-600">Planned</dt>
               <dd class="mt-1 font-semibold text-ink-950">
-                {{ formatDuration(day.planned_minutes) }}
+                {{ formatDuration(cell.day.planned_minutes) }}
               </dd>
             </div>
             <div>
               <dt class="text-ink-600">Fixed</dt>
               <dd class="mt-1 font-semibold text-ink-950">
-                {{ day.fixed_event_count }}
+                {{ cell.day.fixed_event_count }}
               </dd>
             </div>
             <div>
               <dt class="text-ink-600">Interruptions</dt>
               <dd class="mt-1 font-semibold text-ink-950">
-                {{ formatDuration(day.interruption_minutes) }}
+                {{ formatDuration(cell.day.interruption_minutes) }}
               </dd>
             </div>
             <div>
               <dt class="text-ink-600">Deferred</dt>
               <dd class="mt-1 font-semibold text-ink-950">
-                {{ day.unscheduled_deferred_count }}
+                {{ cell.day.unscheduled_deferred_count }}
               </dd>
             </div>
           </dl>
           <p class="mt-4 text-sm font-medium text-ink-700">
             Useful free time:
             <span class="text-ink-950">
-              {{ day.has_useful_free_time ? "Yes" : "No" }}
+              {{ cell.day.has_useful_free_time ? "Yes" : "No" }}
             </span>
           </p>
           } @else {
@@ -209,7 +219,7 @@
           }
         </article>
       </a>
-      }
+      } }
     </div>
   </section>
   } }
