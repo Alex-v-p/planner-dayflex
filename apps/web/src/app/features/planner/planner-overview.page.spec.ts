@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from "@angular/core/testing";
 import { ActivatedRoute, Router, convertToParamMap } from "@angular/router";
 import { BehaviorSubject, Observable, of, throwError } from "rxjs";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientService } from "../../core/api/api-client.service";
 import { PlannerApiService, PlanningRangeSummary } from "./planner-api.service";
@@ -142,6 +142,35 @@ describe("rendered planner overviews", () => {
     expect(plannerApi.monthStarts).toEqual(["2026-07-01"]);
     expect(text(fixture)).toContain("Month overview");
     expect(text(fixture)).toContain("Jul 1, 2026 to Jul 31, 2026");
+  });
+
+  it("keeps date-only month labels stable in negative-offset runtimes", async () => {
+    const restoreDateTimeFormat = mockNegativeOffsetRuntimeDateFormatting();
+    routeData.next({ overviewMode: "month" });
+    queryParamMap.next(convertToParamMap({ date: "2026-07-20" }));
+
+    try {
+      const fixture = await renderOverview(
+        routeData,
+        queryParamMap,
+        plannerApi,
+        router,
+      );
+
+      expect(text(fixture)).toContain("Jul 1, 2026 to Jul 31, 2026");
+      expect(
+        linkByAriaLabel(
+          fixture,
+          "Open planner workspace for Jul 1, 2026, No saved day",
+        )?.getAttribute("href"),
+      ).toBe("/planner?date=2026-07-01");
+      expect(firstDayHeading(fixture)).toBe("Wed");
+      expect(announcement(fixture)).toContain(
+        "Month overview loaded for Jul 1, 2026 through Jul 31, 2026.",
+      );
+    } finally {
+      restoreDateTimeFormat();
+    }
   });
 
   it("pads month grids so month dates align to Monday-first weekday columns", async () => {
@@ -358,6 +387,49 @@ function overviewGridCells<T>(
     const date = element.getAttribute("data-date");
     return date === null ? { kind: "padding" } : { kind: "day", date };
   });
+}
+
+function firstDayHeading<T>(fixture: ComponentFixture<T>): string {
+  return (
+    (fixture.nativeElement as HTMLElement).querySelector(
+      "[data-testid='overview-day-cell'] p",
+    )?.textContent ?? ""
+  ).trim();
+}
+
+function mockNegativeOffsetRuntimeDateFormatting(): () => void {
+  const RealDateTimeFormat = Intl.DateTimeFormat;
+  const mockDateTimeFormat = function MockDateTimeFormat(
+    locales?: Intl.LocalesArgument,
+    options?: Intl.DateTimeFormatOptions,
+  ) {
+    const formatter = new RealDateTimeFormat(locales, {
+      ...options,
+      timeZone: "UTC",
+    });
+    return {
+      format(value?: Date | number) {
+        const date =
+          value === undefined
+            ? new Date()
+            : value instanceof Date
+              ? value
+              : new Date(value);
+        const displayDate =
+          options?.timeZone === "UTC"
+            ? date
+            : new Date(date.getTime() - 7 * 60 * 60 * 1000);
+        return formatter.format(displayDate);
+      },
+    } as Intl.DateTimeFormat;
+  } as typeof Intl.DateTimeFormat;
+  const spy = vi
+    .spyOn(Intl, "DateTimeFormat")
+    .mockImplementation(mockDateTimeFormat);
+
+  return () => {
+    spy.mockRestore();
+  };
 }
 
 async function firstValue<T>(observable: Observable<T>): Promise<T> {

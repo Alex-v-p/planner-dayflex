@@ -151,9 +151,10 @@ export class PlannerOverviewPage implements OnInit {
   }
 
   protected dayName(value: string): string {
-    return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(
-      dateFromLocalDate(value),
-    );
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: "UTC",
+      weekday: "short",
+    }).format(dateFromLocalDate(value));
   }
 
   protected dayNumber(value: string): string {
@@ -322,6 +323,7 @@ function localDateFromDate(date: Date): string {
 
 function formatDateLabel(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
+    timeZone: "UTC",
     month: "short",
     day: "numeric",
     year: "numeric",
