@@ -56,6 +56,8 @@ def test_health_auth_and_planning_routes_are_published(client: TestClient) -> No
         "/planning/days/{planning_day_id}/schedule",
         "/planning/days/{planning_day_id}/schedule-snapshots",
         "/planning/days/{planning_day_id}/task-progress",
+        "/planning/overviews/month",
+        "/planning/overviews/week",
         "/planning/preferences",
         "/planning/schedule-snapshots/{snapshot_id}",
         "/planning/tasks",

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from api_service.application.planning import (
@@ -24,6 +24,7 @@ from api_service.contracts.planning import (
     InterruptionCreateRequest,
     PlanningDayCreateRequest,
     PlanningDayResponse,
+    PlanningRangeSummaryResponse,
     ScheduleDecisionResponse,
     ScheduleItemResponse,
     ScheduleSnapshotResponse,
@@ -109,6 +110,46 @@ def list_planning_days(
         PlanningDayResponse.model_validate(planning_day)
         for planning_day in planning_service.list_planning_days(session, user.id)
     ]
+
+
+@router.get("/overviews/week", response_model=PlanningRangeSummaryResponse)
+def get_week_overview(
+    start_date: date = Query(
+        ..., description="First local date in the seven-day overview."
+    ),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> PlanningRangeSummaryResponse:
+    """Return a seven-day saved-plan summary for the authenticated user."""
+    return planning_service.summarize_planning_range(
+        session,
+        user.id,
+        start_date,
+        start_date + timedelta(days=6),
+    )
+
+
+@router.get("/overviews/month", response_model=PlanningRangeSummaryResponse)
+def get_month_overview(
+    month: date = Query(
+        ...,
+        description="Any date in the local month to summarize; use YYYY-MM-01.",
+    ),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> PlanningRangeSummaryResponse:
+    """Return a calendar-month saved-plan summary for the authenticated user."""
+    start_date = month.replace(day=1)
+    if start_date.month == 12:
+        next_month = start_date.replace(year=start_date.year + 1, month=1)
+    else:
+        next_month = start_date.replace(month=start_date.month + 1)
+    return planning_service.summarize_planning_range(
+        session,
+        user.id,
+        start_date,
+        next_month - timedelta(days=1),
+    )
 
 
 @router.get("/days/{planning_day_id}", response_model=PlanningDayResponse)
