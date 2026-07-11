@@ -309,6 +309,94 @@ class InterruptionCreateRequest(PlanningRequest):
         return self
 
 
+class ParseTaskRequest(PlanningRequest):
+    """Browser-facing informal task parse request."""
+
+    text: StrictStr = Field(min_length=1, max_length=2000)
+    local_date: date | None = None
+    time_zone: StrictStr | None = Field(default=None, min_length=1, max_length=64)
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        return _non_empty_string(value, "text")
+
+    @field_validator("local_date", mode="before")
+    @classmethod
+    def validate_local_date(cls, value: object) -> object:
+        return _date_only(value, "local_date")
+
+    @field_validator("time_zone")
+    @classmethod
+    def validate_optional_time_zone(cls, value: str | None) -> str | None:
+        return None if value is None else _valid_time_zone(value)
+
+
+class ParseInterruptionRequest(ParseTaskRequest):
+    """Browser-facing informal interruption parse request."""
+
+
+class TaskProposalResponse(BaseModel):
+    """Editable proposed task fields."""
+
+    title: str | None = None
+    estimated_minutes: int | None = None
+    priority: int | None = None
+    due_date: date | None = None
+    earliest_start_at: datetime | None = None
+    splitting_allowed: bool | None = None
+    min_segment_minutes: int | None = None
+
+
+class InterruptionProposalResponse(BaseModel):
+    """Editable proposed interruption fields."""
+
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    time_zone: str | None = None
+    reported_at: datetime | None = None
+
+
+class ParseTaskResponse(BaseModel):
+    """Browser-facing task parse result with explicit fallback metadata."""
+
+    status: Literal["suggested", "fallback"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    proposed_fields: TaskProposalResponse
+    fallback_reason: (
+        Literal[
+            "ai_disabled",
+            "service_unavailable",
+            "timeout",
+            "provider_error",
+            "invalid_response",
+            "unable_to_parse",
+        ]
+        | None
+    )
+    error_code: str | None
+
+
+class ParseInterruptionResponse(BaseModel):
+    """Browser-facing interruption parse result with explicit fallback metadata."""
+
+    status: Literal["suggested", "fallback"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    proposed_fields: InterruptionProposalResponse
+    fallback_reason: (
+        Literal[
+            "ai_disabled",
+            "service_unavailable",
+            "timeout",
+            "provider_error",
+            "invalid_response",
+            "unable_to_parse",
+        ]
+        | None
+    )
+    error_code: str | None
+
+
 class ScheduleItemResponse(BaseModel):
     """One browser-facing block in a persisted schedule snapshot."""
 

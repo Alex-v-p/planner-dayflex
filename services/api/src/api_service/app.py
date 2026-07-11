@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from .config import Settings
 from .database import Database
+from .infrastructure.ai_client import AiClient, DisabledAiClient, HttpAiClient
 from .infrastructure.scheduler_client import HttpSchedulerClient, SchedulerClient
 from .interfaces.auth import router as auth_router
 from .interfaces.planning import router as planning_router
@@ -33,6 +34,7 @@ def create_app(
     settings: Settings | None = None,
     database: Database | None = None,
     scheduler_client: SchedulerClient | None = None,
+    ai_client: AiClient | None = None,
 ) -> FastAPI:
     """Build an API instance from explicit settings and its owned database boundary."""
     configured_settings = settings or Settings()
@@ -41,6 +43,15 @@ def create_app(
     configured_scheduler_client = scheduler_client or HttpSchedulerClient(
         str(configured_settings.scheduler_base_url)
     )
+    if ai_client is not None:
+        configured_ai_client = ai_client
+    elif configured_settings.ai_service_base_url is None:
+        configured_ai_client = DisabledAiClient()
+    else:
+        configured_ai_client = HttpAiClient(
+            str(configured_settings.ai_service_base_url),
+            timeout_seconds=configured_settings.ai_client_timeout_seconds,
+        )
 
     app = FastAPI(
         title="planner-dayflex application API",
@@ -53,6 +64,7 @@ def create_app(
     app.state.settings = configured_settings
     app.state.database = configured_database
     app.state.scheduler_client = configured_scheduler_client
+    app.state.ai_client = configured_ai_client
 
     @app.exception_handler(RequestValidationError)
     def request_validation_exception_handler(

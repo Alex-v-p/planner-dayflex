@@ -1,16 +1,18 @@
 # application API service
 
 `services/api/` is the browser-facing application boundary for
-`planner-dayflex`. It will own browser DTOs, input validation, authorization,
-persistence, and orchestration when the relevant scoped tickets arrive. It
-does not contain scheduler algorithms, AI behavior, Docker, or Compose topology.
+`planner-dayflex`. It owns browser DTOs, input validation, authorization,
+persistence, and orchestration. It does not contain scheduler algorithms,
+provider-specific AI behavior, Docker, or Compose topology.
 
 The current service includes the TKT-008 foundation, TKT-009 username/password
 authentication, TKT-010 persisted planning inputs, TKT-011 daily plan
 generation through the scheduler service, and TKT-012 progress/interruption
-recovery. The lasting dependency
-and boundary choice is recorded in
-[ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md).
+recovery. TKT-022 adds authenticated planning AI parse proxy endpoints backed by
+the optional AI service. The lasting dependency and boundary choices are
+recorded in
+[ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md)
+and [ADR 0004](../../docs/architecture/decisions/0004-ai-service-boundary.md).
 
 ## Toolchain
 
@@ -43,6 +45,8 @@ $env:PLANNER_API_DATABASE_URL = "postgresql+psycopg://<user>:<password>@<host>:5
 $env:PLANNER_API_LOG_LEVEL = "INFO"
 $env:PLANNER_API_SCHEDULER_BASE_URL = "http://127.0.0.1:8001"
 $env:PLANNER_API_SCHEDULER_VERSION = "0.1.0"
+$env:PLANNER_API_AI_SERVICE_BASE_URL = "http://127.0.0.1:8002"
+$env:PLANNER_API_AI_CLIENT_TIMEOUT_SECONDS = "2.0"
 python -m uv run uvicorn api_service.app:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
@@ -56,6 +60,11 @@ use a local test database.
 used only by the explicit scheduler HTTP client. `PLANNER_API_SCHEDULER_VERSION`
 defaults to `0.1.0` and is persisted with each generated schedule snapshot for
 history and auditability.
+
+`PLANNER_API_AI_SERVICE_BASE_URL` is optional. When unset, the planning AI parse
+routes return an explicit `ai_disabled` fallback and normal planning remains
+available. `PLANNER_API_AI_CLIENT_TIMEOUT_SECONDS` defaults to `2.0` and is
+bounded so optional parsing cannot block planning or recovery.
 
 `GET /health` returns `200` with `{"status":"ok"}` for process liveness. It
 does not run a database query: a database outage should not make a process
@@ -125,6 +134,8 @@ query through the current user's ID:
 - `DELETE /planning/days/{planning_day_id}/fixed-events/{fixed_event_id}`
 - `POST /planning/days/{planning_day_id}/task-progress`
 - `POST /planning/days/{planning_day_id}/interruptions`
+- `POST /planning/ai/parse-task`
+- `POST /planning/ai/parse-interruption`
 - `POST /planning/tasks`
 - `GET /planning/tasks`
 - `PUT /planning/tasks/{task_id}`
@@ -180,7 +191,30 @@ failures return `503` and roll back the interruption plus revised snapshot.
 
 Service and container impact for TKT-012: the application API service owns
 validation, authorization, persistence, and scheduler orchestration for recovery.
-No AI service, worker, queue, Docker image, or Compose topology is added.
+TKT-022 service and container impact: the API gains an internal AI-service
+client and authenticated parse proxy routes. No persistence, migration, direct
+provider access, API Docker image, worker, queue, or Compose topology is added.
+
+## Planning AI parsing
+
+`POST /planning/ai/parse-task` and `POST /planning/ai/parse-interruption`
+accept informal text plus optional local date and time zone. They call only the
+internal `services/ai` HTTP contract when `PLANNER_API_AI_SERVICE_BASE_URL` is
+configured. They never persist raw text or proposals, never schedule work, and
+never call a provider directly.
+
+All disabled, unreachable, timeout, non-success, malformed JSON, and
+schema-invalid AI-service paths return a safe fallback result:
+
+```json
+{
+  "status": "fallback",
+  "confidence": 0.0,
+  "proposed_fields": {},
+  "fallback_reason": "service_unavailable",
+  "error_code": "ai_service_unavailable"
+}
+```
 
 ## Migrations
 

@@ -65,3 +65,15 @@ def test_test_configuration_accepts_an_isolated_sqlite_url() -> None:
         settings.database_url.get_secret_value()
         == "sqlite+pysqlite:///isolated-test.db"
     )
+
+
+def test_ai_service_configuration_is_api_boundary_only() -> None:
+    settings = Settings(
+        environment=Environment.TEST,
+        database_url="sqlite+pysqlite:///isolated-test.db",
+        ai_service_base_url="http://127.0.0.1:8002",
+        ai_client_timeout_seconds=1.5,
+    )
+
+    assert str(settings.ai_service_base_url) == "http://127.0.0.1:8002/"
+    assert settings.ai_client_timeout_seconds == 1.5
