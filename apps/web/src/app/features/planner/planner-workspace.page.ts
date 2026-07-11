@@ -9,7 +9,7 @@ import {
 } from "@angular/core";
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { FormsModule } from "@angular/forms";
-import { ActivatedRoute, Router } from "@angular/router";
+import { ActivatedRoute, Router, RouterLink } from "@angular/router";
 import {
   Observable,
   Subject,
@@ -125,7 +125,7 @@ interface ScheduleSummary {
 @Component({
   selector: "pdf-planner-workspace-page",
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, RouterLink],
   templateUrl: "./planner-workspace.page.html",
 })
 export class PlannerWorkspacePage implements OnInit {

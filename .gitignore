@@ -13,3 +13,4 @@
 **/.angular/cache/
 **/dist/
 **/coverage/
+**/test-results/

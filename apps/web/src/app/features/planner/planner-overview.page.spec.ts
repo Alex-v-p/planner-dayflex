@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from "@angular/core/testing";
+import { HttpErrorResponse } from "@angular/common/http";
 import { ActivatedRoute, Router, convertToParamMap } from "@angular/router";
 import { BehaviorSubject, Observable, of, throwError } from "rxjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -230,6 +231,24 @@ describe("rendered planner overviews", () => {
       "Planner overview data did not load.",
     );
   });
+
+  it("links permission failures back to sign-in with the selected overview context", async () => {
+    plannerApi.error = new HttpErrorResponse({ status: 403 });
+    routeData.next({ overviewMode: "month" });
+    queryParamMap.next(convertToParamMap({ date: "2026-07-20" }));
+
+    const fixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+
+    expect(text(fixture)).toContain("Overview unavailable");
+    expect(linkByText(fixture, "Sign in again")?.getAttribute("href")).toBe(
+      "/sign-in?returnUrl=%2Fplanner%2Fmonth%3Fdate%3D2026-07-20",
+    );
+  });
 });
 
 class FakeApiClient {
@@ -353,6 +372,18 @@ function linkByAriaLabel<T>(
   label: string,
 ): HTMLAnchorElement | null {
   return fixture.nativeElement.querySelector(`a[aria-label="${label}"]`);
+}
+
+function linkByText<T>(
+  fixture: ComponentFixture<T>,
+  linkText: string,
+): HTMLAnchorElement | null {
+  const links = Array.from(
+    (fixture.nativeElement as HTMLElement).querySelectorAll("a"),
+  );
+  return (
+    links.find((candidate) => candidate.textContent?.includes(linkText)) ?? null
+  );
 }
 
 function buttonByText<T>(

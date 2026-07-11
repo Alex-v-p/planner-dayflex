@@ -96,6 +96,21 @@
       Free-time finder unavailable
     </p>
     <p class="mt-2 text-sm leading-6 text-ink-600">{{ view.message }}</p>
+    <a
+      routerLink="/sign-in"
+      [queryParams]="{
+        returnUrl:
+          '/free-times?start_date=' +
+          view.filters.startDate +
+          '&end_date=' +
+          view.filters.endDate +
+          '&minimum_minutes=' +
+          view.filters.minimumMinutes
+      }"
+      class="mt-4 inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+    >
+      Sign in again
+    </a>
   </section>
   } @else if (view.status === "error") {
   <section

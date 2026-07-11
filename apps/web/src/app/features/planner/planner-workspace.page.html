@@ -87,6 +87,13 @@
       We cannot open {{ formatDateLabel(view.selectedDate) }}
     </p>
     <p class="mt-2 text-sm leading-6 text-ink-600">{{ view.message }}</p>
+    <a
+      routerLink="/sign-in"
+      [queryParams]="{ returnUrl: '/planner?date=' + view.selectedDate }"
+      class="mt-4 inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+    >
+      Sign in again
+    </a>
   </section>
   } @else if (view.status === "error") {
   <section
