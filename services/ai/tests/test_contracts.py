@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 from fastapi.testclient import TestClient
 
 from ai_service.app import create_app
@@ -142,9 +140,7 @@ def test_schema_errors_use_safe_envelope_without_user_text() -> None:
     assert secret_text not in response.text
 
 
-def test_logs_do_not_emit_user_text_provider_payload_or_credentials(
-    caplog,
-) -> None:
+def test_logs_do_not_emit_user_text_provider_payload_or_credentials(capsys) -> None:
     credential = "secret-provider-token"
     app_client = TestClient(
         create_app(
@@ -156,14 +152,14 @@ def test_logs_do_not_emit_user_text_provider_payload_or_credentials(
         )
     )
 
-    with caplog.at_level(logging.INFO):
-        response = app_client.post(
-            "/v1/parse-task",
-            json={"text": "private task text for 30 minutes"},
-        )
+    response = app_client.post(
+        "/v1/parse-task",
+        json={"text": "private task text for 30 minutes"},
+    )
 
     assert response.status_code == 200
-    rendered_logs = "\n".join(record.getMessage() for record in caplog.records)
+    rendered_logs = capsys.readouterr().err
+    assert "parse_completed" in rendered_logs
     assert "private task text" not in rendered_logs
     assert credential not in rendered_logs
     assert "provider_payload" not in rendered_logs

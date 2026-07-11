@@ -131,6 +131,102 @@ def test_ai_client_falls_back_for_unusable_responses(
     assert result.error_code == code
 
 
+@pytest.mark.parametrize(
+    "proposed_fields",
+    [
+        {"title": "   "},
+        {"title": "x" * 201},
+        {"estimated_minutes": -5},
+        {"estimated_minutes": 1441},
+        {"priority": 99},
+        {"earliest_start_at": "2026-07-11T09:00:00"},
+        {
+            "estimated_minutes": 30,
+            "splitting_allowed": True,
+            "min_segment_minutes": 45,
+        },
+        {"splitting_allowed": False, "min_segment_minutes": 15},
+        {"min_segment_minutes": 5},
+    ],
+)
+def test_ai_client_falls_back_for_invalid_task_proposals(
+    monkeypatch: pytest.MonkeyPatch, proposed_fields: dict[str, object]
+) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *args, **kwargs: httpx.Response(
+            200,
+            json={
+                "status": "suggested",
+                "confidence": 0.8,
+                "proposed_fields": {
+                    "title": "Write report",
+                    "estimated_minutes": 45,
+                    "priority": 4,
+                    "due_date": None,
+                    "earliest_start_at": None,
+                    "splitting_allowed": None,
+                    "min_segment_minutes": None,
+                    **proposed_fields,
+                },
+                "fallback_reason": None,
+                "error_code": None,
+            },
+        ),
+    )
+
+    result = HttpAiClient("http://ai.test").parse_task({"text": "Write report"})
+
+    assert result.status == "fallback"
+    assert result.fallback_reason == "invalid_response"
+    assert result.error_code == "ai_service_invalid_response"
+
+
+@pytest.mark.parametrize(
+    "proposed_fields",
+    [
+        {"time_zone": "not/a-zone"},
+        {"start_at": "2026-07-11T09:00:00"},
+        {"end_at": "2026-07-11T10:00:00"},
+        {"reported_at": "2026-07-11T09:00:00"},
+        {
+            "start_at": "2026-07-11T11:00:00+02:00",
+            "end_at": "2026-07-11T10:00:00+02:00",
+        },
+    ],
+)
+def test_ai_client_falls_back_for_invalid_interruption_proposals(
+    monkeypatch: pytest.MonkeyPatch, proposed_fields: dict[str, object]
+) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *args, **kwargs: httpx.Response(
+            200,
+            json={
+                "status": "suggested",
+                "confidence": 0.8,
+                "proposed_fields": {
+                    "start_at": "2026-07-11T09:00:00+02:00",
+                    "end_at": "2026-07-11T10:00:00+02:00",
+                    "time_zone": "Europe/Brussels",
+                    "reported_at": "2026-07-11T09:00:00+02:00",
+                    **proposed_fields,
+                },
+                "fallback_reason": None,
+                "error_code": None,
+            },
+        ),
+    )
+
+    result = HttpAiClient("http://ai.test").parse_interruption({"text": "from 9 to 10"})
+
+    assert result.status == "fallback"
+    assert result.fallback_reason == "invalid_response"
+    assert result.error_code == "ai_service_invalid_response"
+
+
 def test_ai_client_uses_bounded_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     captured = {}
 

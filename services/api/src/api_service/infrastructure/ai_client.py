@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal, Protocol
+from typing import Literal, Protocol, Self
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
-from typing import Self
-
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 
 FallbackReason = Literal[
@@ -26,13 +35,42 @@ class TaskProposalDTO(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    title: str | None = None
-    estimated_minutes: int | None = None
-    priority: int | None = None
+    title: StrictStr | None = Field(default=None, min_length=1, max_length=200)
+    estimated_minutes: StrictInt | None = Field(default=None, gt=0, le=1440)
+    priority: StrictInt | None = Field(default=None, ge=1, le=5)
     due_date: date | None = None
     earliest_start_at: datetime | None = None
-    splitting_allowed: bool | None = None
-    min_segment_minutes: int | None = None
+    splitting_allowed: StrictBool | None = None
+    min_segment_minutes: StrictInt | None = Field(default=None, ge=15, le=1440)
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("title must not be blank")
+        return stripped
+
+    @field_validator("earliest_start_at")
+    @classmethod
+    def validate_earliest_start_at(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else _aware_datetime(value)
+
+    @model_validator(mode="after")
+    def validate_split_settings(self) -> Self:
+        if self.splitting_allowed is False and self.min_segment_minutes is not None:
+            raise ValueError(
+                "min_segment_minutes must be omitted when splitting is not allowed"
+            )
+        if (
+            self.estimated_minutes is not None
+            and self.min_segment_minutes is not None
+            and self.min_segment_minutes > self.estimated_minutes
+        ):
+            raise ValueError("min_segment_minutes cannot exceed estimated_minutes")
+        return self
 
 
 class InterruptionProposalDTO(BaseModel):
@@ -42,8 +80,32 @@ class InterruptionProposalDTO(BaseModel):
 
     start_at: datetime | None = None
     end_at: datetime | None = None
-    time_zone: str | None = None
+    time_zone: StrictStr | None = Field(default=None, min_length=1, max_length=64)
     reported_at: datetime | None = None
+
+    @field_validator("time_zone")
+    @classmethod
+    def validate_time_zone(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        stripped = value.strip()
+        try:
+            ZoneInfo(stripped)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("time_zone must be a valid IANA time zone") from error
+        return stripped
+
+    @field_validator("start_at", "end_at", "reported_at")
+    @classmethod
+    def validate_datetimes(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else _aware_datetime(value)
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> Self:
+        if self.start_at is not None and self.end_at is not None:
+            if self.end_at <= self.start_at:
+                raise ValueError("end_at must be after start_at")
+        return self
 
 
 class ParseTaskResultDTO(BaseModel):
@@ -188,3 +250,9 @@ def _validate_fallback_metadata(
             raise ValueError("suggested results cannot include fallback metadata")
     elif fallback_reason is None:
         raise ValueError("fallback results require fallback_reason")
+
+
+def _aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("datetime fields must include an explicit UTC offset")
+    return value
