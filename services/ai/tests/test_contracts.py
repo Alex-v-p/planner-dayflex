@@ -1,0 +1,169 @@
+"""Contract and provider behavior tests for the AI service."""
+
+from __future__ import annotations
+
+import logging
+
+from fastapi.testclient import TestClient
+
+from ai_service.app import create_app
+from ai_service.infrastructure.config import AiProvider, Settings
+
+
+def client(provider_enabled: bool = True, provider: AiProvider = AiProvider.MOCK):
+    return TestClient(
+        create_app(Settings(provider_enabled=provider_enabled, provider=provider))
+    )
+
+
+def test_health_reports_liveness_when_provider_is_disabled() -> None:
+    response = client(provider_enabled=False).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_mock_provider_returns_valid_task_suggestion() -> None:
+    response = client().post(
+        "/v1/parse-task",
+        json={
+            "text": "Write proposal for 90 minutes priority 5 today after 9",
+            "local_date": "2026-07-11",
+            "time_zone": "Europe/Brussels",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "suggested",
+        "confidence": 0.72,
+        "proposed_fields": {
+            "title": "Write proposal",
+            "estimated_minutes": 90,
+            "priority": 5,
+            "due_date": "2026-07-11",
+            "earliest_start_at": "2026-07-11T09:00:00+02:00",
+            "splitting_allowed": None,
+            "min_segment_minutes": None,
+        },
+        "fallback_reason": None,
+        "error_code": None,
+    }
+
+
+def test_mock_provider_returns_interruption_suggestion() -> None:
+    response = client().post(
+        "/v1/parse-interruption",
+        json={
+            "text": "Dentist from 14:00 to 15:15",
+            "local_date": "2026-07-11",
+            "time_zone": "Europe/Brussels",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "suggested"
+    assert body["confidence"] == 0.74
+    assert body["proposed_fields"] == {
+        "start_at": "2026-07-11T14:00:00+02:00",
+        "end_at": "2026-07-11T15:15:00+02:00",
+        "time_zone": "Europe/Brussels",
+        "reported_at": "2026-07-11T14:00:00+02:00",
+    }
+    assert body["fallback_reason"] is None
+    assert body["error_code"] is None
+
+
+def test_ambiguous_text_returns_explicit_fallback() -> None:
+    response = client().post(
+        "/v1/parse-task",
+        json={"text": "ambiguous ???", "local_date": "2026-07-11"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "fallback",
+        "confidence": 0.0,
+        "proposed_fields": {
+            "title": None,
+            "estimated_minutes": None,
+            "priority": None,
+            "due_date": None,
+            "earliest_start_at": None,
+            "splitting_allowed": None,
+            "min_segment_minutes": None,
+        },
+        "fallback_reason": "unable_to_parse",
+        "error_code": "unable_to_parse",
+    }
+
+
+def test_disabled_provider_returns_explicit_fallback() -> None:
+    response = client(provider_enabled=False).post(
+        "/v1/parse-interruption",
+        json={
+            "text": "from 13 to 14",
+            "local_date": "2026-07-11",
+            "time_zone": "Europe/Brussels",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "fallback"
+    assert response.json()["fallback_reason"] == "ai_disabled"
+    assert response.json()["error_code"] == "ai_disabled"
+
+
+def test_external_placeholder_returns_provider_error_fallback() -> None:
+    response = client(provider_enabled=True, provider=AiProvider.EXTERNAL).post(
+        "/v1/parse-task",
+        json={"text": "Write proposal", "local_date": "2026-07-11"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "fallback"
+    assert response.json()["fallback_reason"] == "provider_error"
+    assert response.json()["error_code"] == "provider_not_configured"
+
+
+def test_schema_errors_use_safe_envelope_without_user_text() -> None:
+    secret_text = "private medical appointment"
+    response = client().post(
+        "/v1/parse-task",
+        json={"text": secret_text, "time_zone": "not/a-zone"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "validation_error",
+        "details": ["The AI parse request is invalid."],
+    }
+    assert secret_text not in response.text
+
+
+def test_logs_do_not_emit_user_text_provider_payload_or_credentials(
+    caplog,
+) -> None:
+    credential = "secret-provider-token"
+    app_client = TestClient(
+        create_app(
+            Settings(
+                provider_enabled=True,
+                provider=AiProvider.MOCK,
+                provider_credential=credential,
+            )
+        )
+    )
+
+    with caplog.at_level(logging.INFO):
+        response = app_client.post(
+            "/v1/parse-task",
+            json={"text": "private task text for 30 minutes"},
+        )
+
+    assert response.status_code == 200
+    rendered_logs = "\n".join(record.getMessage() for record in caplog.records)
+    assert "private task text" not in rendered_logs
+    assert credential not in rendered_logs
+    assert "provider_payload" not in rendered_logs
