@@ -680,6 +680,118 @@ describe("rendered planner workspace", () => {
     ]);
   });
 
+  it("keeps progress details available for retry when saving progress fails", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [task, studyTask],
+      snapshot: canonicalSnapshot,
+    });
+    plannerApi.progressError = new HttpErrorResponse({ status: 503 });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#progress-minutes", "60");
+    setInput(fixture, "#progress-recorded", "2026-07-04T14:00");
+    setInput(fixture, "#progress-time-zone", "Europe/Brussels");
+    const progressTask = query(fixture, "#progress-task") as HTMLSelectElement;
+    progressTask.value = "task-study";
+    progressTask.dispatchEvent(new Event("change", { bubbles: true }));
+    formByLabel(fixture, "Record task progress").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "We could not save progress. Your details are still here; try again when the API is available.",
+    );
+    expect((query(fixture, "#progress-task") as HTMLSelectElement).value).toBe(
+      "task-study",
+    );
+    expect(inputValue(fixture, "#progress-minutes")).toBe("60");
+    expect(inputValue(fixture, "#progress-recorded")).toBe("2026-07-04T14:00");
+    expect(inputValue(fixture, "#progress-time-zone")).toBe("Europe/Brussels");
+
+    plannerApi.progressError = null;
+    formByLabel(fixture, "Record task progress").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.recordedProgress).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          task_id: "task-study",
+          completed_minutes: 60,
+          recorded_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+      {
+        planningDayId: "day-1",
+        request: {
+          task_id: "task-study",
+          completed_minutes: 60,
+          recorded_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+    ]);
+    expect(text(fixture)).toContain("Progress saved.");
+  });
+
+  it("keeps interruption details available for retry when rescheduling fails", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    plannerApi.interruptionError = new HttpErrorResponse({ status: 503 });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-start", "2026-07-04T14:00");
+    setInput(fixture, "#interruption-end", "2026-07-04T15:15");
+    setInput(fixture, "#interruption-zone", "Europe/Brussels");
+    setInput(fixture, "#interruption-reported", "2026-07-04T14:00");
+    formByLabel(fixture, "Report interruption").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "The scheduler is unavailable right now. Saved progress is unchanged; try again when scheduling is available.",
+    );
+    expect(inputValue(fixture, "#interruption-start")).toBe("2026-07-04T14:00");
+    expect(inputValue(fixture, "#interruption-end")).toBe("2026-07-04T15:15");
+    expect(inputValue(fixture, "#interruption-zone")).toBe("Europe/Brussels");
+    expect(inputValue(fixture, "#interruption-reported")).toBe(
+      "2026-07-04T14:00",
+    );
+
+    plannerApi.interruptionError = null;
+    plannerApi.interruptionResponse = of(revisedStudySnapshot);
+    formByLabel(fixture, "Report interruption").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.reportedInterruptions).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          start_at: "2026-07-04T14:00:00+02:00",
+          end_at: "2026-07-04T15:15:00+02:00",
+          time_zone: "Europe/Brussels",
+          reported_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+      {
+        planningDayId: "day-1",
+        request: {
+          start_at: "2026-07-04T14:00:00+02:00",
+          end_at: "2026-07-04T15:15:00+02:00",
+          time_zone: "Europe/Brussels",
+          reported_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+    ]);
+    expect(text(fixture)).toContain(
+      "Revised schedule snapshot v3 is now shown.",
+    );
+  });
+
   it("marks unfinished work complete and removes it from progress choices", async () => {
     plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
@@ -1186,6 +1298,9 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("We cannot open");
     expect(text(fixture)).toContain(
       "Your session cannot open this planning day",
+    );
+    expect(linkByText(fixture, "Sign in again")?.getAttribute("href")).toBe(
+      "/sign-in?returnUrl=%2Fplanner%3Fdate%3D2026-07-04",
     );
     expect(text(fixture)).not.toContain("Team meeting");
   });
@@ -1772,6 +1887,19 @@ class FakeRouter {
     this.navigations.push({ queryParams: options.queryParams });
     return Promise.resolve(true);
   }
+
+  createUrlTree(
+    commands: readonly unknown[],
+    options?: { queryParams?: Record<string, string> },
+  ): string {
+    const path = commands.join("/");
+    const queryParams = new URLSearchParams(options?.queryParams).toString();
+    return queryParams ? `${path}?${queryParams}` : path;
+  }
+
+  serializeUrl(url: unknown): string {
+    return String(url);
+  }
 }
 
 async function renderWorkspace(
@@ -1862,6 +1990,18 @@ function query<T>(
   selector: string,
 ): Element | null {
   return fixture.nativeElement.querySelector(selector);
+}
+
+function linkByText<T>(
+  fixture: ComponentFixture<T>,
+  linkText: string,
+): HTMLAnchorElement | null {
+  const links = Array.from(
+    (fixture.nativeElement as HTMLElement).querySelectorAll("a"),
+  );
+  return (
+    links.find((candidate) => candidate.textContent?.includes(linkText)) ?? null
+  );
 }
 
 function setInput<T>(
