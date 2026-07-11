@@ -97,6 +97,28 @@ def test_ai_client_falls_back_for_network_errors(
                 200,
                 json={
                     "status": "suggested",
+                    "confidence": "0.8",
+                    "proposed_fields": {
+                        "title": "Write report",
+                        "estimated_minutes": None,
+                        "priority": None,
+                        "due_date": None,
+                        "earliest_start_at": None,
+                        "splitting_allowed": None,
+                        "min_segment_minutes": None,
+                    },
+                    "fallback_reason": None,
+                    "error_code": None,
+                },
+            ),
+            "invalid_response",
+            "ai_service_invalid_response",
+        ),
+        (
+            httpx.Response(
+                200,
+                json={
+                    "status": "suggested",
                     "confidence": 0.8,
                     "proposed_fields": {
                         "title": "Write report",
@@ -109,6 +131,28 @@ def test_ai_client_falls_back_for_network_errors(
                     },
                     "fallback_reason": "provider_error",
                     "error_code": "raw_provider_error",
+                },
+            ),
+            "invalid_response",
+            "ai_service_invalid_response",
+        ),
+        (
+            httpx.Response(
+                200,
+                json={
+                    "status": "fallback",
+                    "confidence": 0.0,
+                    "proposed_fields": {
+                        "title": None,
+                        "estimated_minutes": None,
+                        "priority": None,
+                        "due_date": None,
+                        "earliest_start_at": None,
+                        "splitting_allowed": None,
+                        "min_segment_minutes": None,
+                    },
+                    "fallback_reason": "unable_to_parse",
+                    "error_code": "",
                 },
             ),
             "invalid_response",
@@ -139,6 +183,9 @@ def test_ai_client_falls_back_for_unusable_responses(
         {"estimated_minutes": -5},
         {"estimated_minutes": 1441},
         {"priority": 99},
+        {"due_date": "2026-07-11T00:00:00"},
+        {"due_date": "2026-07-11 00:00:00"},
+        {"due_date": "2026-07-11t00:00:00"},
         {"earliest_start_at": "2026-07-11T09:00:00"},
         {
             "estimated_minutes": 30,

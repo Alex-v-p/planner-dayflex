@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import re
 from typing import Literal, Protocol, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -12,6 +13,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictFloat,
     StrictInt,
     StrictStr,
     ValidationError,
@@ -28,6 +30,7 @@ FallbackReason = Literal[
     "invalid_response",
     "unable_to_parse",
 ]
+DATE_ONLY_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class TaskProposalDTO(BaseModel):
@@ -52,6 +55,11 @@ class TaskProposalDTO(BaseModel):
         if not stripped:
             raise ValueError("title must not be blank")
         return stripped
+
+    @field_validator("due_date", mode="before")
+    @classmethod
+    def validate_due_date(cls, value: object) -> object:
+        return _date_only(value, "due_date")
 
     @field_validator("earliest_start_at")
     @classmethod
@@ -114,10 +122,10 @@ class ParseTaskResultDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["suggested", "fallback"]
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: StrictFloat = Field(ge=0.0, le=1.0)
     proposed_fields: TaskProposalDTO
     fallback_reason: FallbackReason | None
-    error_code: str | None
+    error_code: StrictStr | None = Field(default=None, min_length=1, max_length=80)
 
     @model_validator(mode="after")
     def validate_fallback_metadata(self) -> Self:
@@ -131,10 +139,10 @@ class ParseInterruptionResultDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["suggested", "fallback"]
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: StrictFloat = Field(ge=0.0, le=1.0)
     proposed_fields: InterruptionProposalDTO
     fallback_reason: FallbackReason | None
-    error_code: str | None
+    error_code: StrictStr | None = Field(default=None, min_length=1, max_length=80)
 
     @model_validator(mode="after")
     def validate_fallback_metadata(self) -> Self:
@@ -255,4 +263,14 @@ def _validate_fallback_metadata(
 def _aware_datetime(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("datetime fields must include an explicit UTC offset")
+    return value
+
+
+def _date_only(value: object, field_name: str) -> object:
+    if value is None:
+        return value
+    if isinstance(value, datetime) or not isinstance(value, (date, str)):
+        raise ValueError(f"{field_name} must be a date without a time")
+    if isinstance(value, str) and DATE_ONLY_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"{field_name} must be a date without a time")
     return value
