@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+import pytest
+from pydantic import ValidationError
 
 from ai_service.app import create_app
+from ai_service.contracts.parsing import TaskProposalDTO
 from ai_service.infrastructure.config import AiProvider, Settings
 
 
@@ -138,6 +141,40 @@ def test_schema_errors_use_safe_envelope_without_user_text() -> None:
         "details": ["The AI parse request is invalid."],
     }
     assert secret_text not in response.text
+
+
+@pytest.mark.parametrize(
+    "local_date",
+    [
+        "2026-07-11T00:00:00",
+        "2026-07-11 00:00:00",
+        "2026-07-11t00:00:00",
+    ],
+)
+def test_parse_request_rejects_datetime_shaped_local_date(local_date: str) -> None:
+    response = client().post(
+        "/v1/parse-task",
+        json={"text": "Write proposal", "local_date": local_date},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "validation_error",
+        "details": ["The AI parse request is invalid."],
+    }
+
+
+@pytest.mark.parametrize(
+    "due_date",
+    [
+        "2026-07-11T00:00:00",
+        "2026-07-11 00:00:00",
+        "2026-07-11t00:00:00",
+    ],
+)
+def test_task_proposal_rejects_datetime_shaped_due_date(due_date: str) -> None:
+    with pytest.raises(ValidationError):
+        TaskProposalDTO(title="Write proposal", due_date=due_date)
 
 
 def test_logs_do_not_emit_user_text_provider_payload_or_credentials(capsys) -> None:
