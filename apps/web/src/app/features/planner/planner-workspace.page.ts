@@ -110,8 +110,16 @@ type SuggestionState<T> =
       readonly result: null;
     }
   | { readonly status: "ready"; readonly message: string; readonly result: T }
-  | { readonly status: "fallback"; readonly message: string; readonly result: T }
-  | { readonly status: "error"; readonly message: string; readonly result: null };
+  | {
+      readonly status: "fallback";
+      readonly message: string;
+      readonly result: T;
+    }
+  | {
+      readonly status: "error";
+      readonly message: string;
+      readonly result: null;
+    };
 
 interface TimelineBlock {
   readonly item: ScheduleItem;
@@ -165,7 +173,9 @@ export class PlannerWorkspacePage implements OnInit {
   protected readonly fixedEventFormMessage = signal("");
   protected readonly taskAiText = signal("");
   protected readonly interruptionAiText = signal("");
-  protected readonly taskSuggestion = signal<SuggestionState<ParseTaskResponse>>({
+  protected readonly taskSuggestion = signal<
+    SuggestionState<ParseTaskResponse>
+  >({
     status: "idle",
     message: "",
     result: null,
@@ -787,7 +797,9 @@ export class PlannerWorkspacePage implements OnInit {
       });
   }
 
-  protected applyInterruptionSuggestion(result: ParseInterruptionResponse): void {
+  protected applyInterruptionSuggestion(
+    result: ParseInterruptionResponse,
+  ): void {
     if (result.status !== "suggested") {
       return;
     }
@@ -1749,9 +1761,7 @@ function suggestionMessage(
   return fallbackMessage(result.fallback_reason);
 }
 
-function fallbackMessage(
-  reason: ParseTaskResponse["fallback_reason"],
-): string {
+function fallbackMessage(reason: ParseTaskResponse["fallback_reason"]): string {
   switch (reason) {
     case "ai_disabled":
       return "Suggestions are off. You can keep entering details yourself.";
