@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     scheduler_base_url: AnyHttpUrl = "http://127.0.0.1:8001"
     scheduler_version: str = "0.1.0"
+    ai_service_base_url: AnyHttpUrl | None = None
+    ai_client_timeout_seconds: float = 2.0
 
     @field_validator("database_url")
     @classmethod
@@ -67,6 +69,14 @@ class Settings(BaseSettings):
         if not stripped:
             raise ValueError("must not be blank")
         return stripped
+
+    @field_validator("ai_client_timeout_seconds")
+    @classmethod
+    def validate_ai_client_timeout_seconds(cls, value: float) -> float:
+        """Keep AI proxy calls bounded so parsing cannot block planning."""
+        if value < 0.1 or value > 10.0:
+            raise ValueError("must be between 0.1 and 10.0 seconds")
+        return value
 
     @property
     def database_url_value(self) -> str:

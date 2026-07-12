@@ -212,6 +212,29 @@ describe("rendered free-time finder", () => {
     expect(text(fixture)).toContain("Choose a valid date range");
     expect(announcement(fixture)).toContain("Choose a valid date range");
   });
+
+  it("links permission failures back to sign-in without losing filters", async () => {
+    const routeParams = new BehaviorSubject(
+      convertToParamMap({
+        start_date: "2026-07-01",
+        end_date: "2026-07-03",
+        minimum_minutes: "45",
+      }),
+    );
+    const freeTimesApi = new FakeFreeTimesApi();
+    freeTimesApi.error = new HttpErrorResponse({ status: 401 });
+
+    const fixture = await renderFreeTimes(
+      routeParams,
+      freeTimesApi,
+      new FakeRouter(),
+    );
+
+    expect(text(fixture)).toContain("Free-time finder unavailable");
+    expect(linkByText(fixture, "Sign in again")?.getAttribute("href")).toBe(
+      "/sign-in?returnUrl=%2Ffree-times%3Fstart_date%3D2026-07-01%26end_date%3D2026-07-03%26minimum_minutes%3D45",
+    );
+  });
 });
 
 class FakeApiClient {
@@ -320,6 +343,18 @@ function linkByAriaLabel<T>(
   label: string,
 ): HTMLAnchorElement | null {
   return fixture.nativeElement.querySelector(`a[aria-label="${label}"]`);
+}
+
+function linkByText<T>(
+  fixture: ComponentFixture<T>,
+  linkText: string,
+): HTMLAnchorElement | null {
+  const links = Array.from(
+    (fixture.nativeElement as HTMLElement).querySelectorAll("a"),
+  );
+  return (
+    links.find((candidate) => candidate.textContent?.includes(linkText)) ?? null
+  );
 }
 
 function buttonByText<T>(

@@ -6,7 +6,7 @@ This is the browser application foundation for `planner-dayflex`.
 
 - Angular 22 with standalone components and TypeScript.
 - Tailwind CSS 3 for utility styling.
-- ESLint, Prettier, and Vitest for local quality checks.
+- ESLint, Prettier, Vitest, and Playwright for local quality checks.
 - Node 22.22.3 or another runtime allowed by the package `engines` field.
 
 ## Commands
@@ -20,9 +20,14 @@ npm run format
 npm run lint
 npm run test
 npm run build
+npx playwright install chromium
+npm run test:e2e
 ```
 
 `npm run start` serves the app at `http://127.0.0.1:4200`.
+`npm run test:e2e` starts that dev server automatically and uses stubbed API
+responses for the canonical browser journey. Run `npx playwright install
+chromium` once before the first local E2E run.
 
 ## API configuration
 
@@ -41,8 +46,8 @@ The app follows the repository structure guide:
 - `src/app/core/` owns configuration, HTTP setup, routing, and shell layout.
 - `src/app/shared/` owns reusable presentational controls and feedback
   primitives.
-- `src/app/features/` is intentionally absent until feature tickets introduce
-  planner, task, event, schedule, or free-time screens.
+- `src/app/features/` owns planner, authentication, overview, and free-time
+  feature screens.
 
 ## Ticket impact
 

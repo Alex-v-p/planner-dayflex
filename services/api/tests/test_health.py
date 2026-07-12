@@ -47,6 +47,8 @@ def test_health_auth_and_planning_routes_are_published(client: TestClient) -> No
         "/auth/me",
         "/auth/register",
         "/health",
+        "/planning/ai/parse-interruption",
+        "/planning/ai/parse-task",
         "/planning/days",
         "/planning/days/{planning_day_id}",
         "/planning/days/{planning_day_id}/fixed-events",

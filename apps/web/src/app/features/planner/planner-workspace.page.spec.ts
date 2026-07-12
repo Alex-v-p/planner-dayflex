@@ -527,6 +527,65 @@ describe("planner workspace API contract", () => {
     ]);
     expect(JSON.stringify(api.posts)).not.toContain("user-1");
   });
+
+  it("requests AI parsing only through planning API endpoints", async () => {
+    const api = new FakeApiClient();
+    api.responses.set("/planning/ai/parse-task", {
+      status: "suggested",
+      confidence: 0.8,
+      proposed_fields: {
+        title: "Write report",
+        estimated_minutes: 45,
+        priority: 4,
+        due_date: null,
+        earliest_start_at: null,
+        splitting_allowed: null,
+        min_segment_minutes: null,
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    api.responses.set("/planning/ai/parse-interruption", {
+      status: "fallback",
+      confidence: 0,
+      proposed_fields: {
+        start_at: null,
+        end_at: null,
+        time_zone: null,
+        reported_at: null,
+      },
+      fallback_reason: "ai_disabled",
+      error_code: "ai_disabled",
+    });
+    await TestBed.configureTestingModule({
+      providers: [
+        PlannerApiService,
+        { provide: ApiClientService, useValue: api },
+      ],
+    }).compileComponents();
+    const service = TestBed.inject(PlannerApiService);
+
+    await firstValue(
+      service.parseTask({
+        text: "Write report for 45 minutes",
+        local_date: selectedDate,
+        time_zone: "Europe/Brussels",
+      }),
+    );
+    await firstValue(
+      service.parseInterruption({
+        text: "from 10 to 11",
+        local_date: selectedDate,
+        time_zone: "Europe/Brussels",
+      }),
+    );
+
+    expect(api.posts.map((call) => call.path)).toEqual([
+      "/planning/ai/parse-task",
+      "/planning/ai/parse-interruption",
+    ]);
+    expect(JSON.stringify(api.posts)).not.toContain("openai");
+  });
 });
 
 describe("rendered planner workspace", () => {
@@ -611,6 +670,161 @@ describe("rendered planner workspace", () => {
     expect(announcement(fixture)).toContain("Planner workspace loaded");
   });
 
+  it("shows a task suggestion and applies it only into editable fields", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const suggestionResponse = new Subject<unknown>();
+    plannerApi.taskSuggestionResponse = suggestionResponse;
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#task-ai-text", "Write final report for 45 minutes");
+    buttonByText(fixture, "Suggest details", "Flexible tasks").click();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Looking for editable task details.");
+    expect(
+      buttonByText(fixture, "Suggest details", "Flexible tasks").disabled,
+    ).toBe(true);
+    expect(inputValue(fixture, "#task-title")).toBe("");
+    expect(plannerApi.createdTasks).toEqual([]);
+
+    suggestionResponse.next({
+      status: "suggested",
+      confidence: 0.8,
+      proposed_fields: {
+        title: "Write final report",
+        estimated_minutes: 45,
+        priority: 4,
+        due_date: "2026-07-04",
+        earliest_start_at: null,
+        splitting_allowed: null,
+        min_segment_minutes: null,
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    suggestionResponse.complete();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Suggestion ready");
+    expect(inputValue(fixture, "#task-title")).toBe("");
+    expect(plannerApi.createdTasks).toEqual([]);
+    buttonByText(fixture, "Apply to form", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#task-title")).toBe("Write final report");
+    expect(inputValue(fixture, "#task-estimate")).toBe("45");
+    expect(inputValue(fixture, "#task-priority")).toBe("4");
+    expect(plannerApi.createdTasks).toEqual([]);
+  });
+
+  it("shows task fallback without changing editable fields", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    plannerApi.taskSuggestionResponse = of({
+      status: "fallback",
+      confidence: 0,
+      proposed_fields: {
+        title: null,
+        estimated_minutes: null,
+        priority: null,
+        due_date: null,
+        earliest_start_at: null,
+        splitting_allowed: null,
+        min_segment_minutes: null,
+      },
+      fallback_reason: "ai_disabled",
+      error_code: "ai_disabled",
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#task-ai-text", "something");
+    buttonByText(fixture, "Suggest details", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Suggestions are off");
+    expect(inputValue(fixture, "#task-title")).toBe("");
+  });
+
+  it("applies interruption suggestions into the interruption form only", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    const suggestionResponse = new Subject<unknown>();
+    plannerApi.interruptionSuggestionResponse = suggestionResponse;
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-ai-text", "appointment from 13 to 14");
+    buttonByText(fixture, "Suggest details", "Report interruption").click();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Looking for editable unavailable time.");
+    expect(
+      buttonByText(fixture, "Suggest details", "Report interruption").disabled,
+    ).toBe(true);
+    expect(inputValue(fixture, "#interruption-start")).toBe("");
+    expect(plannerApi.reportedInterruptions).toEqual([]);
+
+    suggestionResponse.next({
+      status: "suggested",
+      confidence: 0.7,
+      proposed_fields: {
+        start_at: "2026-07-04T13:00:00+02:00",
+        end_at: "2026-07-04T14:00:00+02:00",
+        time_zone: "Europe/Brussels",
+        reported_at: "2026-07-04T13:00:00+02:00",
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    suggestionResponse.complete();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Suggestion ready");
+    expect(inputValue(fixture, "#interruption-start")).toBe("");
+    expect(plannerApi.reportedInterruptions).toEqual([]);
+    buttonByText(fixture, "Apply to form", "Report interruption").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#interruption-start")).toBe("2026-07-04T13:00");
+    expect(inputValue(fixture, "#interruption-end")).toBe("2026-07-04T14:00");
+    expect(plannerApi.reportedInterruptions).toEqual([]);
+  });
+
+  it("shows interruption fallback without changing editable fields", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    plannerApi.interruptionSuggestionResponse = of({
+      status: "fallback",
+      confidence: 0,
+      proposed_fields: {
+        start_at: null,
+        end_at: null,
+        time_zone: null,
+        reported_at: null,
+      },
+      fallback_reason: "ai_disabled",
+      error_code: "ai_disabled",
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-ai-text", "appointment");
+    buttonByText(fixture, "Suggest details", "Report interruption").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Suggestions are off");
+    expect(inputValue(fixture, "#interruption-start")).toBe("");
+    expect(inputValue(fixture, "#interruption-end")).toBe("");
+    expect(plannerApi.reportedInterruptions).toEqual([]);
+  });
+
   it("records partial study progress and replaces the visible plan after an interruption", async () => {
     plannerApi.result = workspaceData({
       tasks: [task, studyTask],
@@ -678,6 +892,118 @@ describe("rendered planner workspace", () => {
       "interruption",
       "task",
     ]);
+  });
+
+  it("keeps progress details available for retry when saving progress fails", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [task, studyTask],
+      snapshot: canonicalSnapshot,
+    });
+    plannerApi.progressError = new HttpErrorResponse({ status: 503 });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#progress-minutes", "60");
+    setInput(fixture, "#progress-recorded", "2026-07-04T14:00");
+    setInput(fixture, "#progress-time-zone", "Europe/Brussels");
+    const progressTask = query(fixture, "#progress-task") as HTMLSelectElement;
+    progressTask.value = "task-study";
+    progressTask.dispatchEvent(new Event("change", { bubbles: true }));
+    formByLabel(fixture, "Record task progress").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "We could not save progress. Your details are still here; try again when the API is available.",
+    );
+    expect((query(fixture, "#progress-task") as HTMLSelectElement).value).toBe(
+      "task-study",
+    );
+    expect(inputValue(fixture, "#progress-minutes")).toBe("60");
+    expect(inputValue(fixture, "#progress-recorded")).toBe("2026-07-04T14:00");
+    expect(inputValue(fixture, "#progress-time-zone")).toBe("Europe/Brussels");
+
+    plannerApi.progressError = null;
+    formByLabel(fixture, "Record task progress").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.recordedProgress).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          task_id: "task-study",
+          completed_minutes: 60,
+          recorded_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+      {
+        planningDayId: "day-1",
+        request: {
+          task_id: "task-study",
+          completed_minutes: 60,
+          recorded_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+    ]);
+    expect(text(fixture)).toContain("Progress saved.");
+  });
+
+  it("keeps interruption details available for retry when rescheduling fails", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    plannerApi.interruptionError = new HttpErrorResponse({ status: 503 });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-start", "2026-07-04T14:00");
+    setInput(fixture, "#interruption-end", "2026-07-04T15:15");
+    setInput(fixture, "#interruption-zone", "Europe/Brussels");
+    setInput(fixture, "#interruption-reported", "2026-07-04T14:00");
+    formByLabel(fixture, "Report interruption").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "The scheduler is unavailable right now. Saved progress is unchanged; try again when scheduling is available.",
+    );
+    expect(inputValue(fixture, "#interruption-start")).toBe("2026-07-04T14:00");
+    expect(inputValue(fixture, "#interruption-end")).toBe("2026-07-04T15:15");
+    expect(inputValue(fixture, "#interruption-zone")).toBe("Europe/Brussels");
+    expect(inputValue(fixture, "#interruption-reported")).toBe(
+      "2026-07-04T14:00",
+    );
+
+    plannerApi.interruptionError = null;
+    plannerApi.interruptionResponse = of(revisedStudySnapshot);
+    formByLabel(fixture, "Report interruption").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.reportedInterruptions).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          start_at: "2026-07-04T14:00:00+02:00",
+          end_at: "2026-07-04T15:15:00+02:00",
+          time_zone: "Europe/Brussels",
+          reported_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+      {
+        planningDayId: "day-1",
+        request: {
+          start_at: "2026-07-04T14:00:00+02:00",
+          end_at: "2026-07-04T15:15:00+02:00",
+          time_zone: "Europe/Brussels",
+          reported_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+    ]);
+    expect(text(fixture)).toContain(
+      "Revised schedule snapshot v3 is now shown.",
+    );
   });
 
   it("marks unfinished work complete and removes it from progress choices", async () => {
@@ -1187,6 +1513,9 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain(
       "Your session cannot open this planning day",
     );
+    expect(linkByText(fixture, "Sign in again")?.getAttribute("href")).toBe(
+      "/sign-in?returnUrl=%2Fplanner%3Fdate%3D2026-07-04",
+    );
     expect(text(fixture)).not.toContain("Team meeting");
   });
 
@@ -1640,6 +1969,8 @@ class FakePlannerApi {
   readonly generatedPlanningDayIds: string[] = [];
   readonly recordedProgress: unknown[] = [];
   readonly reportedInterruptions: unknown[] = [];
+  readonly parsedTasks: unknown[] = [];
+  readonly parsedInterruptions: unknown[] = [];
   taskMutationError: unknown = null;
   fixedEventMutationError: unknown = null;
   generateError: unknown = null;
@@ -1647,6 +1978,8 @@ class FakePlannerApi {
   progressError: unknown = null;
   interruptionError: unknown = null;
   interruptionResponse: Observable<ScheduleSnapshot> | null = null;
+  taskSuggestionResponse: Observable<unknown> | null = null;
+  interruptionSuggestionResponse: Observable<unknown> | null = null;
 
   loadWorkspaceDate(date: string): Observable<PlannerWorkspaceData> {
     this.loadedDates.push(date);
@@ -1760,6 +2093,47 @@ class FakePlannerApi {
     }
     return of({ ...canonicalSnapshot, id: "snapshot-revised", version: 3 });
   }
+
+  parseTask(request: unknown): Observable<unknown> {
+    this.parsedTasks.push(request);
+    return (
+      this.taskSuggestionResponse ??
+      of({
+        status: "fallback",
+        confidence: 0,
+        proposed_fields: {
+          title: null,
+          estimated_minutes: null,
+          priority: null,
+          due_date: null,
+          earliest_start_at: null,
+          splitting_allowed: null,
+          min_segment_minutes: null,
+        },
+        fallback_reason: "ai_disabled",
+        error_code: "ai_disabled",
+      })
+    );
+  }
+
+  parseInterruption(request: unknown): Observable<unknown> {
+    this.parsedInterruptions.push(request);
+    return (
+      this.interruptionSuggestionResponse ??
+      of({
+        status: "fallback",
+        confidence: 0,
+        proposed_fields: {
+          start_at: null,
+          end_at: null,
+          time_zone: null,
+          reported_at: null,
+        },
+        fallback_reason: "ai_disabled",
+        error_code: "ai_disabled",
+      })
+    );
+  }
 }
 
 class FakeRouter {
@@ -1771,6 +2145,19 @@ class FakeRouter {
   ): Promise<boolean> {
     this.navigations.push({ queryParams: options.queryParams });
     return Promise.resolve(true);
+  }
+
+  createUrlTree(
+    commands: readonly unknown[],
+    options?: { queryParams?: Record<string, string> },
+  ): string {
+    const path = commands.join("/");
+    const queryParams = new URLSearchParams(options?.queryParams).toString();
+    return queryParams ? `${path}?${queryParams}` : path;
+  }
+
+  serializeUrl(url: unknown): string {
+    return String(url);
   }
 }
 
@@ -1862,6 +2249,18 @@ function query<T>(
   selector: string,
 ): Element | null {
   return fixture.nativeElement.querySelector(selector);
+}
+
+function linkByText<T>(
+  fixture: ComponentFixture<T>,
+  linkText: string,
+): HTMLAnchorElement | null {
+  const links = Array.from(
+    (fixture.nativeElement as HTMLElement).querySelectorAll("a"),
+  );
+  return (
+    links.find((candidate) => candidate.textContent?.includes(linkText)) ?? null
+  );
 }
 
 function setInput<T>(

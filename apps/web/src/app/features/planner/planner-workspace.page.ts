@@ -9,7 +9,7 @@ import {
 } from "@angular/core";
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { FormsModule } from "@angular/forms";
-import { ActivatedRoute, Router } from "@angular/router";
+import { ActivatedRoute, Router, RouterLink } from "@angular/router";
 import {
   Observable,
   Subject,
@@ -35,6 +35,8 @@ import {
   TaskProgress,
   TaskProgressCreateRequest,
   InterruptionCreateRequest,
+  ParseInterruptionResponse,
+  ParseTaskResponse,
 } from "./planner-api.service";
 
 type WorkspaceLoadState =
@@ -100,6 +102,25 @@ type GeneratePlanState =
 
 type RecoveryMutationState = GeneratePlanState;
 
+type SuggestionState<T> =
+  | { readonly status: "idle"; readonly message: string; readonly result: null }
+  | {
+      readonly status: "pending";
+      readonly message: string;
+      readonly result: null;
+    }
+  | { readonly status: "ready"; readonly message: string; readonly result: T }
+  | {
+      readonly status: "fallback";
+      readonly message: string;
+      readonly result: T;
+    }
+  | {
+      readonly status: "error";
+      readonly message: string;
+      readonly result: null;
+    };
+
 interface TimelineBlock {
   readonly item: ScheduleItem;
   readonly label: string;
@@ -125,7 +146,7 @@ interface ScheduleSummary {
 @Component({
   selector: "pdf-planner-workspace-page",
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, RouterLink],
   templateUrl: "./planner-workspace.page.html",
 })
 export class PlannerWorkspacePage implements OnInit {
@@ -150,6 +171,22 @@ export class PlannerWorkspacePage implements OnInit {
   protected readonly interruptionFormErrors = signal<FormErrors>({});
   protected readonly taskFormMessage = signal("");
   protected readonly fixedEventFormMessage = signal("");
+  protected readonly taskAiText = signal("");
+  protected readonly interruptionAiText = signal("");
+  protected readonly taskSuggestion = signal<
+    SuggestionState<ParseTaskResponse>
+  >({
+    status: "idle",
+    message: "",
+    result: null,
+  });
+  protected readonly interruptionSuggestion = signal<
+    SuggestionState<ParseInterruptionResponse>
+  >({
+    status: "idle",
+    message: "",
+    result: null,
+  });
   protected readonly progressState = signal<RecoveryMutationState>({
     status: "idle",
     message: "",
@@ -261,6 +298,14 @@ export class PlannerWorkspacePage implements OnInit {
     this.taskForm.update((form) => ({ ...form, ...patch }));
   }
 
+  protected updateTaskAiText(value: string): void {
+    this.taskAiText.set(value);
+  }
+
+  protected updateInterruptionAiText(value: string): void {
+    this.interruptionAiText.set(value);
+  }
+
   protected updateFixedEventForm(patch: Partial<FixedEventFormModel>): void {
     this.fixedEventForm.update((form) => ({ ...form, ...patch }));
   }
@@ -321,6 +366,85 @@ export class PlannerWorkspacePage implements OnInit {
         : this.plannerApi.updateTask(form.id, result.request);
 
     this.runMutation(action, request$, "task");
+  }
+
+  protected suggestTask(): void {
+    const text = this.taskAiText().trim();
+    if (text === "") {
+      this.taskSuggestion.set({
+        status: "error",
+        message: "Add a short task description first.",
+        result: null,
+      });
+      return;
+    }
+
+    const state = this.state();
+    const timeZone =
+      state.status === "ready"
+        ? (state.data.day?.time_zone ?? guessTimeZone())
+        : guessTimeZone();
+    this.taskSuggestion.set({
+      status: "pending",
+      message: "Looking for editable task details.",
+      result: null,
+    });
+    this.plannerApi
+      .parseTask({
+        text,
+        local_date: this.selectedDate(),
+        time_zone: timeZone,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.taskSuggestion.set({
+            status: result.status === "suggested" ? "ready" : "fallback",
+            message: suggestionMessage(result),
+            result,
+          });
+        },
+        error: () => {
+          this.taskSuggestion.set({
+            status: "fallback",
+            message: fallbackMessage("service_unavailable"),
+            result: taskFallbackResult("service_unavailable"),
+          });
+        },
+      });
+  }
+
+  protected applyTaskSuggestion(result: ParseTaskResponse): void {
+    if (result.status !== "suggested") {
+      return;
+    }
+    const proposal = result.proposed_fields;
+    const timeZone =
+      currentWorkspaceDay(this.state())?.time_zone ??
+      this.taskForm().earliestStartTimeZone;
+    this.taskForm.update((form) => ({
+      ...form,
+      title: proposal.title ?? form.title,
+      estimatedMinutes:
+        proposal.estimated_minutes === null
+          ? form.estimatedMinutes
+          : String(proposal.estimated_minutes),
+      priority:
+        proposal.priority === null ? form.priority : String(proposal.priority),
+      dueDate: proposal.due_date ?? form.dueDate,
+      earliestStartLocal:
+        proposal.earliest_start_at === null
+          ? form.earliestStartLocal
+          : toDateTimeLocalValue(proposal.earliest_start_at, timeZone),
+      earliestStartTimeZone: timeZone,
+      splittingAllowed: proposal.splitting_allowed ?? form.splittingAllowed,
+      minSegmentMinutes:
+        proposal.min_segment_minutes === null
+          ? form.minSegmentMinutes
+          : String(proposal.min_segment_minutes),
+    }));
+    this.taskFormErrors.set({});
+    this.taskFormMessage.set("Suggestion applied. Review before saving.");
   }
 
   protected deleteTask(task: Task): void {
@@ -626,6 +750,82 @@ export class PlannerWorkspacePage implements OnInit {
           });
         },
       });
+  }
+
+  protected suggestInterruption(): void {
+    const text = this.interruptionAiText().trim();
+    if (text === "") {
+      this.interruptionSuggestion.set({
+        status: "error",
+        message: "Add a short interruption description first.",
+        result: null,
+      });
+      return;
+    }
+
+    const timeZone =
+      currentWorkspaceDay(this.state())?.time_zone ??
+      this.interruptionForm().timeZone ??
+      guessTimeZone();
+    this.interruptionSuggestion.set({
+      status: "pending",
+      message: "Looking for editable unavailable time.",
+      result: null,
+    });
+    this.plannerApi
+      .parseInterruption({
+        text,
+        local_date: this.selectedDate(),
+        time_zone: timeZone,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.interruptionSuggestion.set({
+            status: result.status === "suggested" ? "ready" : "fallback",
+            message: suggestionMessage(result),
+            result,
+          });
+        },
+        error: () => {
+          this.interruptionSuggestion.set({
+            status: "fallback",
+            message: fallbackMessage("service_unavailable"),
+            result: interruptionFallbackResult("service_unavailable"),
+          });
+        },
+      });
+  }
+
+  protected applyInterruptionSuggestion(
+    result: ParseInterruptionResponse,
+  ): void {
+    if (result.status !== "suggested") {
+      return;
+    }
+    const proposal = result.proposed_fields;
+    const timeZone = proposal.time_zone ?? this.interruptionForm().timeZone;
+    this.interruptionForm.update((form) => ({
+      ...form,
+      startLocal:
+        proposal.start_at === null
+          ? form.startLocal
+          : toDateTimeLocalValue(proposal.start_at, timeZone),
+      endLocal:
+        proposal.end_at === null
+          ? form.endLocal
+          : toDateTimeLocalValue(proposal.end_at, timeZone),
+      timeZone,
+      reportedLocal:
+        proposal.reported_at === null
+          ? form.reportedLocal
+          : toDateTimeLocalValue(proposal.reported_at, timeZone),
+    }));
+    this.interruptionFormErrors.set({});
+    this.interruptionState.set({
+      status: "idle",
+      message: "Suggestion applied. Review before submitting.",
+    });
   }
 
   protected unfinishedTasks(
@@ -1549,6 +1749,70 @@ function interruptionErrorMessage(error: unknown): string {
   }
 
   return "We could not revise the schedule. Your interruption details are still here; try again when the API is available.";
+}
+
+function suggestionMessage(
+  result: ParseTaskResponse | ParseInterruptionResponse,
+): string {
+  if (result.status === "suggested") {
+    return "Suggestion ready. Apply it to the form if it helps.";
+  }
+
+  return fallbackMessage(result.fallback_reason);
+}
+
+function fallbackMessage(reason: ParseTaskResponse["fallback_reason"]): string {
+  switch (reason) {
+    case "ai_disabled":
+      return "Suggestions are off. You can keep entering details yourself.";
+    case "timeout":
+      return "Suggestions took too long. Your form is unchanged.";
+    case "provider_error":
+    case "invalid_response":
+    case "service_unavailable":
+      return "Suggestions are unavailable. Your form is unchanged.";
+    case "unable_to_parse":
+      return "No clear suggestion yet. You can edit the fields yourself.";
+    default:
+      return "Suggestions are unavailable. Your form is unchanged.";
+  }
+}
+
+function taskFallbackResult(
+  reason: ParseTaskResponse["fallback_reason"],
+): ParseTaskResponse {
+  return {
+    status: "fallback",
+    confidence: 0,
+    proposed_fields: {
+      title: null,
+      estimated_minutes: null,
+      priority: null,
+      due_date: null,
+      earliest_start_at: null,
+      splitting_allowed: null,
+      min_segment_minutes: null,
+    },
+    fallback_reason: reason,
+    error_code: reason,
+  };
+}
+
+function interruptionFallbackResult(
+  reason: ParseTaskResponse["fallback_reason"],
+): ParseInterruptionResponse {
+  return {
+    status: "fallback",
+    confidence: 0,
+    proposed_fields: {
+      start_at: null,
+      end_at: null,
+      time_zone: null,
+      reported_at: null,
+    },
+    fallback_reason: reason,
+    error_code: reason,
+  };
 }
 
 function itemMarker(kind: string): string {

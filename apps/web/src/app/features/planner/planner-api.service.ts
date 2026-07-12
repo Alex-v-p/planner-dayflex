@@ -141,6 +141,52 @@ export interface InterruptionCreateRequest {
   readonly reported_at: string;
 }
 
+export interface ParseInputRequest {
+  readonly text: string;
+  readonly local_date: string | null;
+  readonly time_zone: string | null;
+}
+
+export interface TaskProposal {
+  readonly title: string | null;
+  readonly estimated_minutes: number | null;
+  readonly priority: number | null;
+  readonly due_date: string | null;
+  readonly earliest_start_at: string | null;
+  readonly splitting_allowed: boolean | null;
+  readonly min_segment_minutes: number | null;
+}
+
+export interface InterruptionProposal {
+  readonly start_at: string | null;
+  readonly end_at: string | null;
+  readonly time_zone: string | null;
+  readonly reported_at: string | null;
+}
+
+export interface ParseTaskResponse {
+  readonly status: "suggested" | "fallback";
+  readonly confidence: number;
+  readonly proposed_fields: TaskProposal;
+  readonly fallback_reason:
+    | "ai_disabled"
+    | "service_unavailable"
+    | "timeout"
+    | "provider_error"
+    | "invalid_response"
+    | "unable_to_parse"
+    | null;
+  readonly error_code: string | null;
+}
+
+export interface ParseInterruptionResponse {
+  readonly status: "suggested" | "fallback";
+  readonly confidence: number;
+  readonly proposed_fields: InterruptionProposal;
+  readonly fallback_reason: ParseTaskResponse["fallback_reason"];
+  readonly error_code: string | null;
+}
+
 @Injectable({ providedIn: "root" })
 export class PlannerApiService {
   private readonly api = inject(ApiClientService);
@@ -298,6 +344,22 @@ export class PlannerApiService {
   ): Observable<ScheduleSnapshot> {
     return this.api.postJson<InterruptionCreateRequest, ScheduleSnapshot>(
       `/planning/days/${planningDayId}/interruptions`,
+      request,
+    );
+  }
+
+  parseTask(request: ParseInputRequest): Observable<ParseTaskResponse> {
+    return this.api.postJson<ParseInputRequest, ParseTaskResponse>(
+      "/planning/ai/parse-task",
+      request,
+    );
+  }
+
+  parseInterruption(
+    request: ParseInputRequest,
+  ): Observable<ParseInterruptionResponse> {
+    return this.api.postJson<ParseInputRequest, ParseInterruptionResponse>(
+      "/planning/ai/parse-interruption",
       request,
     );
   }

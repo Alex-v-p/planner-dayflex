@@ -23,6 +23,10 @@ from api_service.contracts.planning import (
     FixedEventResponse,
     FixedEventUpdateRequest,
     InterruptionCreateRequest,
+    ParseInterruptionRequest,
+    ParseInterruptionResponse,
+    ParseTaskRequest,
+    ParseTaskResponse,
     PlanningDayCreateRequest,
     PlanningDayResponse,
     PlanningRangeSummaryResponse,
@@ -39,12 +43,37 @@ from api_service.contracts.planning import (
     UserPreferencesResponse,
 )
 from api_service.infrastructure.models import User
+from api_service.infrastructure.ai_client import AiClient
 from api_service.infrastructure.scheduler_client import SchedulerClient
 from api_service.interfaces.auth import get_current_user, get_session, get_settings
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
 planning_service = PlanningService()
+
+
+@router.post("/ai/parse-task", response_model=ParseTaskResponse)
+def parse_task(
+    body: ParseTaskRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> ParseTaskResponse:
+    """Return an editable task parsing proposal without persisting it."""
+    _ = user
+    result = _get_ai_client(request).parse_task(body.model_dump(mode="json"))
+    return ParseTaskResponse.model_validate(result.model_dump())
+
+
+@router.post("/ai/parse-interruption", response_model=ParseInterruptionResponse)
+def parse_interruption(
+    body: ParseInterruptionRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> ParseInterruptionResponse:
+    """Return an editable interruption proposal without persisting it."""
+    _ = user
+    result = _get_ai_client(request).parse_interruption(body.model_dump(mode="json"))
+    return ParseInterruptionResponse.model_validate(result.model_dump())
 
 
 @router.get("/preferences", response_model=UserPreferencesResponse)
@@ -555,6 +584,10 @@ def _conflict(detail: str) -> HTTPException:
 
 def _get_scheduler_client(request: Request) -> SchedulerClient:
     return request.app.state.scheduler_client
+
+
+def _get_ai_client(request: Request) -> AiClient:
+    return request.app.state.ai_client
 
 
 def _date_only_query(value: str, field_name: str) -> date:

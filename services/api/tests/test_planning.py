@@ -2523,6 +2523,14 @@ def test_planning_routes_require_authentication(client: TestClient) -> None:
         client.get("/planning/days/day-id/schedule-snapshots"),
         client.get("/planning/schedule-snapshots/snapshot-id"),
         client.post(
+            "/planning/ai/parse-task",
+            json={"text": "Write report", "local_date": "2026-07-01"},
+        ),
+        client.post(
+            "/planning/ai/parse-interruption",
+            json={"text": "from 10 to 11", "local_date": "2026-07-01"},
+        ),
+        client.post(
             "/planning/tasks",
             json={
                 "title": "Prepare",
@@ -2535,6 +2543,61 @@ def test_planning_routes_require_authentication(client: TestClient) -> None:
     ]
 
     assert [response.status_code for response in checks] == [401] * len(checks)
+
+
+def test_parse_task_route_requires_auth_and_returns_fallback_by_default(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+
+    response = client.post(
+        "/planning/ai/parse-task",
+        json={
+            "text": "Write report for 45 minutes",
+            "local_date": "2026-07-01",
+            "time_zone": "Europe/Brussels",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "fallback",
+        "confidence": 0.0,
+        "proposed_fields": {
+            "title": None,
+            "estimated_minutes": None,
+            "priority": None,
+            "due_date": None,
+            "earliest_start_at": None,
+            "splitting_allowed": None,
+            "min_segment_minutes": None,
+        },
+        "fallback_reason": "ai_disabled",
+        "error_code": "ai_disabled",
+    }
+
+
+def test_parse_interruption_route_uses_injected_ai_client(client: TestClient) -> None:
+    register(client, "alice")
+    client.app.state.ai_client = CapturingAiClient()
+
+    response = client.post(
+        "/planning/ai/parse-interruption",
+        json={
+            "text": "appointment from 10 to 11",
+            "local_date": "2026-07-01",
+            "time_zone": "Europe/Brussels",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "suggested"
+    assert response.json()["proposed_fields"]["time_zone"] == "Europe/Brussels"
+    assert client.app.state.ai_client.request == {
+        "text": "appointment from 10 to 11",
+        "local_date": "2026-07-01",
+        "time_zone": "Europe/Brussels",
+    }
 
 
 def register(client: TestClient, username: str) -> dict[str, object]:
@@ -2807,6 +2870,35 @@ class CapturingSchedulerClient:
     ) -> ScheduleResultDTO:
         self.request = schedule_request
         return self.schedule_day(schedule_request)
+
+
+class CapturingAiClient:
+    def __init__(self) -> None:
+        self.request: dict[str, object] = {}
+
+    def parse_task(self, request: dict[str, object]) -> object:
+        self.request = request
+        raise AssertionError("parse_task was not expected")
+
+    def parse_interruption(self, request: dict[str, object]) -> object:
+        from api_service.infrastructure.ai_client import (
+            InterruptionProposalDTO,
+            ParseInterruptionResultDTO,
+        )
+
+        self.request = request
+        return ParseInterruptionResultDTO(
+            status="suggested",
+            confidence=0.8,
+            proposed_fields=InterruptionProposalDTO(
+                start_at="2026-07-01T10:00:00+02:00",
+                end_at="2026-07-01T11:00:00+02:00",
+                time_zone="Europe/Brussels",
+                reported_at="2026-07-01T10:00:00+02:00",
+            ),
+            fallback_reason=None,
+            error_code=None,
+        )
 
 
 def item(
