@@ -397,6 +397,28 @@ class ParseInterruptionResponse(BaseModel):
     error_code: str | None
 
 
+class ScheduleExplanationResponse(BaseModel):
+    """Browser-facing optional AI explanation result."""
+
+    status: Literal["explained", "fallback"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    explanation: str | None
+    deterministic_reason: str
+    reason_code: str
+    fallback_reason: (
+        Literal[
+            "ai_disabled",
+            "service_unavailable",
+            "timeout",
+            "provider_error",
+            "invalid_response",
+            "unable_to_parse",
+        ]
+        | None
+    )
+    error_code: str | None
+
+
 class ScheduleItemResponse(BaseModel):
     """One browser-facing block in a persisted schedule snapshot."""
 

@@ -128,6 +128,102 @@ def test_external_placeholder_returns_provider_error_fallback() -> None:
     assert response.json()["error_code"] == "provider_not_configured"
 
 
+@pytest.mark.parametrize(
+    ("reason_code", "expected"),
+    [
+        (
+            "placed_in_earliest_valid_window",
+            "first open window",
+        ),
+        ("moved_after_interruption", "reported unavailable time"),
+        ("split_across_available_windows", "splitting is allowed"),
+        ("blocked_by_fixed_event", "fixed events"),
+        ("blocked_by_interruption", "reported unavailable time"),
+        ("missed_before_current_time", "already passed"),
+        ("insufficient_time_before_deadline", "before its due date"),
+        ("insufficient_remaining_day_time", "remaining day"),
+        ("designated_free_time", "kept visible as free time"),
+        ("locked_time_overlap_merged", "counted once"),
+    ],
+)
+def test_mock_provider_explains_allowed_schedule_reason_families(
+    reason_code: str, expected: str
+) -> None:
+    response = client().post(
+        "/v1/explain-schedule-decision",
+        json={
+            "reason_code": reason_code,
+            "deterministic_reason": (
+                "Write report was moved after reported unavailable time."
+            ),
+            "facts": {
+                "task_title": "Write report",
+                "task_estimated_minutes": 90,
+                "task_priority": 5,
+                "task_due_date": None,
+                "scheduled_start_at": "2026-07-11T16:00:00+02:00",
+                "scheduled_end_at": "2026-07-11T17:30:00+02:00",
+                "previous_start_at": None,
+                "previous_end_at": None,
+                "interruption_start_at": "2026-07-11T14:00:00+02:00",
+                "interruption_end_at": "2026-07-11T15:15:00+02:00",
+                "day_start_at": "2026-07-11T08:00:00+02:00",
+                "day_end_at": "2026-07-11T18:00:00+02:00",
+                "free_window_minutes": None,
+                "reason_details": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "explained"
+    assert body["confidence"] == 0.7
+    assert expected in body["explanation"]
+    assert body["fallback_reason"] is None
+    assert body["error_code"] is None
+
+
+def test_disabled_provider_returns_explanation_fallback() -> None:
+    response = client(provider_enabled=False).post(
+        "/v1/explain-schedule-decision",
+        json={
+            "reason_code": "moved_after_interruption",
+            "deterministic_reason": (
+                "Write report was moved after reported unavailable time."
+            ),
+            "facts": {"task_title": "Write report"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "fallback"
+    assert response.json()["fallback_reason"] == "ai_disabled"
+    assert response.json()["error_code"] == "ai_disabled"
+
+
+def test_explanation_schema_rejects_unapproved_reason_codes_and_extra_facts() -> None:
+    response = client().post(
+        "/v1/explain-schedule-decision",
+        json={
+            "reason_code": "provider_should_invent",
+            "deterministic_reason": "private schedule fact",
+            "facts": {
+                "task_title": "Write report",
+                "raw_prompt": "private prompt",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "validation_error",
+        "details": ["The AI parse request is invalid."],
+    }
+    assert "private schedule fact" not in response.text
+    assert "private prompt" not in response.text
+
+
 def test_schema_errors_use_safe_envelope_without_user_text() -> None:
     secret_text = "private medical appointment"
     response = client().post(
@@ -200,3 +296,22 @@ def test_logs_do_not_emit_user_text_provider_payload_or_credentials(capsys) -> N
     assert "private task text" not in rendered_logs
     assert credential not in rendered_logs
     assert "provider_payload" not in rendered_logs
+
+
+def test_explanation_logs_are_event_only(capsys) -> None:
+    app_client = client()
+
+    response = app_client.post(
+        "/v1/explain-schedule-decision",
+        json={
+            "reason_code": "blocked_by_fixed_event",
+            "deterministic_reason": "Private task was not scheduled.",
+            "facts": {"task_title": "Private task"},
+        },
+    )
+
+    assert response.status_code == 200
+    rendered_logs = capsys.readouterr().err
+    assert "explanation_completed" in rendered_logs
+    assert "Private task" not in rendered_logs
+    assert "Private task was not scheduled" not in rendered_logs

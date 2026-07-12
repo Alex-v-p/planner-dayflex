@@ -9,7 +9,8 @@ The current service includes the TKT-008 foundation, TKT-009 username/password
 authentication, TKT-010 persisted planning inputs, TKT-011 daily plan
 generation through the scheduler service, and TKT-012 progress/interruption
 recovery. TKT-022 adds authenticated planning AI parse proxy endpoints backed by
-the optional AI service. The lasting dependency and boundary choices are
+the optional AI service, and TKT-023 adds optional AI wording for existing
+schedule decisions. The lasting dependency and boundary choices are
 recorded in
 [ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md)
 and [ADR 0004](../../docs/architecture/decisions/0004-ai-service-boundary.md).
@@ -61,10 +62,10 @@ used only by the explicit scheduler HTTP client. `PLANNER_API_SCHEDULER_VERSION`
 defaults to `0.1.0` and is persisted with each generated schedule snapshot for
 history and auditability.
 
-`PLANNER_API_AI_SERVICE_BASE_URL` is optional. When unset, the planning AI parse
-routes return an explicit `ai_disabled` fallback and normal planning remains
-available. `PLANNER_API_AI_CLIENT_TIMEOUT_SECONDS` defaults to `2.0` and is
-bounded so optional parsing cannot block planning or recovery.
+`PLANNER_API_AI_SERVICE_BASE_URL` is optional. When unset, planning AI parse and
+schedule-explanation routes return an explicit `ai_disabled` fallback and normal
+planning remains available. `PLANNER_API_AI_CLIENT_TIMEOUT_SECONDS` defaults to
+`2.0` and is bounded so optional AI wording cannot block planning or recovery.
 
 `GET /health` returns `200` with `{"status":"ok"}` for process liveness. It
 does not run a database query: a database outage should not make a process
@@ -136,6 +137,7 @@ query through the current user's ID:
 - `POST /planning/days/{planning_day_id}/interruptions`
 - `POST /planning/ai/parse-task`
 - `POST /planning/ai/parse-interruption`
+- `POST /planning/days/{planning_day_id}/schedule-decisions/{decision_id}/ai-explanation`
 - `POST /planning/tasks`
 - `GET /planning/tasks`
 - `PUT /planning/tasks/{task_id}`
@@ -192,10 +194,12 @@ failures return `503` and roll back the interruption plus revised snapshot.
 Service and container impact for TKT-012: the application API service owns
 validation, authorization, persistence, and scheduler orchestration for recovery.
 TKT-022 service and container impact: the API gains an internal AI-service
-client and authenticated parse proxy routes. No persistence, migration, direct
-provider access, API Docker image, worker, queue, or Compose topology is added.
+client and authenticated parse proxy routes. TKT-023 extends that client with
+optional schedule-explanation wording for existing decisions. No persistence,
+migration, direct provider access, API Docker image, worker, queue, or Compose
+topology is added.
 
-## Planning AI parsing
+## Planning AI helpers
 
 `POST /planning/ai/parse-task` and `POST /planning/ai/parse-interruption`
 accept informal text plus optional local date and time zone. They call only the
@@ -203,8 +207,17 @@ internal `services/ai` HTTP contract when `PLANNER_API_AI_SERVICE_BASE_URL` is
 configured. They never persist raw text or proposals, never schedule work, and
 never call a provider directly.
 
+`POST
+/planning/days/{planning_day_id}/schedule-decisions/{decision_id}/ai-explanation`
+requires an authenticated user-owned day and decision. It sends only the
+decision reason code, deterministic reason text, and approved structured
+schedule facts to the internal `services/ai` `/v1/explain-schedule-decision`
+contract. The endpoint does not change the schedule, persist explanation
+history, or replace deterministic scheduler wording.
+
 All disabled, unreachable, timeout, non-success, malformed JSON, and
-schema-invalid AI-service paths return a safe fallback result:
+schema-invalid AI-service paths return a safe fallback result. Parse fallbacks
+use the shared parse shape:
 
 ```json
 {
@@ -215,6 +228,9 @@ schema-invalid AI-service paths return a safe fallback result:
   "error_code": "ai_service_unavailable"
 }
 ```
+
+Schedule-explanation fallbacks keep the deterministic reason in the API
+response and return `explanation: null` with stable fallback metadata.
 
 ## Migrations
 

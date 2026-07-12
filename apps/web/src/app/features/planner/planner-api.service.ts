@@ -187,6 +187,16 @@ export interface ParseInterruptionResponse {
   readonly error_code: string | null;
 }
 
+export interface ScheduleExplanationResponse {
+  readonly status: "explained" | "fallback";
+  readonly confidence: number;
+  readonly explanation: string | null;
+  readonly deterministic_reason: string;
+  readonly reason_code: string;
+  readonly fallback_reason: ParseTaskResponse["fallback_reason"];
+  readonly error_code: string | null;
+}
+
 @Injectable({ providedIn: "root" })
 export class PlannerApiService {
   private readonly api = inject(ApiClientService);
@@ -361,6 +371,15 @@ export class PlannerApiService {
     return this.api.postJson<ParseInputRequest, ParseInterruptionResponse>(
       "/planning/ai/parse-interruption",
       request,
+    );
+  }
+
+  explainScheduleDecision(
+    planningDayId: string,
+    decisionId: string,
+  ): Observable<ScheduleExplanationResponse> {
+    return this.api.postEmpty<ScheduleExplanationResponse>(
+      `/planning/days/${planningDayId}/schedule-decisions/${decisionId}/ai-explanation`,
     );
   }
 

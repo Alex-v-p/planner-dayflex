@@ -28,6 +28,7 @@ import {
   PlannerApiService,
   PlannerWorkspaceData,
   ScheduleDecision,
+  ScheduleExplanationResponse,
   ScheduleItem,
   ScheduleSnapshot,
   Task,
@@ -121,6 +122,24 @@ type SuggestionState<T> =
       readonly result: null;
     };
 
+type ExplanationState =
+  | { readonly status: "idle"; readonly message: string; readonly result: null }
+  | {
+      readonly status: "pending";
+      readonly message: string;
+      readonly result: null;
+    }
+  | {
+      readonly status: "ready";
+      readonly message: string;
+      readonly result: ScheduleExplanationResponse;
+    }
+  | {
+      readonly status: "fallback";
+      readonly message: string;
+      readonly result: ScheduleExplanationResponse;
+    };
+
 interface TimelineBlock {
   readonly item: ScheduleItem;
   readonly label: string;
@@ -187,6 +206,9 @@ export class PlannerWorkspacePage implements OnInit {
     message: "",
     result: null,
   });
+  protected readonly explanationStates = signal<
+    Readonly<Record<string, ExplanationState>>
+  >({});
   protected readonly progressState = signal<RecoveryMutationState>({
     status: "idle",
     message: "",
@@ -235,6 +257,7 @@ export class PlannerWorkspacePage implements OnInit {
           this.generatePlanState.set({ status: "idle", message: "" });
           this.progressState.set({ status: "idle", message: "" });
           this.interruptionState.set({ status: "idle", message: "" });
+          this.explanationStates.set({});
         }),
         switchMap((selectedDate) =>
           this.plannerApi.loadWorkspaceDate(selectedDate).pipe(
@@ -445,6 +468,52 @@ export class PlannerWorkspacePage implements OnInit {
     }));
     this.taskFormErrors.set({});
     this.taskFormMessage.set("Suggestion applied. Review before saving.");
+  }
+
+  protected explainDecision(decision: ScheduleDecision): void {
+    const state = this.state();
+    if (state.status !== "ready" || state.data.day === null) {
+      this.setExplanationState(decision.id, {
+        status: "fallback",
+        message: "Explanations are unavailable until a saved day is open.",
+        result: explanationFallbackResult(
+          decision,
+          "service_unavailable",
+          this.decisionText(decision, []),
+        ),
+      });
+      return;
+    }
+
+    const deterministicReason = this.decisionText(decision, state.data.tasks);
+    this.setExplanationState(decision.id, {
+      status: "pending",
+      message: "Optional explanation is loading.",
+      result: null,
+    });
+    this.plannerApi
+      .explainScheduleDecision(state.data.day.id, decision.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.setExplanationState(decision.id, {
+            status: result.status === "explained" ? "ready" : "fallback",
+            message: explanationMessage(result),
+            result,
+          });
+        },
+        error: () => {
+          this.setExplanationState(decision.id, {
+            status: "fallback",
+            message: explanationFallbackMessage("service_unavailable"),
+            result: explanationFallbackResult(
+              decision,
+              "service_unavailable",
+              deterministicReason,
+            ),
+          });
+        },
+      });
   }
 
   protected deleteTask(task: Task): void {
@@ -1088,6 +1157,16 @@ export class PlannerWorkspacePage implements OnInit {
     return decision.reason_code;
   }
 
+  protected decisionExplanationState(decisionId: string): ExplanationState {
+    return (
+      this.explanationStates()[decisionId] ?? {
+        status: "idle",
+        message: "",
+        result: null,
+      }
+    );
+  }
+
   protected formatDuration(minutes: number): string {
     if (minutes < 60) {
       return `${minutes} min`;
@@ -1120,6 +1199,16 @@ export class PlannerWorkspacePage implements OnInit {
         },
       };
     });
+  }
+
+  private setExplanationState(
+    decisionId: string,
+    state: ExplanationState,
+  ): void {
+    this.explanationStates.update((current) => ({
+      ...current,
+      [decisionId]: state,
+    }));
   }
 
   private runMutation<T>(
@@ -1776,6 +1865,49 @@ function fallbackMessage(reason: ParseTaskResponse["fallback_reason"]): string {
     default:
       return "Suggestions are unavailable. Your form is unchanged.";
   }
+}
+
+function explanationMessage(result: ScheduleExplanationResponse): string {
+  if (result.status === "explained") {
+    return "Optional AI explanation ready.";
+  }
+
+  return explanationFallbackMessage(result.fallback_reason);
+}
+
+function explanationFallbackMessage(
+  reason: ParseTaskResponse["fallback_reason"],
+): string {
+  switch (reason) {
+    case "ai_disabled":
+      return "Optional AI explanations are off. The scheduler reason remains available.";
+    case "timeout":
+      return "Optional AI explanation took too long. The scheduler reason remains available.";
+    case "provider_error":
+    case "invalid_response":
+    case "service_unavailable":
+      return "Optional AI explanation is unavailable. The scheduler reason remains available.";
+    case "unable_to_parse":
+      return "Optional AI explanation is unavailable for this reason. The scheduler reason remains available.";
+    default:
+      return "Optional AI explanation is unavailable. The scheduler reason remains available.";
+  }
+}
+
+function explanationFallbackResult(
+  decision: ScheduleDecision,
+  reason: ParseTaskResponse["fallback_reason"],
+  deterministicReason: string,
+): ScheduleExplanationResponse {
+  return {
+    status: "fallback",
+    confidence: 0,
+    explanation: null,
+    deterministic_reason: deterministicReason,
+    reason_code: decision.reason_code,
+    fallback_reason: reason,
+    error_code: reason,
+  };
 }
 
 function taskFallbackResult(

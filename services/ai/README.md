@@ -1,8 +1,8 @@
 # planner-dayflex AI service
 
-`services/ai` is the optional natural-language parsing boundary. It owns all
-direct AI/provider communication and exposes only internal HTTP contracts to the
-application API.
+`services/ai` is the optional AI boundary for natural-language parsing and
+schedule-decision wording. It owns all direct AI/provider communication and
+exposes only internal HTTP contracts to the application API.
 
 ## Run locally
 
@@ -36,8 +36,9 @@ dependency in this ticket.
 
 - `POST /v1/parse-task`
 - `POST /v1/parse-interruption`
+- `POST /v1/explain-schedule-decision`
 
-Both endpoints return the shared parse result contract:
+The parse endpoints return the shared parse result contract:
 
 - `status`: `suggested` or `fallback`
 - `confidence`: number from `0.0` to `1.0`
@@ -45,4 +46,15 @@ Both endpoints return the shared parse result contract:
 - `fallback_reason`: stable reason or `null`
 - `error_code`: stable machine code or `null`
 
+The schedule explanation endpoint accepts only approved structured scheduler
+facts, the persisted reason code, and deterministic reason text from
+`services/api`. It returns optional wording for that existing decision:
+
+- `status`: `explained` or `fallback`
+- `confidence`: number from `0.0` to `1.0`
+- `explanation`: grounded wording or `null`
+- `fallback_reason`: stable reason or `null`
+- `error_code`: stable machine code or `null`
+
+The AI service never changes schedules or decides where work belongs.
 Schema errors return a safe 422 envelope and do not echo user text.

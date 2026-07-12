@@ -239,13 +239,53 @@
         </h3>
         <ul class="mt-3 space-y-2">
           @for (decision of snapshot.decisions; track decision.id) {
-          <li class="text-sm leading-6 text-ink-700">
-            {{ decisionText(decision, view.data.tasks) }}
-            <code
-              class="ml-1 rounded bg-mist-50 px-1 py-0.5 text-xs text-ink-600"
+          <li
+            class="rounded-md border border-mist-200 p-3 text-sm leading-6 text-ink-700"
+          >
+            <p>
+              {{ decisionText(decision, view.data.tasks) }}
+              <code
+                class="ml-1 rounded bg-mist-50 px-1 py-0.5 text-xs text-ink-600"
+              >
+                {{ decisionCode(decision) }}
+              </code>
+            </p>
+            <div class="mt-2">
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
+                (click)="explainDecision(decision)"
+                [disabled]="decisionExplanationState(decision.id).status === 'pending'"
+              >
+                Explain with AI
+              </button>
+            </div>
+            @if (decisionExplanationState(decision.id); as explanationState) {
+            @if (explanationState.status !== "idle") {
+            <div
+              class="mt-3 rounded-md border border-mist-200 bg-mist-50 p-3"
+              role="status"
             >
-              {{ decisionCode(decision) }}
-            </code>
+              <p
+                class="text-xs font-semibold uppercase tracking-normal text-ink-600"
+              >
+                Optional AI explanation
+              </p>
+              <p class="mt-1 text-sm text-ink-700">
+                {{ explanationState.message }}
+              </p>
+              @if (explanationState.result; as explanationResult) { @if
+              (explanationResult.status === "explained") {
+              <p class="mt-2 text-sm text-ink-700">
+                {{ explanationResult.explanation }}
+              </p>
+              } @else if (explanationResult.fallback_reason) {
+              <p class="mt-2 text-sm text-ink-600">
+                {{ explanationResult.fallback_reason }}
+              </p>
+              } }
+            </div>
+            } }
           </li>
           }
         </ul>
