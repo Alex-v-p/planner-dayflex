@@ -127,6 +127,9 @@ def test_helper_scripts_use_committed_env_template_and_selected_stack() -> None:
     )
     assert "/edge-health" in smoke_text
     assert "/api/health" in smoke_text
+    assert "/api/ready" in smoke_text
+    assert "/api/auth/register" in smoke_text
+    assert "/planning/days/$($day.id)/interruptions" in smoke_text
     assert "/scheduler/health" in smoke_text
     assert "API database connection check failed" in smoke_text
     assert "Worker Redis connection check failed" in smoke_text
