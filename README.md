@@ -13,7 +13,8 @@ the [`application API`](services/api/README.md), the
 [`worker service`](services/worker/README.md) are initialized. The API
 owns browser-facing validation, authorization, persistence, and orchestration;
 the browser calls that API boundary rather than scheduler, database, queue, AI,
-worker, or model internals. Compose and deployment remain ticketed work.
+worker, or model internals. Local Compose topology is available under
+[`infra/`](infra/compose.yml); deployment remains ticketed work.
 
 ## Product direction
 
@@ -70,5 +71,52 @@ Release numbering and the planned automation work are documented in
 
 The scheduler-core, scheduler-service, API-service, AI-service, worker-service,
 and web-application CI jobs run their documented format, lint, test,
-image-build, and build commands as applicable. Deployment remains a safe
-placeholder until a hosting platform is chosen.
+image-build, Compose-topology, and build commands as applicable. Deployment
+remains a safe placeholder until a hosting platform is chosen.
+
+## Local Compose topology
+
+From a clean checkout with Docker available, start the local stack through the
+reverse proxy:
+
+```powershell
+.\infra\docker\smoke-local.ps1 -KeepRunning
+```
+
+Open `http://127.0.0.1:8080`. The helper validates startup, checks
+`/edge-health` and `/api/health` through the proxy, verifies database and Redis
+connections through service-owned code, and leaves the stack running when
+`-KeepRunning` is supplied. Stop and remove local volumes with:
+
+```powershell
+.\infra\docker\cleanup-local.ps1
+```
+
+The default topology runs the reverse proxy, web app, API, scheduler,
+PostgreSQL, Redis, AI service in disabled-provider mode, and the non-critical
+worker. Browser traffic is published only by the edge proxy on localhost. The
+proxy routes `/` to the web app and `/api/` to the API; scheduler, AI, worker,
+PostgreSQL, Redis, and model runtime routes are not exposed to the browser.
+For a reduced stack, start only `edge web api scheduler postgres redis`; API
+health and deterministic scheduling remain usable, and optional AI/worker
+features use their existing fallback behavior when those services are absent.
+
+Local defaults live in [`infra/docker/.env.example`](infra/docker/.env.example).
+They are non-secret development placeholders. Real credentials and overrides
+must come from the environment or an untracked env file. The optional Ollama
+runtime is profile-gated and attached only to the AI/model network:
+
+```powershell
+docker compose --env-file .\infra\docker\.env.example -f .\infra\compose.yml --profile model up -d ollama ai
+```
+
+Health checks follow service semantics: API, scheduler, and AI health endpoints
+are dependency-free liveness; PostgreSQL and Redis use connection checks; the
+worker health check verifies Redis reachability because it has no HTTP surface.
+
+Data-model impact: None. TKT-025 adds no migrations, tables, fields,
+constraints, indexes, or backfills.
+
+Service and container impact: local-only Dockerfiles for existing services and
+a shared Compose/Nginx topology. No production deployment, TLS, new service
+boundary, or browser access to internal services is added.

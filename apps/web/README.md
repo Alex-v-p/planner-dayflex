@@ -29,6 +29,10 @@ npm run test:e2e
 responses for the canonical browser journey. Run `npx playwright install
 chromium` once before the first local E2E run.
 
+The local Compose image is built from `apps/web/Dockerfile`. It compiles the
+Angular app and serves static files on container port `8080`; only the shared
+edge proxy publishes a host port.
+
 ## API configuration
 
 The browser calls only the application API. It does not import scheduler,
@@ -52,5 +56,5 @@ The app follows the repository structure guide:
 ## Ticket impact
 
 - Data-model impact: None.
-- Service/container impact: Browser/API only; no new service, Docker image, or
-  Compose topology.
+- Service/container impact: TKT-025 adds a local-only web image used behind the
+  shared reverse proxy. The browser still calls only `/api` through the edge.
