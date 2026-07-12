@@ -21,6 +21,8 @@ from pydantic import (
     model_validator,
 )
 
+from api_service.correlation import REQUEST_ID_HEADER, current_request_id
+
 
 FallbackReason = Literal[
     "ai_disabled",
@@ -324,6 +326,7 @@ class HttpAiClient:
             response = httpx.post(
                 f"{self._base_url}{path}",
                 json=request,
+                headers=_correlation_headers(),
                 timeout=self._timeout,
             )
         except httpx.TimeoutException:
@@ -400,3 +403,10 @@ def _date_only(value: object, field_name: str) -> object:
     if isinstance(value, str) and DATE_ONLY_PATTERN.fullmatch(value) is None:
         raise ValueError(f"{field_name} must be a date without a time")
     return value
+
+
+def _correlation_headers() -> dict[str, str]:
+    request_id = current_request_id()
+    if request_id is None:
+        return {}
+    return {REQUEST_ID_HEADER: request_id}

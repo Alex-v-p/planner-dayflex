@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from api_service.correlation import set_request_id
 from api_service.infrastructure.ai_client import HttpAiClient
 
 
@@ -462,3 +463,37 @@ def test_ai_client_uses_bounded_timeout(monkeypatch: pytest.MonkeyPatch) -> None
     HttpAiClient("http://ai.test", timeout_seconds=1.25).parse_task({"text": "x"})
 
     assert captured["timeout"] == 1.25
+
+
+def test_ai_client_propagates_current_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    def fake_post(*args, **kwargs):
+        captured["headers"] = kwargs["headers"]
+        return httpx.Response(
+            200,
+            json={
+                "status": "fallback",
+                "confidence": 0.0,
+                "proposed_fields": {
+                    "title": None,
+                    "estimated_minutes": None,
+                    "priority": None,
+                    "due_date": None,
+                    "earliest_start_at": None,
+                    "splitting_allowed": None,
+                    "min_segment_minutes": None,
+                },
+                "fallback_reason": "unable_to_parse",
+                "error_code": "unable_to_parse",
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    set_request_id("api-ai-req-123")
+
+    HttpAiClient("http://ai.test").parse_task({"text": "x"})
+
+    assert captured["headers"] == {"X-Request-ID": "api-ai-req-123"}

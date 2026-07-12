@@ -31,4 +31,5 @@ class ScheduleExplanationJobEnvelope(BaseModel):
     contract_version: Literal[1] = WORKER_JOB_CONTRACT_VERSION
     kind: Literal["schedule_explanation_enrichment"] = SCHEDULE_EXPLANATION_JOB_KIND
     idempotency_key: str = Field(min_length=1, max_length=200)
+    correlation_id: str | None = Field(default=None, min_length=8, max_length=80)
     payload: ScheduleExplanationJobPayload

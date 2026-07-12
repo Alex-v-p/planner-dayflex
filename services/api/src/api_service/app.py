@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
@@ -9,6 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .config import Settings
+from .correlation import REQUEST_ID_HEADER, safe_request_id, set_request_id
 from .database import Database
 from .infrastructure.ai_client import AiClient, DisabledAiClient, HttpAiClient
 from .infrastructure.scheduler_client import HttpSchedulerClient, SchedulerClient
@@ -26,6 +29,20 @@ class HealthResponse(BaseModel):
     """Dependency-free liveness response for the API process."""
 
     status: str = "ok"
+
+
+class ReadinessCheck(BaseModel):
+    """One safe readiness signal without connection strings or secrets."""
+
+    name: str
+    status: str
+
+
+class ReadinessResponse(BaseModel):
+    """Aggregated readiness response for the API process and dependencies."""
+
+    status: str
+    checks: list[ReadinessCheck]
 
 
 def redact_validation_error_inputs(error: dict[str, object]) -> dict[str, object]:
@@ -81,6 +98,22 @@ def create_app(
     app.state.ai_client = configured_ai_client
     app.state.worker_queue_client = configured_worker_queue_client
 
+    @app.middleware("http")
+    async def correlate_request(request: Request, call_next):
+        """Attach a safe request ID to logs and responses."""
+        request_id = safe_request_id(request.headers.get(REQUEST_ID_HEADER))
+        set_request_id(request_id)
+        try:
+            response = await call_next(request)
+            response.headers[REQUEST_ID_HEADER] = request_id
+            logger.info(
+                "API request completed",
+                extra={"event": "request_completed"},
+            )
+            return response
+        finally:
+            set_request_id(None)
+
     @app.exception_handler(RequestValidationError)
     def request_validation_exception_handler(
         _request: Request, exc: RequestValidationError
@@ -101,6 +134,43 @@ def create_app(
     def health() -> HealthResponse:
         """Report process liveness without conflating it with database readiness."""
         return HealthResponse()
+
+    @app.get("/ready", response_model=ReadinessResponse)
+    def ready() -> JSONResponse | ReadinessResponse:
+        """Check API dependencies with safe service/check names only."""
+        checks: list[ReadinessCheck] = []
+        try:
+            configured_database.check_connection()
+            checks.append(ReadinessCheck(name="database", status="ok"))
+        except Exception:
+            logging.getLogger("api_service").warning(
+                "Readiness check failed",
+                extra={"event": "readiness_check_completed"},
+            )
+            checks.append(ReadinessCheck(name="database", status="unavailable"))
+
+        try:
+            scheduler_ready = configured_scheduler_client.check_readiness()
+        except Exception:
+            logging.getLogger("api_service").warning(
+                "Readiness check failed",
+                extra={"event": "readiness_check_completed"},
+            )
+            scheduler_ready = False
+        checks.append(
+            ReadinessCheck(
+                name="scheduler",
+                status="ok" if scheduler_ready else "unavailable",
+            )
+        )
+        status_code = 200 if all(check.status == "ok" for check in checks) else 503
+        body = ReadinessResponse(
+            status="ok" if status_code == 200 else "unavailable",
+            checks=checks,
+        )
+        if status_code == 200:
+            return body
+        return JSONResponse(status_code=status_code, content=body.model_dump())
 
     app.include_router(auth_router)
     app.include_router(planning_router)

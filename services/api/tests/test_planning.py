@@ -18,6 +18,7 @@ from api_service.application.planning import (
 )
 from api_service.contracts.planning import TaskProgressCreateRequest
 from api_service.contracts.worker_jobs import ScheduleExplanationJobEnvelope
+from api_service.correlation import set_request_id
 from api_service.database import Database
 from api_service.domain.auth import SESSION_COOKIE_NAME
 from api_service.infrastructure.models import (
@@ -1834,6 +1835,8 @@ def test_reschedule_scheduler_failures_roll_back_interruption_and_snapshot(
 def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_request_id(None)
+
     class SuccessfulSchedulerResponse:
         status_code = 200
 
@@ -1872,10 +1875,14 @@ def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
             }
 
     def fake_post(
-        url: str, json: dict[str, object], timeout: float
+        url: str,
+        json: dict[str, object],
+        headers: dict[str, str],
+        timeout: float,
     ) -> SuccessfulSchedulerResponse:
         assert url == "http://scheduler.test/v1/schedule-day"
         assert json == {"request": "body"}
+        assert headers == {}
         assert timeout == 5.0
         return SuccessfulSchedulerResponse()
 
@@ -1895,6 +1902,8 @@ def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
 def test_http_scheduler_client_posts_reschedule_day_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_request_id(None)
+
     class SuccessfulSchedulerResponse:
         status_code = 200
 
@@ -1914,13 +1923,17 @@ def test_http_scheduler_client_posts_reschedule_day_envelope(
             }
 
     def fake_post(
-        url: str, json: dict[str, object], timeout: float
+        url: str,
+        json: dict[str, object],
+        headers: dict[str, str],
+        timeout: float,
     ) -> SuccessfulSchedulerResponse:
         assert url == "http://scheduler.test/v1/reschedule-day"
         assert json == {
             "previous_result": {"items": []},
             "schedule_request": {"planning_day": "body"},
         }
+        assert headers == {}
         assert timeout == 5.0
         return SuccessfulSchedulerResponse()
 
@@ -1935,11 +1948,39 @@ def test_http_scheduler_client_posts_reschedule_day_envelope(
     assert [item.kind for item in result.items] == ["designated_free_time"]
 
 
+def test_http_scheduler_client_propagates_current_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ReadyResponse:
+        status_code = 200
+
+    captured: dict[str, object] = {}
+
+    def fake_get(url: str, headers: dict[str, str], timeout: float) -> ReadyResponse:
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return ReadyResponse()
+
+    monkeypatch.setattr(
+        "api_service.infrastructure.scheduler_client.httpx.get", fake_get
+    )
+    set_request_id("api-scheduler-req-123")
+
+    assert HttpSchedulerClient("http://scheduler.test").check_readiness() is True
+    assert captured == {
+        "url": "http://scheduler.test/ready",
+        "headers": {"X-Request-ID": "api-scheduler-req-123"},
+        "timeout": 5.0,
+    }
+
+
 def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
     client: TestClient,
     database: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_request_id(None)
     register(client, "alice")
     save_canonical_inputs(client)
     day = client.post(
@@ -1970,13 +2011,18 @@ def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
             }
 
     def fake_post(
-        url: str, json: dict[str, object], timeout: float
+        url: str,
+        json: dict[str, object],
+        headers: dict[str, str],
+        timeout: float,
     ) -> MalformedSchedulerResponse:
         assert url == "http://scheduler.test/v1/schedule-day"
         assert json["planning_day"] == {
             "local_date": "2026-06-22",
             "time_zone": "Europe/Brussels",
         }
+        assert set(headers) == {"X-Request-ID"}
+        assert len(headers["X-Request-ID"]) == 32
         assert timeout == 5.0
         return MalformedSchedulerResponse()
 

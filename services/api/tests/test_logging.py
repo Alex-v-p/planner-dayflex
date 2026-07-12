@@ -7,6 +7,7 @@ import logging
 
 from api_service.app import create_app
 from api_service.config import Settings
+from api_service.correlation import set_request_id
 from api_service.logging_config import (
     LOGGER_NAME,
     UVICORN_LOGGER_NAMES,
@@ -28,9 +29,12 @@ def test_json_formatter_does_not_include_message_or_sensitive_extra_values() -> 
     record.event = "api_started"
     record.password = "password"
 
+    set_request_id("req-safe-123")
     formatted = JsonFormatter().format(record)
 
-    assert json.loads(formatted)["event"] == "api_started"
+    payload = json.loads(formatted)
+    assert payload["event"] == "api_started"
+    assert payload["request_id"] == "req-safe-123"
     assert "database_url" not in formatted
     assert "password" not in formatted
 

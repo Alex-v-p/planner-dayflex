@@ -56,6 +56,7 @@ from api_service.contracts.worker_jobs import (
     ScheduleExplanationJobEnvelope,
     ScheduleExplanationJobPayload,
 )
+from api_service.correlation import current_request_id
 from api_service.infrastructure.worker_queue import (
     WorkerQueueClient,
     schedule_explanation_result_key,
@@ -1383,6 +1384,7 @@ def _schedule_explanation_job_envelope(
             f"schedule-explanation:v1:{snapshot.id}:{decision.id}:"
             f"{decision.reason_code}"
         ),
+        correlation_id=current_request_id(),
         payload=ScheduleExplanationJobPayload(
             decision_id=decision.id,
             reason_code=decision.reason_code,

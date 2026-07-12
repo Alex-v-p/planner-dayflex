@@ -1,4 +1,4 @@
-"""Safe structured logging for the worker service."""
+"""Safe structured logging for the scheduler service."""
 
 from __future__ import annotations
 
@@ -6,21 +6,13 @@ from datetime import UTC, datetime
 import json
 import logging
 
-from worker_service.correlation import current_request_id
+from scheduler_service.correlation import current_request_id
 
 
-LOGGER_NAME = "worker_service"
-SAFE_EVENTS = frozenset(
-    {
-        "worker_started",
-        "worker_job_completed",
-        "worker_job_duplicate",
-        "worker_job_retryable_failed",
-        "worker_job_permanent_failed",
-        "worker_cleanup_completed",
-    }
-)
+LOGGER_NAME = "scheduler_service"
+SAFE_EVENTS = frozenset({"scheduler_started", "request_completed"})
 DEFAULT_EVENT = "log_event"
+UVICORN_LOGGER_NAMES = ("uvicorn.error", "uvicorn.access")
 
 
 class JsonFormatter(logging.Formatter):
@@ -42,9 +34,7 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
-def configure_logging(log_level: str) -> logging.Logger:
-    """Configure worker logs without payloads, URLs, credentials, or prompts."""
-    logger = logging.getLogger(LOGGER_NAME)
+def _configure_safe_logger(logger: logging.Logger, log_level: str) -> None:
     logger.handlers.clear()
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
@@ -52,4 +42,12 @@ def configure_logging(log_level: str) -> logging.Logger:
     logger.setLevel(log_level)
     logger.propagate = False
     logger.disabled = False
-    return logger
+
+
+def configure_logging(log_level: str = "INFO") -> logging.Logger:
+    """Configure scheduler logs without request bodies or task titles."""
+    service_logger = logging.getLogger(LOGGER_NAME)
+    _configure_safe_logger(service_logger, log_level)
+    for logger_name in UVICORN_LOGGER_NAMES:
+        _configure_safe_logger(logging.getLogger(logger_name), log_level)
+    return service_logger

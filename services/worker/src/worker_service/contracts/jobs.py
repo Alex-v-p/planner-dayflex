@@ -57,6 +57,7 @@ class WorkerJobEnvelope(BaseModel):
         "cleanup_stale_observations",
     ]
     idempotency_key: str = Field(min_length=1, max_length=200)
+    correlation_id: str | None = Field(default=None, min_length=8, max_length=80)
     payload: dict[str, object]
 
 

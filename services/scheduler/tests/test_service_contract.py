@@ -92,6 +92,23 @@ def test_health_reports_liveness() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert "x-request-id" in response.headers
+
+
+def test_ready_reports_dependency_free_readiness() -> None:
+    response = client.get("/ready", headers={"X-Request-ID": "scheduler-req-1"})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert response.headers["x-request-id"] == "scheduler-req-1"
+
+
+def test_request_id_header_is_sanitized() -> None:
+    response = client.get("/health", headers={"X-Request-ID": "token?secret=raw"})
+
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] != "token?secret=raw"
+    assert len(response.headers["x-request-id"]) == 32
 
 
 def test_schedule_day_returns_the_explicit_contract_and_reason_codes() -> None:

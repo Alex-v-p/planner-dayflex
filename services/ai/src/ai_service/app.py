@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from ai_service.application.explanations import ExplanationApplication
 from ai_service.application.parsing import ParseApplication
+from ai_service.correlation import REQUEST_ID_HEADER, safe_request_id, set_request_id
 from ai_service.contracts.explanations import (
     ExplainScheduleDecisionRequestDTO,
     ExplainScheduleDecisionResultDTO,
@@ -50,6 +51,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.parser = parser
     app.state.explainer = explainer
 
+    @app.middleware("http")
+    async def correlate_request(request: Request, call_next):
+        """Attach a safe request ID to logs and responses."""
+        request_id = safe_request_id(request.headers.get(REQUEST_ID_HEADER))
+        set_request_id(request_id)
+        try:
+            response = await call_next(request)
+            response.headers[REQUEST_ID_HEADER] = request_id
+            logger.info("AI request completed", extra={"event": "request_completed"})
+            return response
+        finally:
+            set_request_id(None)
+
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(
         _: Request, __: RequestValidationError
@@ -60,6 +74,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health", response_model=HealthResponseDTO)
     def health() -> HealthResponseDTO:
         """Report process liveness without checking provider readiness."""
+        return HealthResponseDTO()
+
+    @app.get("/ready", response_model=HealthResponseDTO)
+    def ready() -> HealthResponseDTO:
+        """Report AI service readiness without exposing provider configuration."""
         return HealthResponseDTO()
 
     @app.post(

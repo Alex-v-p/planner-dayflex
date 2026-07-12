@@ -22,6 +22,17 @@ def test_health_reports_liveness_when_provider_is_disabled() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert "x-request-id" in response.headers
+
+
+def test_ready_reports_service_readiness_without_provider_details() -> None:
+    response = client(provider_enabled=False).get(
+        "/ready", headers={"X-Request-ID": "ai-ready-123"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert response.headers["x-request-id"] == "ai-ready-123"
 
 
 def test_mock_provider_returns_valid_task_suggestion() -> None:

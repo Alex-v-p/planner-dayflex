@@ -9,6 +9,7 @@ from redis import Redis
 from redis.exceptions import RedisError
 from rq import get_current_job
 
+from worker_service.correlation import safe_request_id, set_request_id
 from worker_service.config import Settings
 from worker_service.contracts.jobs import (
     JobEnvelopeAdapter,
@@ -42,44 +43,52 @@ def process_job(raw_envelope: dict[str, object]) -> dict[str, object]:
         )
         return {"status": "permanent_failure"}
 
-    store = ObservationStore(_current_redis())
-    claimed = False
+    if envelope.correlation_id is not None:
+        set_request_id(safe_request_id(envelope.correlation_id))
 
     try:
-        if not store.claim(envelope.idempotency_key):
-            LOGGER.info(
-                "Duplicate worker job skipped",
-                extra={"event": "worker_job_duplicate"},
-            )
-            return {"status": "duplicate"}
-        claimed = True
+        store = ObservationStore(_current_redis())
+        claimed = False
 
-        if envelope.kind == "test_job":
-            return _process_test_job(envelope.idempotency_key, envelope.payload, store)
-        if envelope.kind == "schedule_explanation_enrichment":
-            return _process_schedule_explanation(envelope.payload, store)
-        if envelope.kind == "cleanup_stale_observations":
-            return _process_cleanup(envelope.payload, store)
-        raise PermanentWorkerJobError("unsupported job kind")
-    except RetryableWorkerJobError:
-        if claimed:
-            store.release_claim(envelope.idempotency_key)
-        raise
-    except RedisError as exc:
-        if claimed:
-            _release_claim_safely(store, envelope.idempotency_key)
-        LOGGER.warning(
-            "Retryable worker job failure",
-            extra={"event": "worker_job_retryable_failed"},
-        )
-        raise RetryableWorkerJobError("retryable worker job failure") from exc
-    except (PermanentWorkerJobError, ValidationError, ValueError):
-        store.record_failure(envelope.idempotency_key, "permanent")
-        LOGGER.error(
-            "Permanent worker job failure",
-            extra={"event": "worker_job_permanent_failed"},
-        )
-        return {"status": "permanent_failure"}
+        try:
+            if not store.claim(envelope.idempotency_key):
+                LOGGER.info(
+                    "Duplicate worker job skipped",
+                    extra={"event": "worker_job_duplicate"},
+                )
+                return {"status": "duplicate"}
+            claimed = True
+
+            if envelope.kind == "test_job":
+                return _process_test_job(
+                    envelope.idempotency_key, envelope.payload, store
+                )
+            if envelope.kind == "schedule_explanation_enrichment":
+                return _process_schedule_explanation(envelope.payload, store)
+            if envelope.kind == "cleanup_stale_observations":
+                return _process_cleanup(envelope.payload, store)
+            raise PermanentWorkerJobError("unsupported job kind")
+        except RetryableWorkerJobError:
+            if claimed:
+                store.release_claim(envelope.idempotency_key)
+            raise
+        except RedisError as exc:
+            if claimed:
+                _release_claim_safely(store, envelope.idempotency_key)
+            LOGGER.warning(
+                "Retryable worker job failure",
+                extra={"event": "worker_job_retryable_failed"},
+            )
+            raise RetryableWorkerJobError("retryable worker job failure") from exc
+        except (PermanentWorkerJobError, ValidationError, ValueError):
+            store.record_failure(envelope.idempotency_key, "permanent")
+            LOGGER.error(
+                "Permanent worker job failure",
+                extra={"event": "worker_job_permanent_failed"},
+            )
+            return {"status": "permanent_failure"}
+    finally:
+        set_request_id(None)
 
 
 def _process_test_job(
