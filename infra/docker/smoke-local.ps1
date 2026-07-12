@@ -95,12 +95,13 @@ try {
     if ($apiHealth.status -ne "ok") {
         throw "API health through edge returned unexpected status."
     }
+    $apiHealthRequestId = @($apiHealthResponse.Headers["X-Request-ID"])[0]
     Assert-Equal `
-        ($apiHealthResponse.Headers["X-Request-ID"] -ne "smoke-health-req") `
-        $true `
+        ($apiHealthRequestId -eq "smoke-health-req") `
+        $false `
         "API health reflected a browser-supplied request ID."
     Assert-CanonicalRequestId `
-        $apiHealthResponse.Headers["X-Request-ID"] `
+        $apiHealthRequestId `
         "API health did not return a service-owned request ID."
 
     $apiReady = Invoke-RestMethod -Uri "$baseUri/api/ready" -TimeoutSec 10
