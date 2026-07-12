@@ -16,10 +16,12 @@ does not make health fail.
 `GET /ready` returns safe service readiness without exposing provider URLs,
 model names, credentials, or provider error text.
 
-The service accepts `X-Request-ID`, sanitizes unsafe values, returns the safe ID
-in the response header, and includes it in structured JSON logs. Logs contain
-only allowlisted operational event names; they do not include prompts, provider
-payloads, request bodies, URLs, or credentials.
+The service accepts only canonical `X-Request-ID` values in the form
+`pdreq.<32 lowercase hex chars>`. Missing or non-canonical values are replaced
+with a freshly generated canonical ID, which is returned in the response header
+and included in structured JSON logs. Logs contain only allowlisted operational
+event names; they do not include prompts, provider payloads, request bodies,
+URLs, or credentials.
 
 In the local Compose topology, the AI service is internal-only and runs with
 the disabled provider by default. The optional Ollama runtime is enabled only

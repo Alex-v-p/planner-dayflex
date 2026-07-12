@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
+import re
 from threading import Barrier
 from unittest.mock import Mock
 
@@ -39,6 +40,8 @@ from api_service.infrastructure.ai_client import ExplainScheduleDecisionResultDT
 
 
 PASSWORD = "correct horse battery"
+REQUEST_ID_RE = re.compile(r"^pdreq\.[0-9a-f]{32}$")
+SESSION_TOKEN_SHAPED_REQUEST_ID = "J2rfVdJdyPldm9HSOCjHgheYEkKAD5tnMqj8I8-M6LU"
 
 
 def test_planning_preferences_and_days_are_user_scoped(
@@ -1965,12 +1968,12 @@ def test_http_scheduler_client_propagates_current_request_id(
     monkeypatch.setattr(
         "api_service.infrastructure.scheduler_client.httpx.get", fake_get
     )
-    set_request_id("api-scheduler-req-123")
+    set_request_id("pdreq.0123456789abcdef0123456789abcdef")
 
     assert HttpSchedulerClient("http://scheduler.test").check_readiness() is True
     assert captured == {
         "url": "http://scheduler.test/ready",
-        "headers": {"X-Request-ID": "api-scheduler-req-123"},
+        "headers": {"X-Request-ID": "pdreq.0123456789abcdef0123456789abcdef"},
         "timeout": 5.0,
     }
 
@@ -2022,7 +2025,7 @@ def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
             "time_zone": "Europe/Brussels",
         }
         assert set(headers) == {"X-Request-ID"}
-        assert len(headers["X-Request-ID"]) == 32
+        assert REQUEST_ID_RE.fullmatch(headers["X-Request-ID"])
         assert timeout == 5.0
         return MalformedSchedulerResponse()
 
@@ -2814,19 +2817,21 @@ def test_generate_plan_propagates_request_id_to_scheduler_and_worker(
 
     response = client.post(
         f"/planning/days/{day['id']}/generate-plan",
-        headers={"X-Request-ID": "api-flow-req-123"},
+        headers={"X-Request-ID": SESSION_TOKEN_SHAPED_REQUEST_ID},
     )
 
     assert response.status_code == 201
-    assert response.headers["x-request-id"] == "api-flow-req-123"
+    generated_request_id = response.headers["x-request-id"]
+    assert generated_request_id != SESSION_TOKEN_SHAPED_REQUEST_ID
+    assert REQUEST_ID_RE.fullmatch(generated_request_id)
     assert captured == {
         "url": "http://scheduler.test/v1/schedule-day",
-        "headers": {"X-Request-ID": "api-flow-req-123"},
+        "headers": {"X-Request-ID": generated_request_id},
         "timeout": 5.0,
     }
     assert worker_queue.enqueued
     assert {envelope.correlation_id for envelope in worker_queue.enqueued} == {
-        "api-flow-req-123"
+        generated_request_id
     }
 
 
@@ -2892,7 +2897,7 @@ def test_recovery_propagates_request_id_to_scheduler_and_worker(
 
     response = client.post(
         f"/planning/days/{day['id']}/interruptions",
-        headers={"X-Request-ID": "api-recovery-req-123"},
+        headers={"X-Request-ID": "client-recovery-req-123"},
         json={
             "start_at": "2026-06-22T14:00:00+02:00",
             "end_at": "2026-06-22T15:15:00+02:00",
@@ -2903,9 +2908,11 @@ def test_recovery_propagates_request_id_to_scheduler_and_worker(
 
     assert first_snapshot.status_code == 201
     assert response.status_code == 201
-    assert response.headers["x-request-id"] == "api-recovery-req-123"
+    generated_request_id = response.headers["x-request-id"]
+    assert generated_request_id != "client-recovery-req-123"
+    assert REQUEST_ID_RE.fullmatch(generated_request_id)
     assert captured["url"] == "http://scheduler.test/v1/reschedule-day"
-    assert captured["headers"] == {"X-Request-ID": "api-recovery-req-123"}
+    assert captured["headers"] == {"X-Request-ID": generated_request_id}
     assert captured["timeout"] == 5.0
     assert captured["schedule_request"]["interruptions"] == [
         {
@@ -2918,7 +2925,7 @@ def test_recovery_propagates_request_id_to_scheduler_and_worker(
     ]
     assert worker_queue.enqueued
     assert {envelope.correlation_id for envelope in worker_queue.enqueued} == {
-        "api-recovery-req-123"
+        generated_request_id
     }
 
 

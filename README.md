@@ -123,10 +123,14 @@ those internal services.
 
 Safe log correlation uses the `X-Request-ID` header. API, scheduler, AI, and
 worker logs emit single-line JSON with an allowlisted event name and the
-sanitized request ID when one is present. If a caller sends a missing or unsafe
-ID, the service generates an opaque replacement and returns it in the response
-header. Do not put passwords, tokens, session cookies, provider credentials, or
-private task text in request IDs.
+canonical request ID when one is present. Canonical IDs are service-owned values
+in the form `pdreq.<32 lowercase hex chars>`. The browser-facing API always
+ignores inbound `X-Request-ID`, generates a fresh canonical ID, returns it in
+the response header, and propagates it to internal scheduler, AI, and worker
+calls. Scheduler, AI, and worker boundaries preserve only canonical inbound IDs;
+missing or non-canonical values are replaced without logging the raw value. Do
+not put passwords, tokens, session cookies, provider credentials, or private
+task text in request IDs.
 
 For local troubleshooting, start with:
 
@@ -149,10 +153,10 @@ database backup before a production release, `alembic upgrade head` during
 deployment, and a rollback plan that restores the previous application version
 plus the pre-deploy database backup if a migration-bearing release later fails.
 Post-deploy verification inputs for the later release ticket should include
-`/api/health`, `/api/ready`, a unique `X-Request-ID`, registration/login,
-canonical day plan generation, progress recording, interruption recovery, and a
-log lookup by that request ID across API, scheduler, optional AI, and optional
-worker logs.
+`/api/health`, `/api/ready`, the API-returned canonical `X-Request-ID`,
+registration/login, canonical day plan generation, progress recording,
+interruption recovery, and a log lookup by that request ID across API,
+scheduler, optional AI, and optional worker logs.
 
 Data-model impact: None. TKT-025 adds no migrations, tables, fields,
 constraints, indexes, or backfills.

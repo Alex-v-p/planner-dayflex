@@ -492,8 +492,10 @@ def test_ai_client_propagates_current_request_id(
         )
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    set_request_id("api-ai-req-123")
+    set_request_id("pdreq.0123456789abcdef0123456789abcdef")
 
     HttpAiClient("http://ai.test").parse_task({"text": "x"})
 
-    assert captured["headers"] == {"X-Request-ID": "api-ai-req-123"}
+    assert captured["headers"] == {
+        "X-Request-ID": "pdreq.0123456789abcdef0123456789abcdef"
+    }

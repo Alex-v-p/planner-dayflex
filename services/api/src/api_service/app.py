@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .config import Settings
-from .correlation import REQUEST_ID_HEADER, safe_request_id, set_request_id
+from .correlation import REQUEST_ID_HEADER, generate_request_id, set_request_id
 from .database import Database
 from .infrastructure.ai_client import AiClient, DisabledAiClient, HttpAiClient
 from .infrastructure.scheduler_client import HttpSchedulerClient, SchedulerClient
@@ -100,8 +100,8 @@ def create_app(
 
     @app.middleware("http")
     async def correlate_request(request: Request, call_next):
-        """Attach a safe request ID to logs and responses."""
-        request_id = safe_request_id(request.headers.get(REQUEST_ID_HEADER))
+        """Attach a service-owned request ID to logs and responses."""
+        request_id = generate_request_id()
         set_request_id(request_id)
         try:
             response = await call_next(request)

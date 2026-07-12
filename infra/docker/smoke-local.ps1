@@ -65,6 +65,16 @@ function Assert-Contains {
     }
 }
 
+function Assert-CanonicalRequestId {
+    param(
+        [string]$Actual,
+        [string]$Message
+    )
+    if ($Actual -notmatch '^pdreq\.[0-9a-f]{32}$') {
+        throw "$Message Expected canonical pdreq.<32 lowercase hex>, got '$Actual'."
+    }
+}
+
 try {
     & $ComposeExecutable @compose up --build --wait -d edge web api scheduler ai worker postgres redis
     if ($LASTEXITCODE -ne 0) {
@@ -86,9 +96,12 @@ try {
         throw "API health through edge returned unexpected status."
     }
     Assert-Equal `
+        ($apiHealthResponse.Headers["X-Request-ID"] -ne "smoke-health-req") `
+        $true `
+        "API health reflected a browser-supplied request ID."
+    Assert-CanonicalRequestId `
         $apiHealthResponse.Headers["X-Request-ID"] `
-        "smoke-health-req" `
-        "API health did not preserve a safe request ID."
+        "API health did not return a service-owned request ID."
 
     $apiReady = Invoke-RestMethod -Uri "$baseUri/api/ready" -TimeoutSec 10
     if ($apiReady.status -ne "ok") {

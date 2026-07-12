@@ -29,12 +29,12 @@ def test_json_formatter_does_not_include_message_or_sensitive_extra_values() -> 
     record.event = "api_started"
     record.password = "password"
 
-    set_request_id("req-safe-123")
+    set_request_id("pdreq.0123456789abcdef0123456789abcdef")
     formatted = JsonFormatter().format(record)
 
     payload = json.loads(formatted)
     assert payload["event"] == "api_started"
-    assert payload["request_id"] == "req-safe-123"
+    assert payload["request_id"] == "pdreq.0123456789abcdef0123456789abcdef"
     assert "database_url" not in formatted
     assert "password" not in formatted
 

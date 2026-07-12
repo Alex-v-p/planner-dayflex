@@ -35,7 +35,9 @@ class PermanentWorkerJobError(Exception):
 def process_job(raw_envelope: dict[str, object]) -> dict[str, object]:
     """Validate and process one versioned JSON job envelope."""
     try:
-        envelope = JobEnvelopeAdapter.validate_python(raw_envelope)
+        envelope = JobEnvelopeAdapter.validate_python(
+            _envelope_with_safe_correlation(raw_envelope)
+        )
     except ValidationError:
         LOGGER.error(
             "Permanent worker job failure",
@@ -44,7 +46,7 @@ def process_job(raw_envelope: dict[str, object]) -> dict[str, object]:
         return {"status": "permanent_failure"}
 
     if envelope.correlation_id is not None:
-        set_request_id(safe_request_id(envelope.correlation_id))
+        set_request_id(envelope.correlation_id)
 
     try:
         store = ObservationStore(_current_redis())
@@ -89,6 +91,19 @@ def process_job(raw_envelope: dict[str, object]) -> dict[str, object]:
             return {"status": "permanent_failure"}
     finally:
         set_request_id(None)
+
+
+def _envelope_with_safe_correlation(
+    raw_envelope: dict[str, object],
+) -> dict[str, object]:
+    correlation_id = raw_envelope.get("correlation_id")
+    if correlation_id is None:
+        return raw_envelope
+    safe_envelope = dict(raw_envelope)
+    safe_envelope["correlation_id"] = safe_request_id(
+        correlation_id if isinstance(correlation_id, str) else None
+    )
+    return safe_envelope
 
 
 def _process_test_job(

@@ -85,14 +85,15 @@ and scheduler readiness, returning only safe check names (`database` and
 scheduler URLs, credentials, exception text, or request payloads.
 
 Logs are single-line JSON with only timestamp, severity, logger name, an
-allowlisted service-controlled event name, and a sanitized `request_id` when one
+allowlisted service-controlled event name, and a canonical `request_id` when one
 is in scope. The same formatter replaces the effective API, Uvicorn error, and
 Uvicorn access handlers, so access entries never render a request target or
 query string. Settings, URL values, request bodies, arbitrary event values, and
-arbitrary log-message text are not emitted by the formatter. The API accepts
-`X-Request-ID` values containing only 8-80 ASCII letters, digits, `.`, `_`, or
-`-`; missing or unsafe values are replaced with an opaque generated ID and the
-safe value is returned in the response header.
+arbitrary log-message text are not emitted by the formatter. The API ignores
+browser-supplied `X-Request-ID` values, generates a fresh service-owned
+canonical ID in the form `pdreq.<32 lowercase hex chars>`, returns it in the
+response header, and propagates that ID only to internal scheduler, AI, and
+worker calls.
 
 ## Authentication
 
@@ -257,7 +258,7 @@ response and return `explanation: null` with stable fallback metadata.
 After schedule generation or interruption recovery commits a snapshot, the API
 also enqueues one schedule-explanation job per supported decision. Worker job
 payloads do not include raw prompts, provider payloads, user IDs, credentials,
-or URLs. They do include the sanitized request correlation ID when available so
+or URLs. They do include the canonical request correlation ID when available so
 worker logs and worker-to-AI calls can be traced without exposing session IDs or
 private content.
 
