@@ -527,6 +527,65 @@ describe("planner workspace API contract", () => {
     ]);
     expect(JSON.stringify(api.posts)).not.toContain("user-1");
   });
+
+  it("requests AI parsing only through planning API endpoints", async () => {
+    const api = new FakeApiClient();
+    api.responses.set("/planning/ai/parse-task", {
+      status: "suggested",
+      confidence: 0.8,
+      proposed_fields: {
+        title: "Write report",
+        estimated_minutes: 45,
+        priority: 4,
+        due_date: null,
+        earliest_start_at: null,
+        splitting_allowed: null,
+        min_segment_minutes: null,
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    api.responses.set("/planning/ai/parse-interruption", {
+      status: "fallback",
+      confidence: 0,
+      proposed_fields: {
+        start_at: null,
+        end_at: null,
+        time_zone: null,
+        reported_at: null,
+      },
+      fallback_reason: "ai_disabled",
+      error_code: "ai_disabled",
+    });
+    await TestBed.configureTestingModule({
+      providers: [
+        PlannerApiService,
+        { provide: ApiClientService, useValue: api },
+      ],
+    }).compileComponents();
+    const service = TestBed.inject(PlannerApiService);
+
+    await firstValue(
+      service.parseTask({
+        text: "Write report for 45 minutes",
+        local_date: selectedDate,
+        time_zone: "Europe/Brussels",
+      }),
+    );
+    await firstValue(
+      service.parseInterruption({
+        text: "from 10 to 11",
+        local_date: selectedDate,
+        time_zone: "Europe/Brussels",
+      }),
+    );
+
+    expect(api.posts.map((call) => call.path)).toEqual([
+      "/planning/ai/parse-task",
+      "/planning/ai/parse-interruption",
+    ]);
+    expect(JSON.stringify(api.posts)).not.toContain("openai");
+  });
 });
 
 describe("rendered planner workspace", () => {
@@ -609,6 +668,161 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("Snapshot");
     expect(text(fixture)).toContain("None");
     expect(announcement(fixture)).toContain("Planner workspace loaded");
+  });
+
+  it("shows a task suggestion and applies it only into editable fields", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const suggestionResponse = new Subject<unknown>();
+    plannerApi.taskSuggestionResponse = suggestionResponse;
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#task-ai-text", "Write final report for 45 minutes");
+    buttonByText(fixture, "Suggest details", "Flexible tasks").click();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Looking for editable task details.");
+    expect(
+      buttonByText(fixture, "Suggest details", "Flexible tasks").disabled,
+    ).toBe(true);
+    expect(inputValue(fixture, "#task-title")).toBe("");
+    expect(plannerApi.createdTasks).toEqual([]);
+
+    suggestionResponse.next({
+      status: "suggested",
+      confidence: 0.8,
+      proposed_fields: {
+        title: "Write final report",
+        estimated_minutes: 45,
+        priority: 4,
+        due_date: "2026-07-04",
+        earliest_start_at: null,
+        splitting_allowed: null,
+        min_segment_minutes: null,
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    suggestionResponse.complete();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Suggestion ready");
+    expect(inputValue(fixture, "#task-title")).toBe("");
+    expect(plannerApi.createdTasks).toEqual([]);
+    buttonByText(fixture, "Apply to form", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#task-title")).toBe("Write final report");
+    expect(inputValue(fixture, "#task-estimate")).toBe("45");
+    expect(inputValue(fixture, "#task-priority")).toBe("4");
+    expect(plannerApi.createdTasks).toEqual([]);
+  });
+
+  it("shows task fallback without changing editable fields", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    plannerApi.taskSuggestionResponse = of({
+      status: "fallback",
+      confidence: 0,
+      proposed_fields: {
+        title: null,
+        estimated_minutes: null,
+        priority: null,
+        due_date: null,
+        earliest_start_at: null,
+        splitting_allowed: null,
+        min_segment_minutes: null,
+      },
+      fallback_reason: "ai_disabled",
+      error_code: "ai_disabled",
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#task-ai-text", "something");
+    buttonByText(fixture, "Suggest details", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Suggestions are off");
+    expect(inputValue(fixture, "#task-title")).toBe("");
+  });
+
+  it("applies interruption suggestions into the interruption form only", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    const suggestionResponse = new Subject<unknown>();
+    plannerApi.interruptionSuggestionResponse = suggestionResponse;
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-ai-text", "appointment from 13 to 14");
+    buttonByText(fixture, "Suggest details", "Report interruption").click();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Looking for editable unavailable time.");
+    expect(
+      buttonByText(fixture, "Suggest details", "Report interruption").disabled,
+    ).toBe(true);
+    expect(inputValue(fixture, "#interruption-start")).toBe("");
+    expect(plannerApi.reportedInterruptions).toEqual([]);
+
+    suggestionResponse.next({
+      status: "suggested",
+      confidence: 0.7,
+      proposed_fields: {
+        start_at: "2026-07-04T13:00:00+02:00",
+        end_at: "2026-07-04T14:00:00+02:00",
+        time_zone: "Europe/Brussels",
+        reported_at: "2026-07-04T13:00:00+02:00",
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    suggestionResponse.complete();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Suggestion ready");
+    expect(inputValue(fixture, "#interruption-start")).toBe("");
+    expect(plannerApi.reportedInterruptions).toEqual([]);
+    buttonByText(fixture, "Apply to form", "Report interruption").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#interruption-start")).toBe("2026-07-04T13:00");
+    expect(inputValue(fixture, "#interruption-end")).toBe("2026-07-04T14:00");
+    expect(plannerApi.reportedInterruptions).toEqual([]);
+  });
+
+  it("shows interruption fallback without changing editable fields", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    plannerApi.interruptionSuggestionResponse = of({
+      status: "fallback",
+      confidence: 0,
+      proposed_fields: {
+        start_at: null,
+        end_at: null,
+        time_zone: null,
+        reported_at: null,
+      },
+      fallback_reason: "ai_disabled",
+      error_code: "ai_disabled",
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-ai-text", "appointment");
+    buttonByText(fixture, "Suggest details", "Report interruption").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Suggestions are off");
+    expect(inputValue(fixture, "#interruption-start")).toBe("");
+    expect(inputValue(fixture, "#interruption-end")).toBe("");
+    expect(plannerApi.reportedInterruptions).toEqual([]);
   });
 
   it("records partial study progress and replaces the visible plan after an interruption", async () => {
@@ -1755,6 +1969,8 @@ class FakePlannerApi {
   readonly generatedPlanningDayIds: string[] = [];
   readonly recordedProgress: unknown[] = [];
   readonly reportedInterruptions: unknown[] = [];
+  readonly parsedTasks: unknown[] = [];
+  readonly parsedInterruptions: unknown[] = [];
   taskMutationError: unknown = null;
   fixedEventMutationError: unknown = null;
   generateError: unknown = null;
@@ -1762,6 +1978,8 @@ class FakePlannerApi {
   progressError: unknown = null;
   interruptionError: unknown = null;
   interruptionResponse: Observable<ScheduleSnapshot> | null = null;
+  taskSuggestionResponse: Observable<unknown> | null = null;
+  interruptionSuggestionResponse: Observable<unknown> | null = null;
 
   loadWorkspaceDate(date: string): Observable<PlannerWorkspaceData> {
     this.loadedDates.push(date);
@@ -1874,6 +2092,47 @@ class FakePlannerApi {
       return throwError(() => this.interruptionError);
     }
     return of({ ...canonicalSnapshot, id: "snapshot-revised", version: 3 });
+  }
+
+  parseTask(request: unknown): Observable<unknown> {
+    this.parsedTasks.push(request);
+    return (
+      this.taskSuggestionResponse ??
+      of({
+        status: "fallback",
+        confidence: 0,
+        proposed_fields: {
+          title: null,
+          estimated_minutes: null,
+          priority: null,
+          due_date: null,
+          earliest_start_at: null,
+          splitting_allowed: null,
+          min_segment_minutes: null,
+        },
+        fallback_reason: "ai_disabled",
+        error_code: "ai_disabled",
+      })
+    );
+  }
+
+  parseInterruption(request: unknown): Observable<unknown> {
+    this.parsedInterruptions.push(request);
+    return (
+      this.interruptionSuggestionResponse ??
+      of({
+        status: "fallback",
+        confidence: 0,
+        proposed_fields: {
+          start_at: null,
+          end_at: null,
+          time_zone: null,
+          reported_at: null,
+        },
+        fallback_reason: "ai_disabled",
+        error_code: "ai_disabled",
+      })
+    );
   }
 }
 

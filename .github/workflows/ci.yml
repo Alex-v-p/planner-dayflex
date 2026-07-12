@@ -103,6 +103,57 @@ jobs:
       - name: Test
         run: uv run pytest
 
+  ai-service-quality:
+    name: AI service quality
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/ai
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install AI service
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest
+
+      - name: Build AI service image
+        run: docker build -t planner-dayflex-ai:test .
+
+      - name: Smoke health with mock provider
+        run: |
+          docker run --rm -d --name planner-dayflex-ai-smoke -p 8002:8002 \
+            -e PLANNER_AI_PROVIDER_ENABLED=true \
+            -e PLANNER_AI_PROVIDER=mock \
+            planner-dayflex-ai:test
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent http://127.0.0.1:8002/health; then
+              docker stop planner-dayflex-ai-smoke
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs planner-dayflex-ai-smoke
+          docker stop planner-dayflex-ai-smoke
+          exit 1
+
   web-application-quality:
     name: Web application quality
     runs-on: ubuntu-latest
