@@ -77,3 +77,39 @@ def test_ai_service_configuration_is_api_boundary_only() -> None:
 
     assert str(settings.ai_service_base_url) == "http://127.0.0.1:8002/"
     assert settings.ai_client_timeout_seconds == 1.5
+
+
+@pytest.mark.parametrize(
+    ("redis_url", "expected"),
+    [
+        ("redis://:worker-secret@127.0.0.1:6379/0", "redis://"),
+        ("rediss://:worker-secret@redis.example.test:6380/1", "rediss://"),
+    ],
+)
+def test_worker_redis_url_accepts_only_redis_schemes(
+    redis_url: str, expected: str
+) -> None:
+    settings = Settings(
+        environment=Environment.TEST,
+        database_url="sqlite+pysqlite:///isolated-test.db",
+        worker_redis_url=redis_url,
+    )
+
+    assert settings.worker_redis_url_value == redis_url
+    assert settings.worker_redis_url_value.startswith(expected)
+
+
+def test_worker_redis_url_rejects_non_redis_url_without_leaking_secret() -> None:
+    secret_url = "https://:worker-secret@example.test/redis"
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            environment=Environment.TEST,
+            database_url="sqlite+pysqlite:///isolated-test.db",
+            worker_redis_url=secret_url,
+        )
+
+    rendered_error = str(exc_info.value)
+    assert "must use redis:// or rediss://" in rendered_error
+    assert "worker-secret" not in rendered_error
+    assert secret_url not in rendered_error

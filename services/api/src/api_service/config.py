@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PLANNER_API_",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     environment: Environment = Environment.DEVELOPMENT

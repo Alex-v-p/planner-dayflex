@@ -195,6 +195,87 @@ def test_payload_validation_failure_is_safe_permanent_failure(
     assert failure["failure_type"] == "permanent"
 
 
+def test_schedule_explanation_job_caches_ai_result_from_approved_job_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = fakeredis.FakeRedis()
+    captured_request: dict[str, object] = {}
+    monkeypatch.setattr(jobs, "_current_redis", lambda: redis)
+    monkeypatch.setattr(jobs, "Settings", lambda: FakeSettings("http://ai.test"))
+
+    def explain(_base_url: str | None, request: dict[str, object]) -> dict[str, object]:
+        captured_request.update(request)
+        return {
+            "status": "explained",
+            "confidence": 0.8,
+            "explanation": "The cached wording.",
+            "fallback_reason": None,
+            "error_code": None,
+        }
+
+    monkeypatch.setattr(jobs, "explain_schedule_decision", explain)
+
+    result = process_job(make_schedule_explanation_envelope("schedule-key-1"))
+
+    assert result == {"status": "completed"}
+    assert captured_request == {
+        "reason_code": "placed_in_earliest_valid_window",
+        "deterministic_reason": "Task was placed in the earliest valid window.",
+        "facts": {
+            "task_title": "Reply to inbox",
+            "scheduled_start_at": "2026-07-12T09:00:00+02:00",
+        },
+    }
+    cached = json.loads(redis.get(f"{RESULT_PREFIX}schedule-explanation:v1:decision-1"))
+    assert cached["result"]["status"] == "explained"
+    assert cached["result"]["explanation"] == "The cached wording."
+    assert "idempotency" not in json.dumps(captured_request).lower()
+    assert "result_cache_key" not in json.dumps(captured_request)
+
+
+def test_schedule_explanation_job_caches_ai_disabled_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = fakeredis.FakeRedis()
+    monkeypatch.setattr(jobs, "_current_redis", lambda: redis)
+    monkeypatch.setattr(jobs, "Settings", lambda: FakeSettings(None))
+
+    result = process_job(make_schedule_explanation_envelope("schedule-key-1"))
+
+    assert result == {"status": "completed"}
+    cached = json.loads(redis.get(f"{RESULT_PREFIX}schedule-explanation:v1:decision-1"))
+    assert cached["result"]["status"] == "fallback"
+    assert cached["result"]["fallback_reason"] == "ai_disabled"
+    assert cached["result"]["error_code"] == "ai_disabled"
+
+
+def test_schedule_explanation_job_invalid_cache_key_is_permanent_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    redis = fakeredis.FakeRedis()
+    monkeypatch.setattr(jobs, "_current_redis", lambda: redis)
+    monkeypatch.setattr(jobs, "Settings", lambda: FakeSettings(None))
+    caplog.set_level(logging.INFO, logger="worker_service")
+
+    result = process_job(
+        make_schedule_explanation_envelope(
+            "schedule-key-1",
+            result_cache_key="api-owned:decision-1",
+        )
+    )
+    retry = process_job(make_schedule_explanation_envelope("schedule-key-1"))
+
+    assert result == {"status": "permanent_failure"}
+    assert retry == {"status": "duplicate"}
+    failure = json.loads(redis.get(f"{OBSERVATION_PREFIX}failures:schedule-key-1"))
+    assert failure["failure_type"] == "permanent"
+    assert redis.get("api-owned:decision-1") is None
+    assert {record.event for record in caplog.records} >= {
+        "worker_job_permanent_failed"
+    }
+
+
 def make_test_job_envelope(
     idempotency_key: str,
     effect_key: str,
@@ -210,3 +291,30 @@ def make_test_job_envelope(
             "outcome": outcome,
         },
     }
+
+
+def make_schedule_explanation_envelope(
+    idempotency_key: str,
+    *,
+    result_cache_key: str = f"{RESULT_PREFIX}schedule-explanation:v1:decision-1",
+) -> dict[str, object]:
+    return {
+        "contract_version": 1,
+        "kind": "schedule_explanation_enrichment",
+        "idempotency_key": idempotency_key,
+        "payload": {
+            "decision_id": "decision-1",
+            "reason_code": "placed_in_earliest_valid_window",
+            "deterministic_reason": "Task was placed in the earliest valid window.",
+            "facts": {
+                "task_title": "Reply to inbox",
+                "scheduled_start_at": "2026-07-12T09:00:00+02:00",
+            },
+            "result_cache_key": result_cache_key,
+        },
+    }
+
+
+class FakeSettings:
+    def __init__(self, ai_service_base_url: str | None) -> None:
+        self.ai_service_base_url = ai_service_base_url
