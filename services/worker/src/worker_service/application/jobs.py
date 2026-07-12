@@ -6,6 +6,7 @@ import logging
 
 from pydantic import ValidationError
 from redis import Redis
+from redis.exceptions import RedisError
 from rq import get_current_job
 
 from worker_service.config import Settings
@@ -42,14 +43,17 @@ def process_job(raw_envelope: dict[str, object]) -> dict[str, object]:
         return {"status": "permanent_failure"}
 
     store = ObservationStore(_current_redis())
-    if not store.claim(envelope.idempotency_key):
-        LOGGER.info(
-            "Duplicate worker job skipped",
-            extra={"event": "worker_job_duplicate"},
-        )
-        return {"status": "duplicate"}
+    claimed = False
 
     try:
+        if not store.claim(envelope.idempotency_key):
+            LOGGER.info(
+                "Duplicate worker job skipped",
+                extra={"event": "worker_job_duplicate"},
+            )
+            return {"status": "duplicate"}
+        claimed = True
+
         if envelope.kind == "test_job":
             return _process_test_job(envelope.idempotency_key, envelope.payload, store)
         if envelope.kind == "schedule_explanation_enrichment":
@@ -58,8 +62,17 @@ def process_job(raw_envelope: dict[str, object]) -> dict[str, object]:
             return _process_cleanup(envelope.payload, store)
         raise PermanentWorkerJobError("unsupported job kind")
     except RetryableWorkerJobError:
-        store.release_claim(envelope.idempotency_key)
+        if claimed:
+            store.release_claim(envelope.idempotency_key)
         raise
+    except RedisError as exc:
+        if claimed:
+            _release_claim_safely(store, envelope.idempotency_key)
+        LOGGER.warning(
+            "Retryable worker job failure",
+            extra={"event": "worker_job_retryable_failed"},
+        )
+        raise RetryableWorkerJobError("retryable worker job failure") from exc
     except (PermanentWorkerJobError, ValidationError, ValueError):
         store.record_failure(envelope.idempotency_key, "permanent")
         LOGGER.error(
@@ -118,6 +131,16 @@ def _process_cleanup(
     removed = store.cleanup_stale(cleanup_payload.older_than_seconds)
     LOGGER.info("Worker cleanup completed", extra={"event": "worker_cleanup_completed"})
     return {"status": "completed", "removed": removed}
+
+
+def _release_claim_safely(store: ObservationStore, idempotency_key: str) -> None:
+    try:
+        store.release_claim(idempotency_key)
+    except RedisError:
+        LOGGER.warning(
+            "Retryable worker job failure",
+            extra={"event": "worker_job_retryable_failed"},
+        )
 
 
 def _current_redis() -> Redis:

@@ -8,6 +8,7 @@ import logging
 
 import fakeredis
 import pytest
+from redis.exceptions import RedisError
 from rq import Queue, SimpleWorker
 from rq.serializers import JSONSerializer
 
@@ -249,6 +250,22 @@ def test_schedule_explanation_job_caches_ai_disabled_fallback(
     assert cached["result"]["error_code"] == "ai_disabled"
 
 
+def test_transient_redis_failure_after_claim_releases_claim_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = FailingResultCacheRedis(fakeredis.FakeRedis())
+    monkeypatch.setattr(jobs, "_current_redis", lambda: redis)
+    monkeypatch.setattr(jobs, "Settings", lambda: FakeSettings(None))
+
+    with pytest.raises(RetryableWorkerJobError):
+        process_job(make_schedule_explanation_envelope("schedule-key-1"))
+    retry_result = process_job(make_schedule_explanation_envelope("schedule-key-1"))
+
+    assert retry_result == {"status": "completed"}
+    cached = json.loads(redis.get(f"{RESULT_PREFIX}schedule-explanation:v1:decision-1"))
+    assert cached["result"]["status"] == "fallback"
+
+
 def test_schedule_explanation_job_invalid_cache_key_is_permanent_failure(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -318,3 +335,27 @@ def make_schedule_explanation_envelope(
 class FakeSettings:
     def __init__(self, ai_service_base_url: str | None) -> None:
         self.ai_service_base_url = ai_service_base_url
+
+
+class FailingResultCacheRedis:
+    def __init__(self, redis: fakeredis.FakeRedis) -> None:
+        self._redis = redis
+        self._failed_cache_write = False
+
+    def set(self, key: str, value: object, *args: object, **kwargs: object) -> object:
+        if key.startswith(RESULT_PREFIX) and not self._failed_cache_write:
+            self._failed_cache_write = True
+            raise RedisError("transient cache write failure")
+        return self._redis.set(key, value, *args, **kwargs)
+
+    def get(self, key: str) -> object:
+        return self._redis.get(key)
+
+    def delete(self, key: str) -> object:
+        return self._redis.delete(key)
+
+    def incrby(self, key: str, amount: int) -> object:
+        return self._redis.incrby(key, amount)
+
+    def scan_iter(self, *args: object, **kwargs: object) -> object:
+        return self._redis.scan_iter(*args, **kwargs)

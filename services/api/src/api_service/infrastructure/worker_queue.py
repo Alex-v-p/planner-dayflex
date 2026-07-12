@@ -18,6 +18,8 @@ from api_service.infrastructure.ai_client import ExplainScheduleDecisionResultDT
 LOGGER = logging.getLogger("api_service")
 QUEUE_NAME = "planner-dayflex-worker"
 SCHEDULE_EXPLANATION_RESULT_PREFIX = "worker:results:schedule-explanation:v1:"
+REDIS_CONNECT_TIMEOUT_SECONDS = 0.25
+REDIS_SOCKET_TIMEOUT_SECONDS = 0.5
 
 
 class WorkerQueueClient(Protocol):
@@ -53,7 +55,11 @@ class RqWorkerQueueClient:
     """Redis/RQ producer for optional worker jobs."""
 
     def __init__(self, redis_url: str, queue_name: str = QUEUE_NAME) -> None:
-        self._redis = Redis.from_url(redis_url)
+        self._redis = Redis.from_url(
+            redis_url,
+            socket_connect_timeout=REDIS_CONNECT_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+        )
         self._queue = Queue(
             queue_name,
             connection=self._redis,

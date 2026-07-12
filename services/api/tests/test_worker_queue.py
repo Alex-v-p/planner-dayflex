@@ -25,7 +25,13 @@ def test_rq_worker_queue_enqueues_versioned_schedule_explanation_contract(
 ) -> None:
     redis = FakeRedis()
     queue = CapturingQueue()
-    monkeypatch.setattr(worker_queue.Redis, "from_url", lambda url: redis)
+    captured_redis_kwargs: dict[str, Any] = {}
+
+    def from_url(_url: str, **kwargs: Any) -> FakeRedis:
+        captured_redis_kwargs.update(kwargs)
+        return redis
+
+    monkeypatch.setattr(worker_queue.Redis, "from_url", from_url)
     monkeypatch.setattr(
         worker_queue, "Queue", lambda *args, **kwargs: queue.capture(*args, **kwargs)
     )
@@ -50,6 +56,10 @@ def test_rq_worker_queue_enqueues_versioned_schedule_explanation_contract(
     assert queue.enqueued["retry"].max == 2
     assert queue.enqueued["retry"].intervals == [5, 30]
     assert queue.enqueued["args"][0] == envelope.model_dump(mode="json")
+    assert captured_redis_kwargs == {
+        "socket_connect_timeout": worker_queue.REDIS_CONNECT_TIMEOUT_SECONDS,
+        "socket_timeout": worker_queue.REDIS_SOCKET_TIMEOUT_SECONDS,
+    }
 
 
 def test_rq_worker_queue_reads_wrapped_cached_result(
@@ -71,7 +81,7 @@ def test_rq_worker_queue_reads_wrapped_cached_result(
             }
         ),
     )
-    monkeypatch.setattr(worker_queue.Redis, "from_url", lambda url: redis)
+    monkeypatch.setattr(worker_queue.Redis, "from_url", lambda *args, **kwargs: redis)
     monkeypatch.setattr(worker_queue, "Queue", lambda *args, **kwargs: CapturingQueue())
 
     result = RqWorkerQueueClient(
@@ -88,7 +98,7 @@ def test_rq_worker_queue_invalid_cached_result_is_safe_and_redacted(
 ) -> None:
     redis = FakeRedis()
     redis.set(schedule_explanation_result_key("decision-1"), "{secret-token")
-    monkeypatch.setattr(worker_queue.Redis, "from_url", lambda url: redis)
+    monkeypatch.setattr(worker_queue.Redis, "from_url", lambda *args, **kwargs: redis)
     monkeypatch.setattr(worker_queue, "Queue", lambda *args, **kwargs: CapturingQueue())
     log_output = StringIO()
     handler = logging.StreamHandler(log_output)
