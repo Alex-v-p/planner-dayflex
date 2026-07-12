@@ -2696,16 +2696,39 @@ def test_schedule_explanation_facts_distinguish_moved_task_segments(
     )
     ai_client = CapturingAiClient()
     client.app.state.ai_client = ai_client
-    moved_decision_id = revised_snapshot.json()["decisions"][0]["id"]
+    revised_decisions = revised_snapshot.json()["decisions"]
+    placed_decision_id = next(
+        decision["id"]
+        for decision in revised_decisions
+        if decision["reason_code"] == "placed_in_earliest_valid_window"
+        and decision["task_id"] == first_snapshot.json()["items"][6]["task_id"]
+    )
+    moved_decision_id = next(
+        decision["id"]
+        for decision in revised_decisions
+        if decision["reason_code"] == "moved_after_interruption"
+    )
 
-    response = client.post(
+    placed_response = client.post(
+        f"/planning/days/{day['id']}/schedule-decisions/"
+        f"{placed_decision_id}/ai-explanation"
+    )
+    placed_facts = ai_client.explanation_request["facts"]
+    moved_response = client.post(
         f"/planning/days/{day['id']}/schedule-decisions/"
         f"{moved_decision_id}/ai-explanation"
     )
 
     assert progress.status_code == 201
     assert revised_snapshot.status_code == 201
-    assert response.status_code == 200
+    assert placed_response.status_code == 200
+    assert placed_facts["task_title"] == "Study notes"
+    assert placed_facts["previous_start_at"] == "2026-06-22T13:00:00+02:00"
+    assert placed_facts["previous_end_at"] == "2026-06-22T14:00:00+02:00"
+    assert placed_facts["scheduled_start_at"] == "2026-06-22T16:00:00+02:00"
+    assert placed_facts["scheduled_end_at"] == "2026-06-22T16:30:00+02:00"
+    assert placed_facts["scheduled_start_at"] != placed_facts["previous_start_at"]
+    assert moved_response.status_code == 200
     facts = ai_client.explanation_request["facts"]
     assert facts["task_title"] == "Study notes"
     assert facts["previous_start_at"] == "2026-06-22T13:00:00+02:00"
@@ -2938,6 +2961,10 @@ class RecoverySchedulerClient(CanonicalSchedulerClient):
                     item("designated_free_time", "17:20:00", "18:00:00"),
                 ],
                 "decisions": [
+                    decision(
+                        "placed_in_earliest_valid_window",
+                        task_ids["Study notes"],
+                    ),
                     decision("moved_after_interruption", task_ids["Study notes"]),
                     decision(
                         "placed_in_earliest_valid_window",

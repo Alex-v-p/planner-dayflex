@@ -1331,11 +1331,13 @@ def _scheduled_task_item(
     candidates = _task_items(snapshot, decision.task_id)
     if not candidates:
         return None
-    if decision.reason_code != "moved_after_interruption" or len(candidates) == 1:
+    if len(candidates) == 1:
         return candidates[0]
     interruption_item = _first_item(snapshot, "interruption")
     if interruption_item is None:
-        return candidates[-1]
+        if decision.reason_code == "moved_after_interruption":
+            return candidates[-1]
+        return candidates[0]
     interruption_end_at = _as_utc(interruption_item.end_at)
     for item in candidates:
         if _as_utc(item.start_at) >= interruption_end_at:
