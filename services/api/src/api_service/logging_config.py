@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 LOGGER_NAME = "api_service"
 UVICORN_LOGGER_NAMES = ("uvicorn.error", "uvicorn.access")
 DEFAULT_EVENT = "log_event"
-SAFE_EVENTS = frozenset({"api_started"})
+SAFE_EVENTS = frozenset({"api_started", "worker_queue_unavailable"})
 
 
 class JsonFormatter(logging.Formatter):

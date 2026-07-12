@@ -14,16 +14,19 @@ schedule decisions. The lasting dependency and boundary choices are
 recorded in
 [ADR 0003](../../docs/architecture/decisions/0003-application-api-foundation.md)
 and [ADR 0004](../../docs/architecture/decisions/0004-ai-service-boundary.md).
+TKT-024 adds an optional Redis/RQ producer for non-critical worker enrichment.
 
 ## Toolchain
 
 The service uses Python 3.13, `uv`, FastAPI, Uvicorn, SQLAlchemy 2.x, psycopg
 3, Alembic, Pydantic Settings, Argon2id password hashing through
-`argon2-cffi`, HTTPX, Ruff, and pytest. SQLAlchemy and psycopg are runtime
+`argon2-cffi`, HTTPX, Redis, RQ, Ruff, and pytest. SQLAlchemy and psycopg are runtime
 dependencies because the application API owns durable persistence. HTTPX is a
 runtime dependency because TKT-011 calls the scheduler service through its HTTP
-contract. Alembic is available to run the service's schema migrations. These
-dependencies do not create a container topology.
+contract. Redis and RQ are runtime dependencies because TKT-024 can enqueue
+non-critical worker jobs when an explicit Redis URL is configured. Alembic is
+available to run the service's schema migrations. These dependencies do not
+create a container topology.
 
 Run all commands from `services/api/`:
 
@@ -48,6 +51,7 @@ $env:PLANNER_API_SCHEDULER_BASE_URL = "http://127.0.0.1:8001"
 $env:PLANNER_API_SCHEDULER_VERSION = "0.1.0"
 $env:PLANNER_API_AI_SERVICE_BASE_URL = "http://127.0.0.1:8002"
 $env:PLANNER_API_AI_CLIENT_TIMEOUT_SECONDS = "2.0"
+$env:PLANNER_API_WORKER_REDIS_URL = "redis://127.0.0.1:6379/0"
 python -m uv run uvicorn api_service.app:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
@@ -66,6 +70,12 @@ history and auditability.
 schedule-explanation routes return an explicit `ai_disabled` fallback and normal
 planning remains available. `PLANNER_API_AI_CLIENT_TIMEOUT_SECONDS` defaults to
 `2.0` and is bounded so optional AI wording cannot block planning or recovery.
+
+`PLANNER_API_WORKER_REDIS_URL` is optional. When unset, schedule generation,
+interruption recovery, and on-demand explanation routes use a disabled queue
+client. When set, the API enqueues versioned Redis/RQ jobs after a schedule
+snapshot has been committed. Queue failures are logged as safe operational
+events and do not roll back or block planning responses.
 
 `GET /health` returns `200` with `{"status":"ok"}` for process liveness. It
 does not run a database query: a database outage should not make a process
@@ -197,7 +207,8 @@ TKT-022 service and container impact: the API gains an internal AI-service
 client and authenticated parse proxy routes. TKT-023 extends that client with
 optional schedule-explanation wording for existing decisions. No persistence,
 migration, direct provider access, API Docker image, worker, queue, or Compose
-topology is added.
+topology is added. TKT-024 adds an optional worker queue producer only; Docker
+and Compose topology stay deferred.
 
 ## Planning AI helpers
 
@@ -209,11 +220,13 @@ never call a provider directly.
 
 `POST
 /planning/days/{planning_day_id}/schedule-decisions/{decision_id}/ai-explanation`
-requires an authenticated user-owned day and decision. It sends only the
-decision reason code, deterministic reason text, and approved structured
-schedule facts to the internal `services/ai` `/v1/explain-schedule-decision`
-contract. The endpoint does not change the schedule, persist explanation
-history, or replace deterministic scheduler wording.
+requires an authenticated user-owned day and decision. It returns a cached
+worker result when one is available. If no result is cached, it best-effort
+enqueues a versioned worker job containing only the decision ID, reason code,
+deterministic reason text, and approved structured schedule facts, then returns
+deterministic fallback wording. The endpoint does not change the schedule,
+persist explanation history, call a provider directly, or replace deterministic
+scheduler wording.
 
 All disabled, unreachable, timeout, non-success, malformed JSON, and
 schema-invalid AI-service paths return a safe fallback result. Parse fallbacks
@@ -231,6 +244,11 @@ use the shared parse shape:
 
 Schedule-explanation fallbacks keep the deterministic reason in the API
 response and return `explanation: null` with stable fallback metadata.
+
+After schedule generation or interruption recovery commits a snapshot, the API
+also enqueues one schedule-explanation job per supported decision. Worker job
+payloads do not include raw prompts, provider payloads, user IDs, credentials,
+or URLs.
 
 ## Migrations
 
@@ -274,6 +292,9 @@ TKT-012 adds:
 Backfill: none. Rollback: downgrade drops TKT-012 interruption/progress records
 before schedule history and planning input tables, then drops `auth_sessions`
 and `users`.
+
+TKT-024 data-model impact: None. It adds no tables, fields, constraints,
+indexes, migrations, durable job storage, or audit tables.
 
 To validate local migration wiring against an explicitly configured PostgreSQL
 database, set the variables shown above and run:

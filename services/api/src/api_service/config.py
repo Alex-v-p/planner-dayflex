@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PLANNER_API_",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     environment: Environment = Environment.DEVELOPMENT
@@ -33,6 +34,7 @@ class Settings(BaseSettings):
     scheduler_version: str = "0.1.0"
     ai_service_base_url: AnyHttpUrl | None = None
     ai_client_timeout_seconds: float = 2.0
+    worker_redis_url: SecretStr | None = None
 
     @field_validator("database_url")
     @classmethod
@@ -78,7 +80,29 @@ class Settings(BaseSettings):
             raise ValueError("must be between 0.1 and 10.0 seconds")
         return value
 
+    @field_validator("worker_redis_url")
+    @classmethod
+    def validate_worker_redis_url(cls, value: SecretStr | None) -> SecretStr | None:
+        """Accept only Redis URLs for the optional worker producer."""
+        if value is None:
+            return None
+        redis_url = value.get_secret_value()
+        try:
+            parsed_url = make_url(redis_url)
+        except ArgumentError as error:
+            raise ValueError("must be a valid Redis URL") from error
+        if parsed_url.drivername not in {"redis", "rediss"}:
+            raise ValueError("must use redis:// or rediss://")
+        return value
+
     @property
     def database_url_value(self) -> str:
         """Return the URL only to the infrastructure code that opens a connection."""
         return self.database_url.get_secret_value()
+
+    @property
+    def worker_redis_url_value(self) -> str | None:
+        """Return the worker Redis URL only to the queue infrastructure."""
+        if self.worker_redis_url is None:
+            return None
+        return self.worker_redis_url.get_secret_value()

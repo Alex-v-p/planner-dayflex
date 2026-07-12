@@ -17,6 +17,7 @@ from api_service.application.planning import (
     PlanningService,
 )
 from api_service.contracts.planning import TaskProgressCreateRequest
+from api_service.contracts.worker_jobs import ScheduleExplanationJobEnvelope
 from api_service.database import Database
 from api_service.domain.auth import SESSION_COOKIE_NAME
 from api_service.infrastructure.models import (
@@ -33,6 +34,7 @@ from api_service.infrastructure.scheduler_client import (
     SchedulerUnavailableError,
     SchedulerValidationFailedError,
 )
+from api_service.infrastructure.ai_client import ExplainScheduleDecisionResultDTO
 
 
 PASSWORD = "correct horse battery"
@@ -410,6 +412,44 @@ def test_generate_canonical_plan_persists_and_reloads_latest_snapshot(
         assert planning_day is not None
         assert planning_day.current_snapshot_id == payload["id"]
         assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
+
+
+def test_planning_paths_stay_synchronous_when_worker_queue_fails(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    tasks = save_canonical_tasks(client)
+    client.app.state.scheduler_client = RecoverySchedulerClient()
+    client.app.state.worker_queue_client = FailingWorkerQueueClient()
+
+    generated = client.post(f"/planning/days/{day['id']}/generate-plan")
+    progress = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": tasks["Study notes"],
+            "completed_minutes": 60,
+            "recorded_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+    revised = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-06-22T14:00:00+02:00",
+            "end_at": "2026-06-22T15:15:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+
+    assert generated.status_code == 201
+    assert progress.status_code == 201
+    assert revised.status_code == 201
 
 
 def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
@@ -2604,7 +2644,7 @@ def test_parse_interruption_route_uses_injected_ai_client(client: TestClient) ->
     }
 
 
-def test_schedule_explanation_route_uses_user_owned_decision_and_safe_facts(
+def test_schedule_explanation_route_enqueues_safe_worker_job(
     client: TestClient,
 ) -> None:
     register(client, "alice")
@@ -2618,8 +2658,8 @@ def test_schedule_explanation_route_uses_user_owned_decision_and_safe_facts(
     client.app.state.scheduler_client = CanonicalSchedulerClient()
     snapshot_payload = client.post(f"/planning/days/{day['id']}/generate-plan").json()
     decision_id = snapshot_payload["decisions"][0]["id"]
-    ai_client = CapturingAiClient()
-    client.app.state.ai_client = ai_client
+    worker_queue = CapturingWorkerQueueClient()
+    client.app.state.worker_queue_client = worker_queue
 
     response = client.post(
         f"/planning/days/{day['id']}/schedule-decisions/{decision_id}/ai-explanation"
@@ -2627,19 +2667,25 @@ def test_schedule_explanation_route_uses_user_owned_decision_and_safe_facts(
 
     assert response.status_code == 200
     assert response.json() == {
-        "status": "explained",
-        "confidence": 0.7,
-        "explanation": (
-            "Reply to inbox was placed because the saved rules found an open window."
-        ),
+        "status": "fallback",
+        "confidence": 0.0,
+        "explanation": None,
         "deterministic_reason": (
             "Reply to inbox was placed in the earliest valid window."
         ),
         "reason_code": "placed_in_earliest_valid_window",
-        "fallback_reason": None,
-        "error_code": None,
+        "fallback_reason": "service_unavailable",
+        "error_code": "worker_result_pending",
     }
-    assert ai_client.explanation_request == {
+    assert len(worker_queue.enqueued) == 1
+    envelope = worker_queue.enqueued[0].model_dump(mode="json")
+    assert envelope["contract_version"] == 1
+    assert envelope["kind"] == "schedule_explanation_enrichment"
+    assert envelope["idempotency_key"].startswith(
+        f"schedule-explanation:v1:{snapshot_payload['id']}:{decision_id}:"
+    )
+    assert envelope["payload"] == {
+        "decision_id": decision_id,
         "reason_code": "placed_in_earliest_valid_window",
         "deterministic_reason": (
             "Reply to inbox was placed in the earliest valid window."
@@ -2660,9 +2706,9 @@ def test_schedule_explanation_route_uses_user_owned_decision_and_safe_facts(
             "free_window_minutes": 120,
             "reason_details": {},
         },
+        "result_cache_key": f"worker:results:schedule-explanation:v1:{decision_id}",
     }
-    assert "user" not in str(ai_client.explanation_request).lower()
-    assert "snapshot" not in str(ai_client.explanation_request).lower()
+    assert "user" not in str(envelope).lower()
 
 
 def test_schedule_explanation_facts_distinguish_moved_task_segments(
@@ -2695,8 +2741,8 @@ def test_schedule_explanation_facts_distinguish_moved_task_segments(
             "reported_at": "2026-06-22T14:00:00+02:00",
         },
     )
-    ai_client = CapturingAiClient()
-    client.app.state.ai_client = ai_client
+    worker_queue = CapturingWorkerQueueClient()
+    client.app.state.worker_queue_client = worker_queue
     revised_decisions = revised_snapshot.json()["decisions"]
     placed_decision_id = next(
         decision["id"]
@@ -2714,7 +2760,7 @@ def test_schedule_explanation_facts_distinguish_moved_task_segments(
         f"/planning/days/{day['id']}/schedule-decisions/"
         f"{placed_decision_id}/ai-explanation"
     )
-    placed_facts = ai_client.explanation_request["facts"]
+    placed_facts = worker_queue.enqueued[-1].payload.facts
     moved_response = client.post(
         f"/planning/days/{day['id']}/schedule-decisions/"
         f"{moved_decision_id}/ai-explanation"
@@ -2730,7 +2776,7 @@ def test_schedule_explanation_facts_distinguish_moved_task_segments(
     assert placed_facts["scheduled_end_at"] == "2026-06-22T16:30:00+02:00"
     assert placed_facts["scheduled_start_at"] != placed_facts["previous_start_at"]
     assert moved_response.status_code == 200
-    facts = ai_client.explanation_request["facts"]
+    facts = worker_queue.enqueued[-1].payload.facts
     assert facts["task_title"] == "Study notes"
     assert facts["previous_start_at"] == "2026-06-22T13:00:00+02:00"
     assert facts["previous_end_at"] == "2026-06-22T14:00:00+02:00"
@@ -2764,7 +2810,48 @@ def test_schedule_explanation_route_returns_disabled_fallback_by_default(
         "Reply to inbox was placed in the earliest valid window."
     )
     assert response.json()["reason_code"] == "placed_in_earliest_valid_window"
-    assert response.json()["fallback_reason"] == "ai_disabled"
+    assert response.json()["fallback_reason"] == "service_unavailable"
+    assert response.json()["error_code"] == "worker_result_pending"
+
+
+def test_schedule_explanation_route_uses_cached_worker_result(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = CanonicalSchedulerClient()
+    snapshot_payload = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    decision_id = snapshot_payload["decisions"][0]["id"]
+    worker_queue = CapturingWorkerQueueClient(
+        result=ExplainScheduleDecisionResultDTO(
+            status="explained",
+            confidence=0.7,
+            explanation=(
+                "Reply to inbox was placed because the saved rules found an "
+                "open window."
+            ),
+            fallback_reason=None,
+            error_code=None,
+        )
+    )
+    client.app.state.worker_queue_client = worker_queue
+
+    response = client.post(
+        f"/planning/days/{day['id']}/schedule-decisions/{decision_id}/ai-explanation"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "explained"
+    assert response.json()["explanation"] == (
+        "Reply to inbox was placed because the saved rules found an open window."
+    )
+    assert worker_queue.enqueued == []
 
 
 def test_schedule_explanation_route_preserves_decision_ownership(
@@ -3113,6 +3200,37 @@ class CapturingAiClient:
             fallback_reason=None,
             error_code=None,
         )
+
+
+class CapturingWorkerQueueClient:
+    def __init__(self, result: ExplainScheduleDecisionResultDTO | None = None) -> None:
+        self.result = result
+        self.enqueued: list[ScheduleExplanationJobEnvelope] = []
+
+    def enqueue_schedule_explanation(
+        self, envelope: ScheduleExplanationJobEnvelope
+    ) -> None:
+        self.enqueued.append(envelope)
+
+    def get_schedule_explanation_result(
+        self, decision_id: str
+    ) -> ExplainScheduleDecisionResultDTO | None:
+        _ = decision_id
+        return self.result
+
+
+class FailingWorkerQueueClient:
+    def enqueue_schedule_explanation(
+        self, envelope: ScheduleExplanationJobEnvelope
+    ) -> None:
+        _ = envelope
+        raise RuntimeError("queue unavailable")
+
+    def get_schedule_explanation_result(
+        self, decision_id: str
+    ) -> ExplainScheduleDecisionResultDTO | None:
+        _ = decision_id
+        raise RuntimeError("queue unavailable")
 
 
 def item(

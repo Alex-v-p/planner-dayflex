@@ -12,6 +12,11 @@ from .config import Settings
 from .database import Database
 from .infrastructure.ai_client import AiClient, DisabledAiClient, HttpAiClient
 from .infrastructure.scheduler_client import HttpSchedulerClient, SchedulerClient
+from .infrastructure.worker_queue import (
+    DisabledWorkerQueueClient,
+    RqWorkerQueueClient,
+    WorkerQueueClient,
+)
 from .interfaces.auth import router as auth_router
 from .interfaces.planning import router as planning_router
 from .logging_config import configure_logging
@@ -35,6 +40,7 @@ def create_app(
     database: Database | None = None,
     scheduler_client: SchedulerClient | None = None,
     ai_client: AiClient | None = None,
+    worker_queue_client: WorkerQueueClient | None = None,
 ) -> FastAPI:
     """Build an API instance from explicit settings and its owned database boundary."""
     configured_settings = settings or Settings()
@@ -52,6 +58,14 @@ def create_app(
             str(configured_settings.ai_service_base_url),
             timeout_seconds=configured_settings.ai_client_timeout_seconds,
         )
+    if worker_queue_client is not None:
+        configured_worker_queue_client = worker_queue_client
+    elif configured_settings.worker_redis_url_value is None:
+        configured_worker_queue_client = DisabledWorkerQueueClient()
+    else:
+        configured_worker_queue_client = RqWorkerQueueClient(
+            configured_settings.worker_redis_url_value
+        )
 
     app = FastAPI(
         title="planner-dayflex application API",
@@ -65,6 +79,7 @@ def create_app(
     app.state.database = configured_database
     app.state.scheduler_client = configured_scheduler_client
     app.state.ai_client = configured_ai_client
+    app.state.worker_queue_client = configured_worker_queue_client
 
     @app.exception_handler(RequestValidationError)
     def request_validation_exception_handler(

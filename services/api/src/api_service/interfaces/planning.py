@@ -46,6 +46,7 @@ from api_service.contracts.planning import (
 from api_service.infrastructure.models import User
 from api_service.infrastructure.ai_client import AiClient
 from api_service.infrastructure.scheduler_client import SchedulerClient
+from api_service.infrastructure.worker_queue import WorkerQueueClient
 from api_service.interfaces.auth import get_current_user, get_session, get_settings
 
 
@@ -95,7 +96,7 @@ def explain_schedule_decision(
             user.id,
             planning_day_id,
             decision_id,
-            _get_ai_client(request),
+            _get_worker_queue_client(request),
         )
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
@@ -472,6 +473,7 @@ def generate_plan(
             user.id,
             planning_day_id,
             _get_scheduler_client(request),
+            _get_worker_queue_client(request),
             scheduler_version=settings.scheduler_version,
         )
     except PlanningResourceNotFoundError as error:
@@ -510,6 +512,7 @@ def report_interruption(
             planning_day_id,
             body,
             _get_scheduler_client(request),
+            _get_worker_queue_client(request),
             scheduler_version=settings.scheduler_version,
         )
     except PlanningResourceNotFoundError as error:
@@ -613,6 +616,10 @@ def _get_scheduler_client(request: Request) -> SchedulerClient:
 
 def _get_ai_client(request: Request) -> AiClient:
     return request.app.state.ai_client
+
+
+def _get_worker_queue_client(request: Request) -> WorkerQueueClient:
+    return request.app.state.worker_queue_client
 
 
 def _date_only_query(value: str, field_name: str) -> date:
