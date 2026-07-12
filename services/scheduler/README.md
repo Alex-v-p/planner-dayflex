@@ -5,9 +5,9 @@ the pure [`scheduler-core`](../../packages/scheduler-core/README.md) package.
 It owns request/response validation and serialization only; the core still owns
 all deterministic scheduling and rescheduling decisions.
 
-It has no database, queue, Redis, AI/model, authentication, browser, Docker,
-or Compose dependency. The future application API is the browser-facing owner
-and may call this contract; browsers must not call this service directly.
+It has no database, queue, Redis, AI/model, authentication, or browser
+dependency. The application API is the browser-facing owner and may call this
+contract; browsers must not call this service directly.
 
 ## Local dependency and toolchain
 
@@ -30,7 +30,10 @@ python -m uv run uvicorn scheduler_service.app:app --host 127.0.0.1 --port 8001
 
 `GET /health` is a process liveness endpoint. It returns `200` with
 `{"status":"ok"}` and deliberately has no dependency checks because this
-ticket introduces no infrastructure.
+service has no infrastructure dependencies.
+
+TKT-025 adds a local-only scheduler Docker image and Compose service on an
+internal network. It is not published to the host or routed by the edge proxy.
 
 ## HTTP contract
 

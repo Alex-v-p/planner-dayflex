@@ -208,7 +208,14 @@ client and authenticated parse proxy routes. TKT-023 extends that client with
 optional schedule-explanation wording for existing decisions. No persistence,
 migration, direct provider access, API Docker image, worker, queue, or Compose
 topology is added. TKT-024 adds an optional worker queue producer only; Docker
-and Compose topology stay deferred.
+and Compose topology stay deferred to TKT-025. TKT-025 adds a local-only API
+Docker image and Compose wiring to PostgreSQL, scheduler, optional AI, and
+optional Redis/RQ worker producer configuration. Browser access still reaches
+the API only through the reverse proxy `/api/` route.
+
+For the local Compose topology, the API container runs `alembic upgrade head`
+before Uvicorn so a clean local PostgreSQL volume is usable. This does not add
+or change migrations.
 
 ## Planning AI helpers
 

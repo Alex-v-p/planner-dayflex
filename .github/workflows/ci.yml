@@ -223,3 +223,29 @@ jobs:
 
       - name: End-to-end test
         run: npm run test:e2e
+
+  local-compose-topology:
+    name: Local Compose topology
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Static topology checks
+        run: python infra/docker/tests/test_topology_static.py
+
+      - name: Render Compose config
+        shell: pwsh
+        run: ./infra/docker/validate-compose.ps1
+
+      - name: Build local service images
+        shell: pwsh
+        run: ./infra/docker/build-images.ps1
+
+      - name: Smoke local topology
+        shell: pwsh
+        run: ./infra/docker/smoke-local.ps1
+
+      - name: Smoke reduced topology without optional services
+        shell: pwsh
+        run: ./infra/docker/tests/smoke-optional-services-disabled.ps1

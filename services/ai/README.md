@@ -14,6 +14,11 @@ uv run uvicorn ai_service.app:app --host 127.0.0.1 --port 8002
 `GET /health` is dependency-free liveness. A disabled or unavailable provider
 does not make health fail.
 
+In the local Compose topology, the AI service is internal-only and runs with
+the disabled provider by default. The optional Ollama runtime is enabled only
+with the `model` profile and is reachable only from this AI service network.
+No browser route points at AI or the model runtime.
+
 ## Configuration
 
 All service-owned settings use the `PLANNER_AI_` prefix:
@@ -58,3 +63,9 @@ facts, the persisted reason code, and deterministic reason text from
 
 The AI service never changes schedules or decides where work belongs.
 Schema errors return a safe 422 envelope and do not echo user text.
+
+Data-model impact: None.
+
+Service/container impact: TKT-025 keeps the existing local-only AI image and
+adds internal Compose wiring. AI health remains liveness-only and does not
+check provider/model availability.

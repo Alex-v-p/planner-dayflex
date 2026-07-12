@@ -1,8 +1,10 @@
 .pytest_cache
+.pytest-tmp-*
 __pycache__
 *.pyc
 .ruff_cache
 .venv
+*.db
 .git
 .gitignore
 Dockerfile

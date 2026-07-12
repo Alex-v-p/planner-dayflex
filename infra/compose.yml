@@ -1,0 +1,231 @@
+name: planner-dayflex
+
+services:
+  edge:
+    image: nginx:1.27-alpine
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${PLANNER_EDGE_PORT:-8080}:8080"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - edge
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/edge-health | grep -q 'ok'",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    expose:
+      - "8080"
+    networks:
+      - edge
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/health | grep -q 'ok'",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  api:
+    build:
+      context: ../services/api
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scheduler:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PLANNER_API_ENVIRONMENT: ${PLANNER_API_ENVIRONMENT:-development}
+      PLANNER_API_DATABASE_URL: ${PLANNER_API_DATABASE_URL:-postgresql+psycopg://planner_dayflex:planner_dayflex_local@postgres:5432/planner_dayflex}
+      PLANNER_API_LOG_LEVEL: ${PLANNER_API_LOG_LEVEL:-INFO}
+      PLANNER_API_SCHEDULER_BASE_URL: http://scheduler:8001
+      PLANNER_API_SCHEDULER_VERSION: ${PLANNER_API_SCHEDULER_VERSION:-0.1.0}
+      PLANNER_API_AI_SERVICE_BASE_URL: ${PLANNER_API_AI_SERVICE_BASE_URL:-http://ai:8002}
+      PLANNER_API_AI_CLIENT_TIMEOUT_SECONDS: ${PLANNER_API_AI_CLIENT_TIMEOUT_SECONDS:-2.0}
+      PLANNER_API_WORKER_REDIS_URL: ${PLANNER_API_WORKER_REDIS_URL:-redis://redis:6379/0}
+    expose:
+      - "8000"
+    networks:
+      - edge
+      - app_internal
+      - data
+      - queue
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  scheduler:
+    build:
+      context: ..
+      dockerfile: services/scheduler/Dockerfile
+    expose:
+      - "8001"
+    networks:
+      - app_internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  ai:
+    build:
+      context: ../services/ai
+      dockerfile: Dockerfile
+    environment:
+      PLANNER_AI_PROVIDER_ENABLED: ${PLANNER_AI_PROVIDER_ENABLED:-false}
+      PLANNER_AI_PROVIDER: ${PLANNER_AI_PROVIDER:-disabled}
+      PLANNER_AI_MODEL: ${PLANNER_AI_MODEL:-mock-parser-v1}
+      PLANNER_AI_PROVIDER_BASE_URL: ${PLANNER_AI_PROVIDER_BASE_URL:-http://ollama:11434}
+      PLANNER_AI_PROVIDER_TIMEOUT_SECONDS: ${PLANNER_AI_PROVIDER_TIMEOUT_SECONDS:-2.0}
+      PLANNER_AI_LOG_LEVEL: ${PLANNER_AI_LOG_LEVEL:-INFO}
+    expose:
+      - "8002"
+    networks:
+      - app_internal
+      - ai_model
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  worker:
+    build:
+      context: ../services/worker
+      dockerfile: Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      PLANNER_WORKER_REDIS_URL: ${PLANNER_WORKER_REDIS_URL:-redis://redis:6379/0}
+      PLANNER_WORKER_AI_SERVICE_BASE_URL: ${PLANNER_WORKER_AI_SERVICE_BASE_URL:-http://ai:8002}
+      PLANNER_WORKER_LOG_LEVEL: ${PLANNER_WORKER_LOG_LEVEL:-INFO}
+      PLANNER_WORKER_QUEUE_NAME: ${PLANNER_WORKER_QUEUE_NAME:-planner-dayflex-worker}
+    networks:
+      - queue
+      - app_internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, redis; redis.Redis.from_url(os.environ['PLANNER_WORKER_REDIS_URL']).ping()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-planner_dayflex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-planner_dayflex_local}
+      POSTGRES_DB: ${POSTGRES_DB:-planner_dayflex}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    networks:
+      - queue
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  ollama:
+    image: ollama/ollama:0.5.7
+    profiles:
+      - model
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - ai_model
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "ollama",
+          "list",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  edge:
+  app_internal:
+    internal: true
+  data:
+    internal: true
+  queue:
+    internal: true
+  ai_model:
+    internal: true
+
+volumes:
+  postgres_data:
+  ollama_data:

@@ -33,6 +33,11 @@ $env:PLANNER_WORKER_REDIS_URL = "redis://127.0.0.1:6379/0"
 python -m uv run python -m worker_service.interfaces.worker
 ```
 
+The local Compose topology builds `services/worker/Dockerfile` and starts the
+worker on the internal Redis queue network. The worker has no browser-facing
+port and no HTTP contract; its container health check verifies Redis
+reachability for the queue consumer process.
+
 ## Contracts and boundaries
 
 The API produces explicit version-1 job envelopes. The worker validates the
@@ -52,4 +57,6 @@ API falls back to deterministic wording when a cache entry is absent.
 Data-model impact: None.
 
 Service and container impact: introduces a separate non-critical worker runtime
-under `services/worker/`. Docker and Compose topology are deferred to TKT-025.
+under `services/worker/`. TKT-025 adds its local-only Docker image and Compose
+wiring. The worker remains non-critical: API planning and recovery continue to
+use deterministic scheduler responses when Redis or the worker is unavailable.
