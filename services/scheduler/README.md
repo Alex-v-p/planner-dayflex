@@ -31,6 +31,13 @@ python -m uv run uvicorn scheduler_service.app:app --host 127.0.0.1 --port 8001
 `GET /health` is a process liveness endpoint. It returns `200` with
 `{"status":"ok"}` and deliberately has no dependency checks because this
 service has no infrastructure dependencies.
+`GET /ready` returns the same safe `{"status":"ok"}` readiness shape because
+the scheduler has no database, queue, model, or provider dependency.
+
+The service accepts `X-Request-ID`, sanitizes unsafe values, returns the safe ID
+in the response header, and includes it in structured JSON logs. Logs contain
+only allowlisted operational event names; they do not include request bodies,
+task titles, URLs, or credentials.
 
 TKT-025 adds a local-only scheduler Docker image and Compose service on an
 internal network. It is not published to the host or routed by the edge proxy.

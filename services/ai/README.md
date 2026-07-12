@@ -13,6 +13,13 @@ uv run uvicorn ai_service.app:app --host 127.0.0.1 --port 8002
 
 `GET /health` is dependency-free liveness. A disabled or unavailable provider
 does not make health fail.
+`GET /ready` returns safe service readiness without exposing provider URLs,
+model names, credentials, or provider error text.
+
+The service accepts `X-Request-ID`, sanitizes unsafe values, returns the safe ID
+in the response header, and includes it in structured JSON logs. Logs contain
+only allowlisted operational event names; they do not include prompts, provider
+payloads, request bodies, URLs, or credentials.
 
 In the local Compose topology, the AI service is internal-only and runs with
 the disabled provider by default. The optional Ollama runtime is enabled only
@@ -68,4 +75,5 @@ Data-model impact: None.
 
 Service/container impact: TKT-025 keeps the existing local-only AI image and
 adds internal Compose wiring. AI health remains liveness-only and does not
-check provider/model availability.
+check provider/model availability. TKT-026 adds readiness and correlation
+behavior without changing the service topology.

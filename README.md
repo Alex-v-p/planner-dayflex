@@ -84,9 +84,12 @@ reverse proxy:
 ```
 
 Open `http://127.0.0.1:8080`. The helper validates startup, checks
-`/edge-health` and `/api/health` through the proxy, verifies database and Redis
-connections through service-owned code, and leaves the stack running when
-`-KeepRunning` is supplied. Stop and remove local volumes with:
+`/edge-health`, `/api/health`, and `/api/ready` through the proxy, registers a
+unique smoke user, creates the canonical day, generates a plan, records
+progress, reports the interruption, and asserts the revised schedule, decisions,
+version, and free-time window. It also verifies database and Redis connections
+through service-owned code, and leaves the stack running when `-KeepRunning` is
+supplied. Stop and remove local volumes with:
 
 ```powershell
 .\infra\docker\cleanup-local.ps1
@@ -113,10 +116,49 @@ docker compose --env-file .\infra\docker\.env.example -f .\infra\compose.yml --p
 Health checks follow service semantics: API, scheduler, and AI health endpoints
 are dependency-free liveness; PostgreSQL and Redis use connection checks; the
 worker health check verifies Redis reachability because it has no HTTP surface.
+API readiness is exposed as `GET /api/ready` through the edge and checks only
+safe dependency names: `database` and `scheduler`. Scheduler and AI also expose
+internal `GET /ready` endpoints, but the edge must not route browser traffic to
+those internal services.
+
+Safe log correlation uses the `X-Request-ID` header. API, scheduler, AI, and
+worker logs emit single-line JSON with an allowlisted event name and the
+sanitized request ID when one is present. If a caller sends a missing or unsafe
+ID, the service generates an opaque replacement and returns it in the response
+header. Do not put passwords, tokens, session cookies, provider credentials, or
+private task text in request IDs.
+
+For local troubleshooting, start with:
+
+```powershell
+docker compose --env-file .\infra\docker\.env.example -f .\infra\compose.yml ps
+docker compose --env-file .\infra\docker\.env.example -f .\infra\compose.yml logs api scheduler ai worker
+Invoke-RestMethod http://127.0.0.1:8080/api/ready
+```
+
+If readiness reports `database` unavailable, verify the PostgreSQL container is
+healthy and rerun API migrations with the Compose API container. If readiness
+reports `scheduler` unavailable, inspect scheduler logs and confirm the edge is
+not exposing scheduler routes directly. For a clean local retry, run
+`.\infra\docker\cleanup-local.ps1`; it removes disposable local volumes.
+
+Migration and rollback considerations for release planning: the current
+operational hardening ticket has data-model impact `None`, so it introduces no
+migration, backfill, or schema rollback. Existing API migrations still need a
+database backup before a production release, `alembic upgrade head` during
+deployment, and a rollback plan that restores the previous application version
+plus the pre-deploy database backup if a migration-bearing release later fails.
+Post-deploy verification inputs for the later release ticket should include
+`/api/health`, `/api/ready`, a unique `X-Request-ID`, registration/login,
+canonical day plan generation, progress recording, interruption recovery, and a
+log lookup by that request ID across API, scheduler, optional AI, and optional
+worker logs.
 
 Data-model impact: None. TKT-025 adds no migrations, tables, fields,
 constraints, indexes, or backfills.
 
 Service and container impact: local-only Dockerfiles for existing services and
-a shared Compose/Nginx topology. No production deployment, TLS, new service
-boundary, or browser access to internal services is added.
+a shared Compose/Nginx topology. TKT-026 adds readiness/correlation behavior and
+expands operational verification, but adds no new service, store, queue, reverse
+proxy, exposed port, production deployment, TLS, or browser access to internal
+services.
