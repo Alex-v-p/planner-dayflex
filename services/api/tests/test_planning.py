@@ -2664,6 +2664,57 @@ def test_schedule_explanation_route_uses_user_owned_decision_and_safe_facts(
     assert "snapshot" not in str(ai_client.explanation_request).lower()
 
 
+def test_schedule_explanation_facts_distinguish_moved_task_segments(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = RecoverySchedulerClient()
+    first_snapshot = client.post(f"/planning/days/{day['id']}/generate-plan")
+    progress = client.post(
+        f"/planning/days/{day['id']}/task-progress",
+        json={
+            "task_id": first_snapshot.json()["items"][6]["task_id"],
+            "completed_minutes": 60,
+            "recorded_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+    revised_snapshot = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        json={
+            "start_at": "2026-06-22T14:00:00+02:00",
+            "end_at": "2026-06-22T15:15:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+    ai_client = CapturingAiClient()
+    client.app.state.ai_client = ai_client
+    moved_decision_id = revised_snapshot.json()["decisions"][0]["id"]
+
+    response = client.post(
+        f"/planning/days/{day['id']}/schedule-decisions/"
+        f"{moved_decision_id}/ai-explanation"
+    )
+
+    assert progress.status_code == 201
+    assert revised_snapshot.status_code == 201
+    assert response.status_code == 200
+    facts = ai_client.explanation_request["facts"]
+    assert facts["task_title"] == "Study notes"
+    assert facts["previous_start_at"] == "2026-06-22T13:00:00+02:00"
+    assert facts["previous_end_at"] == "2026-06-22T14:00:00+02:00"
+    assert facts["scheduled_start_at"] == "2026-06-22T16:00:00+02:00"
+    assert facts["scheduled_end_at"] == "2026-06-22T16:30:00+02:00"
+    assert facts["scheduled_start_at"] != facts["previous_start_at"]
+
+
 def test_schedule_explanation_route_returns_disabled_fallback_by_default(
     client: TestClient,
 ) -> None:

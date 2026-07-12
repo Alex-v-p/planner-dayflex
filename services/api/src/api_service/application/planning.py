@@ -1252,7 +1252,7 @@ def _schedule_decision_facts(
     selected_task: Task | None,
 ) -> ScheduleDecisionFactsDTO:
     time_zone = ZoneInfo(snapshot.planning_day.time_zone)
-    scheduled_item = _first_task_item(snapshot, decision.task_id)
+    scheduled_item = _scheduled_task_item(snapshot, decision)
     interruption_item = _first_item(snapshot, "interruption")
     free_item = _first_item(snapshot, "designated_free_time")
     previous_item = _previous_task_item(snapshot, decision.task_id)
@@ -1325,30 +1325,41 @@ def _task_for_decision(
     )
 
 
-def _first_task_item(
-    snapshot: ScheduleSnapshot, task_id: str | None
+def _scheduled_task_item(
+    snapshot: ScheduleSnapshot, decision: ScheduleDecision
 ) -> ScheduleItem | None:
-    if task_id is None:
+    candidates = _task_items(snapshot, decision.task_id)
+    if not candidates:
         return None
-    for item in snapshot.items:
-        if item.kind == "task" and item.task_id == task_id:
+    if decision.reason_code != "moved_after_interruption" or len(candidates) == 1:
+        return candidates[0]
+    interruption_item = _first_item(snapshot, "interruption")
+    if interruption_item is None:
+        return candidates[-1]
+    interruption_end_at = _as_utc(interruption_item.end_at)
+    for item in candidates:
+        if _as_utc(item.start_at) >= interruption_end_at:
             return item
-    return None
+    return candidates[-1]
 
 
 def _previous_task_item(
     snapshot: ScheduleSnapshot, task_id: str | None
 ) -> ScheduleItem | None:
-    if task_id is None:
+    candidates = _task_items(snapshot, task_id)
+    if len(candidates) < 2:
         return None
-    candidates = [
+    return candidates[0]
+
+
+def _task_items(snapshot: ScheduleSnapshot, task_id: str | None) -> list[ScheduleItem]:
+    if task_id is None:
+        return []
+    return [
         item
         for item in snapshot.items
         if item.kind == "task" and item.task_id == task_id
     ]
-    if len(candidates) < 2:
-        return None
-    return candidates[0]
 
 
 def _first_item(snapshot: ScheduleSnapshot, kind: str) -> ScheduleItem | None:
