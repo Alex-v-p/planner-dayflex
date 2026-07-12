@@ -588,6 +588,7 @@ def test_canonical_interruption_recovery_records_progress_and_revised_snapshot(
         ),
     ]
     assert [decision["reason_code"] for decision in payload["decisions"]] == [
+        "placed_in_earliest_valid_window",
         "moved_after_interruption",
         "placed_in_earliest_valid_window",
         "designated_free_time",
