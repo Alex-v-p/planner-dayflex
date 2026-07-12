@@ -586,6 +586,46 @@ describe("planner workspace API contract", () => {
     ]);
     expect(JSON.stringify(api.posts)).not.toContain("openai");
   });
+
+  it("requests schedule explanations only through planning API endpoints", async () => {
+    const api = new FakeApiClient();
+    api.responses.set(
+      "/planning/days/day-1/schedule-decisions/decision-1/ai-explanation",
+      {
+        status: "explained",
+        confidence: 0.7,
+        explanation:
+          "Write report moved because the interruption changed the available windows.",
+        deterministic_reason:
+          "Write report was moved after reported unavailable time.",
+        reason_code: "moved_after_interruption",
+        fallback_reason: null,
+        error_code: null,
+      },
+    );
+    await TestBed.configureTestingModule({
+      providers: [
+        PlannerApiService,
+        { provide: ApiClientService, useValue: api },
+      ],
+    }).compileComponents();
+
+    const result = await firstValue(
+      TestBed.inject(PlannerApiService).explainScheduleDecision(
+        "day-1",
+        "decision-1",
+      ),
+    );
+
+    expect(result.status).toBe("explained");
+    expect(api.posts).toEqual([
+      {
+        path: "/planning/days/day-1/schedule-decisions/decision-1/ai-explanation",
+        body: null,
+      },
+    ]);
+    expect(JSON.stringify(api.posts)).not.toContain("ai.test");
+  });
 });
 
 describe("rendered planner workspace", () => {
@@ -1488,6 +1528,95 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("Scheduler reason out_of_contract_reason.");
   });
 
+  it("shows optional AI explanation without replacing scheduler wording", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [task, studyTask],
+      snapshot: revisedStudySnapshot,
+    });
+    plannerApi.explanationResponse = of({
+      status: "explained",
+      confidence: 0.7,
+      explanation:
+        "Study notes moved because the reported interruption reserved the earlier window.",
+      deterministic_reason:
+        "Study notes was moved after reported unavailable time.",
+      reason_code: "moved_after_interruption",
+      fallback_reason: null,
+      error_code: null,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Explain with AI", "Schedule reasons").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.explainedDecisions).toEqual([
+      { planningDayId: "day-1", decisionId: "decision-moved-study" },
+    ]);
+    expect(text(fixture)).toContain(
+      "Study notes was moved after reported unavailable time.",
+    );
+    expect(text(fixture)).toContain("moved_after_interruption");
+    expect(text(fixture)).toContain("Optional AI explanation");
+    expect(text(fixture)).toContain("Optional AI explanation ready.");
+    expect(text(fixture)).toContain(
+      "Study notes moved because the reported interruption reserved the earlier window.",
+    );
+  });
+
+  it("keeps scheduler wording visible when AI explanation falls back", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [task, studyTask],
+      snapshot: revisedStudySnapshot,
+    });
+    plannerApi.explanationResponse = of({
+      status: "fallback",
+      confidence: 0,
+      explanation: null,
+      deterministic_reason:
+        "Study notes was moved after reported unavailable time.",
+      reason_code: "moved_after_interruption",
+      fallback_reason: "timeout",
+      error_code: "ai_service_timeout",
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Explain with AI", "Schedule reasons").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "Study notes was moved after reported unavailable time.",
+    );
+    expect(text(fixture)).toContain("moved_after_interruption");
+    expect(text(fixture)).toContain("Optional AI explanation took too long.");
+    expect(text(fixture)).toContain("timeout");
+  });
+
+  it("keeps scheduler wording visible when AI explanation request errors", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [task, studyTask],
+      snapshot: revisedStudySnapshot,
+    });
+    plannerApi.explanationError = new HttpErrorResponse({ status: 503 });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Explain with AI", "Schedule reasons").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "Study notes was moved after reported unavailable time.",
+    );
+    expect(text(fixture)).toContain(
+      "Optional AI explanation is unavailable. The scheduler reason remains available.",
+    );
+    expect(text(fixture)).toContain("service_unavailable");
+  });
+
   it("preserves selected-date context when the API fails", async () => {
     plannerApi.error = new HttpErrorResponse({
       status: 503,
@@ -1971,6 +2100,7 @@ class FakePlannerApi {
   readonly reportedInterruptions: unknown[] = [];
   readonly parsedTasks: unknown[] = [];
   readonly parsedInterruptions: unknown[] = [];
+  readonly explainedDecisions: unknown[] = [];
   taskMutationError: unknown = null;
   fixedEventMutationError: unknown = null;
   generateError: unknown = null;
@@ -1980,6 +2110,8 @@ class FakePlannerApi {
   interruptionResponse: Observable<ScheduleSnapshot> | null = null;
   taskSuggestionResponse: Observable<unknown> | null = null;
   interruptionSuggestionResponse: Observable<unknown> | null = null;
+  explanationResponse: Observable<unknown> | null = null;
+  explanationError: unknown = null;
 
   loadWorkspaceDate(date: string): Observable<PlannerWorkspaceData> {
     this.loadedDates.push(date);
@@ -2129,6 +2261,28 @@ class FakePlannerApi {
           time_zone: null,
           reported_at: null,
         },
+        fallback_reason: "ai_disabled",
+        error_code: "ai_disabled",
+      })
+    );
+  }
+
+  explainScheduleDecision(
+    planningDayId: string,
+    decisionId: string,
+  ): Observable<unknown> {
+    this.explainedDecisions.push({ planningDayId, decisionId });
+    if (this.explanationError !== null) {
+      return throwError(() => this.explanationError);
+    }
+    return (
+      this.explanationResponse ??
+      of({
+        status: "fallback",
+        confidence: 0,
+        explanation: null,
+        deterministic_reason: "Scheduler reason remains available.",
+        reason_code: "placed_in_earliest_valid_window",
         fallback_reason: "ai_disabled",
         error_code: "ai_disabled",
       })
@@ -2346,6 +2500,8 @@ function regionIdForLabel(regionLabel: string): string {
       return "fixed-events-title";
     case "Generate schedule":
       return "recovery-title";
+    case "Schedule reasons":
+      return "decisions-title";
     case "Work progress":
       return "progress-title";
     case "Report interruption":

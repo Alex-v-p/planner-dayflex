@@ -24,10 +24,16 @@ from api_service.contracts.planning import (
     PlanningDaySummaryResponse,
     PlanningDayCreateRequest,
     PlanningRangeSummaryResponse,
+    ScheduleExplanationResponse,
     TaskProgressCreateRequest,
     TaskCreateRequest,
     TaskUpdateRequest,
     UserPreferencesRequest,
+)
+from api_service.infrastructure.ai_client import (
+    AiClient,
+    ExplainScheduleDecisionResultDTO,
+    ScheduleDecisionFactsDTO,
 )
 from api_service.infrastructure.scheduler_client import (
     ScheduleResultDTO,
@@ -663,6 +669,55 @@ class PlanningService:
             raise PlanningResourceNotFoundError
         return _normalize_schedule_snapshot(snapshot)
 
+    def explain_schedule_decision(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day_id: str,
+        decision_id: str,
+        ai_client: AiClient,
+    ) -> ScheduleExplanationResponse:
+        decision = session.scalar(
+            select(ScheduleDecision)
+            .join(ScheduleSnapshot, ScheduleDecision.snapshot_id == ScheduleSnapshot.id)
+            .join(PlanningDay, ScheduleSnapshot.planning_day_id == PlanningDay.id)
+            .where(
+                ScheduleDecision.id == decision_id,
+                ScheduleSnapshot.planning_day_id == planning_day_id,
+                PlanningDay.user_id == user_id,
+            )
+        )
+        if decision is None:
+            raise PlanningResourceNotFoundError
+
+        snapshot = self.get_schedule_snapshot(session, user_id, decision.snapshot_id)
+        selected_task = _task_for_decision(session, user_id, decision)
+        deterministic_reason = _deterministic_decision_text(decision, selected_task)
+        if decision.reason_code not in ALLOWED_SCHEDULER_DECISION_REASON_CODES:
+            result = _explanation_client_fallback(
+                "invalid_response", "unsupported_reason_code"
+            )
+        else:
+            result = ai_client.explain_schedule_decision(
+                {
+                    "reason_code": decision.reason_code,
+                    "deterministic_reason": deterministic_reason,
+                    "facts": _schedule_decision_facts(
+                        snapshot, decision, selected_task
+                    ).model_dump(mode="json"),
+                }
+            )
+
+        return ScheduleExplanationResponse(
+            status=result.status,
+            confidence=result.confidence,
+            explanation=result.explanation,
+            deterministic_reason=deterministic_reason,
+            reason_code=decision.reason_code,
+            fallback_reason=result.fallback_reason,
+            error_code=result.error_code,
+        )
+
     def _get_fixed_event(
         self, session: Session, planning_day_id: str, fixed_event_id: str
     ) -> FixedEvent:
@@ -1189,6 +1244,189 @@ def _previous_result(snapshot: ScheduleSnapshot) -> dict[str, object]:
         "decisions": decisions,
         "warnings": warnings,
     }
+
+
+def _schedule_decision_facts(
+    snapshot: ScheduleSnapshot,
+    decision: ScheduleDecision,
+    selected_task: Task | None,
+) -> ScheduleDecisionFactsDTO:
+    time_zone = ZoneInfo(snapshot.planning_day.time_zone)
+    scheduled_item = _first_task_item(snapshot, decision.task_id)
+    interruption_item = _first_item(snapshot, "interruption")
+    free_item = _first_item(snapshot, "designated_free_time")
+    previous_item = _previous_task_item(snapshot, decision.task_id)
+    return ScheduleDecisionFactsDTO(
+        task_title=selected_task.title if selected_task is not None else None,
+        task_estimated_minutes=(
+            selected_task.estimated_minutes if selected_task is not None else None
+        ),
+        task_priority=selected_task.priority if selected_task is not None else None,
+        task_due_date=(
+            selected_task.due_date.isoformat()
+            if selected_task is not None and selected_task.due_date is not None
+            else None
+        ),
+        scheduled_start_at=(
+            _as_utc(scheduled_item.start_at).astimezone(time_zone)
+            if scheduled_item is not None
+            else None
+        ),
+        scheduled_end_at=(
+            _as_utc(scheduled_item.end_at).astimezone(time_zone)
+            if scheduled_item is not None
+            else None
+        ),
+        previous_start_at=(
+            _as_utc(previous_item.start_at).astimezone(time_zone)
+            if previous_item is not None
+            else None
+        ),
+        previous_end_at=(
+            _as_utc(previous_item.end_at).astimezone(time_zone)
+            if previous_item is not None
+            else None
+        ),
+        interruption_start_at=(
+            _as_utc(interruption_item.start_at).astimezone(time_zone)
+            if interruption_item is not None
+            else None
+        ),
+        interruption_end_at=(
+            _as_utc(interruption_item.end_at).astimezone(time_zone)
+            if interruption_item is not None
+            else None
+        ),
+        day_start_at=_day_bound_at(snapshot, "day_start", time_zone),
+        day_end_at=_day_bound_at(snapshot, "day_end", time_zone),
+        free_window_minutes=(
+            _duration_minutes(free_item.start_at, free_item.end_at)
+            if free_item is not None
+            else None
+        ),
+        reason_details={
+            key: value
+            for key, value in dict(decision.details_json).items()
+            if isinstance(key, str) and isinstance(value, str)
+        },
+    )
+
+
+def _task_for_decision(
+    session: Session, user_id: str, decision: ScheduleDecision
+) -> Task | None:
+    if decision.task_id is None:
+        return None
+    return session.scalar(
+        select(Task).where(
+            Task.id == decision.task_id,
+            Task.user_id == user_id,
+        )
+    )
+
+
+def _first_task_item(
+    snapshot: ScheduleSnapshot, task_id: str | None
+) -> ScheduleItem | None:
+    if task_id is None:
+        return None
+    for item in snapshot.items:
+        if item.kind == "task" and item.task_id == task_id:
+            return item
+    return None
+
+
+def _previous_task_item(
+    snapshot: ScheduleSnapshot, task_id: str | None
+) -> ScheduleItem | None:
+    if task_id is None:
+        return None
+    candidates = [
+        item
+        for item in snapshot.items
+        if item.kind == "task" and item.task_id == task_id
+    ]
+    if len(candidates) < 2:
+        return None
+    return candidates[0]
+
+
+def _first_item(snapshot: ScheduleSnapshot, kind: str) -> ScheduleItem | None:
+    for item in snapshot.items:
+        if item.kind == kind:
+            return item
+    return None
+
+
+def _day_bound_at(
+    snapshot: ScheduleSnapshot, key: str, time_zone: ZoneInfo
+) -> datetime | None:
+    value = snapshot.configuration_json.get(key)
+    if not isinstance(value, str):
+        return None
+    try:
+        bound_time = time.fromisoformat(value)
+    except ValueError:
+        return None
+    return datetime.combine(snapshot.planning_day.local_date, bound_time, time_zone)
+
+
+def _deterministic_decision_text(
+    decision: ScheduleDecision, selected_task: Task | None
+) -> str:
+    subject = selected_task.title if selected_task is not None else "The schedule"
+    match decision.reason_code:
+        case "placed_in_earliest_valid_window":
+            return f"{subject} was placed in the earliest valid window."
+        case "moved_after_interruption":
+            return f"{subject} was moved after reported unavailable time."
+        case "split_across_available_windows":
+            return f"{subject} was split across available windows."
+        case "blocked_by_fixed_event":
+            return (
+                f"{subject} was not scheduled because fixed events reserve "
+                "the available time."
+            )
+        case "blocked_by_interruption":
+            return (
+                f"{subject} was not scheduled because reported unavailable "
+                "time reserves the available time."
+            )
+        case "missed_before_current_time":
+            return (
+                f"{subject} was not scheduled because its previous time is "
+                "already past."
+            )
+        case "insufficient_time_before_deadline":
+            return (
+                f"{subject} was not scheduled because there is not enough "
+                "time before its due date."
+            )
+        case "insufficient_remaining_day_time":
+            return (
+                f"{subject} was not scheduled because there is not enough "
+                "remaining time in the day."
+            )
+        case "designated_free_time":
+            return "A remaining useful window was kept as free time."
+        case "locked_time_overlap_merged":
+            return "Overlapping unavailable time was counted once."
+        case _:
+            if decision.reason_code.startswith("warning:"):
+                return f"Schedule warning {decision.reason_code}."
+            return f"Scheduler reason {decision.reason_code}."
+
+
+def _explanation_client_fallback(
+    reason: str, error_code: str
+) -> ExplainScheduleDecisionResultDTO:
+    return ExplainScheduleDecisionResultDTO(
+        status="fallback",
+        confidence=0.0,
+        explanation=None,
+        fallback_reason=reason,
+        error_code=error_code,
+    )
 
 
 ALLOWED_SCHEDULER_ITEM_KINDS = {

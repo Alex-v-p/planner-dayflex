@@ -2531,6 +2531,9 @@ def test_planning_routes_require_authentication(client: TestClient) -> None:
             json={"text": "from 10 to 11", "local_date": "2026-07-01"},
         ),
         client.post(
+            "/planning/days/day-id/schedule-decisions/decision-id/ai-explanation"
+        ),
+        client.post(
             "/planning/tasks",
             json={
                 "title": "Prepare",
@@ -2598,6 +2601,120 @@ def test_parse_interruption_route_uses_injected_ai_client(client: TestClient) ->
         "local_date": "2026-07-01",
         "time_zone": "Europe/Brussels",
     }
+
+
+def test_schedule_explanation_route_uses_user_owned_decision_and_safe_facts(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = CanonicalSchedulerClient()
+    snapshot_payload = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    decision_id = snapshot_payload["decisions"][0]["id"]
+    ai_client = CapturingAiClient()
+    client.app.state.ai_client = ai_client
+
+    response = client.post(
+        f"/planning/days/{day['id']}/schedule-decisions/{decision_id}/ai-explanation"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "explained",
+        "confidence": 0.7,
+        "explanation": (
+            "Reply to inbox was placed because the saved rules found an open window."
+        ),
+        "deterministic_reason": (
+            "Reply to inbox was placed in the earliest valid window."
+        ),
+        "reason_code": "placed_in_earliest_valid_window",
+        "fallback_reason": None,
+        "error_code": None,
+    }
+    assert ai_client.explanation_request == {
+        "reason_code": "placed_in_earliest_valid_window",
+        "deterministic_reason": (
+            "Reply to inbox was placed in the earliest valid window."
+        ),
+        "facts": {
+            "task_title": "Reply to inbox",
+            "task_estimated_minutes": 45,
+            "task_priority": 4,
+            "task_due_date": None,
+            "scheduled_start_at": "2026-06-22T08:00:00+02:00",
+            "scheduled_end_at": "2026-06-22T08:45:00+02:00",
+            "previous_start_at": None,
+            "previous_end_at": None,
+            "interruption_start_at": None,
+            "interruption_end_at": None,
+            "day_start_at": "2026-06-22T08:00:00+02:00",
+            "day_end_at": "2026-06-22T18:00:00+02:00",
+            "free_window_minutes": 120,
+            "reason_details": {},
+        },
+    }
+    assert "user" not in str(ai_client.explanation_request).lower()
+    assert "snapshot" not in str(ai_client.explanation_request).lower()
+
+
+def test_schedule_explanation_route_returns_disabled_fallback_by_default(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = CanonicalSchedulerClient()
+    snapshot_payload = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    decision_id = snapshot_payload["decisions"][0]["id"]
+
+    response = client.post(
+        f"/planning/days/{day['id']}/schedule-decisions/{decision_id}/ai-explanation"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "fallback"
+    assert response.json()["deterministic_reason"] == (
+        "Reply to inbox was placed in the earliest valid window."
+    )
+    assert response.json()["reason_code"] == "placed_in_earliest_valid_window"
+    assert response.json()["fallback_reason"] == "ai_disabled"
+
+
+def test_schedule_explanation_route_preserves_decision_ownership(
+    client: TestClient,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    save_canonical_tasks(client)
+    client.app.state.scheduler_client = CanonicalSchedulerClient()
+    snapshot_payload = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    decision_id = snapshot_payload["decisions"][0]["id"]
+
+    client.cookies.clear()
+    register(client, "bob")
+
+    response = client.post(
+        f"/planning/days/{day['id']}/schedule-decisions/{decision_id}/ai-explanation"
+    )
+
+    assert response.status_code == 404
 
 
 def register(client: TestClient, username: str) -> dict[str, object]:
@@ -2875,6 +2992,7 @@ class CapturingSchedulerClient:
 class CapturingAiClient:
     def __init__(self) -> None:
         self.request: dict[str, object] = {}
+        self.explanation_request: dict[str, object] = {}
 
     def parse_task(self, request: dict[str, object]) -> object:
         self.request = request
@@ -2895,6 +3013,23 @@ class CapturingAiClient:
                 end_at="2026-07-01T11:00:00+02:00",
                 time_zone="Europe/Brussels",
                 reported_at="2026-07-01T10:00:00+02:00",
+            ),
+            fallback_reason=None,
+            error_code=None,
+        )
+
+    def explain_schedule_decision(self, request: dict[str, object]) -> object:
+        from api_service.infrastructure.ai_client import (
+            ExplainScheduleDecisionResultDTO,
+        )
+
+        self.explanation_request = request
+        return ExplainScheduleDecisionResultDTO(
+            status="explained",
+            confidence=0.7,
+            explanation=(
+                "Reply to inbox was placed because the saved rules found an "
+                "open window."
             ),
             fallback_reason=None,
             error_code=None,

@@ -31,6 +31,7 @@ from api_service.contracts.planning import (
     PlanningDayResponse,
     PlanningRangeSummaryResponse,
     ScheduleDecisionResponse,
+    ScheduleExplanationResponse,
     ScheduleItemResponse,
     ScheduleSnapshotResponse,
     ScheduleSnapshotSummaryResponse,
@@ -74,6 +75,30 @@ def parse_interruption(
     _ = user
     result = _get_ai_client(request).parse_interruption(body.model_dump(mode="json"))
     return ParseInterruptionResponse.model_validate(result.model_dump())
+
+
+@router.post(
+    "/days/{planning_day_id}/schedule-decisions/{decision_id}/ai-explanation",
+    response_model=ScheduleExplanationResponse,
+)
+def explain_schedule_decision(
+    planning_day_id: str,
+    decision_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> ScheduleExplanationResponse:
+    """Return optional AI wording for one user-owned schedule decision."""
+    try:
+        return planning_service.explain_schedule_decision(
+            session,
+            user.id,
+            planning_day_id,
+            decision_id,
+            _get_ai_client(request),
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
 
 
 @router.get("/preferences", response_model=UserPreferencesResponse)

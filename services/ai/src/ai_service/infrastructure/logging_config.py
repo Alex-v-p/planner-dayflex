@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 
 LOGGER_NAME = "ai_service"
-SAFE_EVENTS = frozenset({"ai_started", "parse_completed"})
+SAFE_EVENTS = frozenset({"ai_started", "parse_completed", "explanation_completed"})
 DEFAULT_EVENT = "log_event"
 UVICORN_LOGGER_NAMES = ("uvicorn.error", "uvicorn.access")
 

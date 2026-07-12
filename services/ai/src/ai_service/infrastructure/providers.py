@@ -7,6 +7,13 @@ from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from ai_service.application.parsing import ParseProvider
+from ai_service.contracts.explanations import (
+    ExplainScheduleDecisionRequestDTO,
+    ExplainScheduleDecisionResultDTO,
+    ExplanationStatus,
+    ScheduleReasonCode,
+    explanation_fallback,
+)
 from ai_service.contracts.parsing import (
     FallbackReason,
     InterruptionProposalDTO,
@@ -32,6 +39,11 @@ class DisabledProvider:
         self, request: ParseInterruptionRequestDTO
     ) -> ParseInterruptionResultDTO:
         return interruption_fallback(FallbackReason.AI_DISABLED, "ai_disabled")
+
+    def explain_schedule_decision(
+        self, request: ExplainScheduleDecisionRequestDTO
+    ) -> ExplainScheduleDecisionResultDTO:
+        return explanation_fallback(FallbackReason.AI_DISABLED, "ai_disabled")
 
 
 class MockProvider:
@@ -100,6 +112,19 @@ class MockProvider:
             error_code=None,
         )
 
+    def explain_schedule_decision(
+        self, request: ExplainScheduleDecisionRequestDTO
+    ) -> ExplainScheduleDecisionResultDTO:
+        subject = request.facts.task_title or "The plan"
+        explanation = _mock_explanation(request.reason_code, subject)
+        return ExplainScheduleDecisionResultDTO(
+            status=ExplanationStatus.EXPLAINED,
+            confidence=0.7,
+            explanation=explanation,
+            fallback_reason=None,
+            error_code=None,
+        )
+
 
 class ExternalProvider:
     """Placeholder external provider adapter without a live SDK dependency."""
@@ -117,6 +142,13 @@ class ExternalProvider:
             FallbackReason.PROVIDER_ERROR, "provider_not_configured"
         )
 
+    def explain_schedule_decision(
+        self, request: ExplainScheduleDecisionRequestDTO
+    ) -> ExplainScheduleDecisionResultDTO:
+        return explanation_fallback(
+            FallbackReason.PROVIDER_ERROR, "provider_not_configured"
+        )
+
 
 def provider_from_settings(settings: Settings) -> ParseProvider:
     """Build the configured provider while preserving disabled fallback behavior."""
@@ -125,6 +157,60 @@ def provider_from_settings(settings: Settings) -> ParseProvider:
     if settings.provider is AiProvider.MOCK:
         return MockProvider()
     return ExternalProvider(settings)
+
+
+def _mock_explanation(reason_code: ScheduleReasonCode, subject: str) -> str:
+    match reason_code:
+        case ScheduleReasonCode.PLACED_IN_EARLIEST_VALID_WINDOW:
+            return (
+                f"{subject} landed in the first open window that satisfied "
+                "the saved schedule rules."
+            )
+        case ScheduleReasonCode.MOVED_AFTER_INTERRUPTION:
+            return (
+                f"{subject} moved because reported unavailable time changed "
+                "what could still happen next."
+            )
+        case ScheduleReasonCode.SPLIT_ACROSS_AVAILABLE_WINDOWS:
+            return (
+                f"{subject} was divided only because splitting is allowed and "
+                "the available windows can hold useful pieces."
+            )
+        case ScheduleReasonCode.BLOCKED_BY_FIXED_EVENT:
+            return (
+                f"{subject} did not fit because fixed events already reserve "
+                "the relevant time."
+            )
+        case ScheduleReasonCode.BLOCKED_BY_INTERRUPTION:
+            return (
+                f"{subject} did not fit because reported unavailable time "
+                "reserves the relevant time."
+            )
+        case ScheduleReasonCode.MISSED_BEFORE_CURRENT_TIME:
+            return (
+                f"{subject} was reconsidered because its earlier planned time "
+                "had already passed."
+            )
+        case ScheduleReasonCode.INSUFFICIENT_TIME_BEFORE_DEADLINE:
+            return (
+                f"{subject} did not fit because the remaining valid time "
+                "before its due date was too short."
+            )
+        case ScheduleReasonCode.INSUFFICIENT_REMAINING_DAY_TIME:
+            return (
+                f"{subject} did not fit because the remaining day did not "
+                "have enough usable time."
+            )
+        case ScheduleReasonCode.DESIGNATED_FREE_TIME:
+            return (
+                "A useful open window was kept visible as free time instead "
+                "of being hidden."
+            )
+        case ScheduleReasonCode.LOCKED_TIME_OVERLAP_MERGED:
+            return (
+                "Overlapping unavailable blocks were counted once so the plan "
+                "does not double-count lost time."
+            )
 
 
 def _looks_unparseable(lowered: str) -> bool:

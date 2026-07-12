@@ -6,7 +6,12 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from ai_service.application.explanations import ExplanationApplication
 from ai_service.application.parsing import ParseApplication
+from ai_service.contracts.explanations import (
+    ExplainScheduleDecisionRequestDTO,
+    ExplainScheduleDecisionResultDTO,
+)
 from ai_service.contracts.parsing import (
     HealthResponseDTO,
     ParseInterruptionRequestDTO,
@@ -32,7 +37,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the AI service app from explicit settings."""
     configured_settings = settings or Settings()
     logger = configure_logging(configured_settings.log_level)
-    parser = ParseApplication(provider_from_settings(configured_settings))
+    provider = provider_from_settings(configured_settings)
+    parser = ParseApplication(provider)
+    explainer = ExplanationApplication(provider)
 
     app = FastAPI(
         title="planner-dayflex AI service",
@@ -41,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = configured_settings
     app.state.parser = parser
+    app.state.explainer = explainer
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(
@@ -76,6 +84,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Return an editable interruption proposal or explicit fallback."""
         result = parser.parse_interruption(request)
         logger.info("AI parse completed", extra={"event": "parse_completed"})
+        return result
+
+    @app.post(
+        "/v1/explain-schedule-decision",
+        response_model=ExplainScheduleDecisionResultDTO,
+        responses={422: {"model": ValidationErrorResponseDTO}},
+    )
+    def explain_schedule_decision(
+        request: ExplainScheduleDecisionRequestDTO,
+    ) -> ExplainScheduleDecisionResultDTO:
+        """Return optional decision wording or explicit fallback."""
+        result = explainer.explain_schedule_decision(request)
+        logger.info(
+            "AI explanation completed", extra={"event": "explanation_completed"}
+        )
         return result
 
     logger.info("AI application created", extra={"event": "ai_started"})

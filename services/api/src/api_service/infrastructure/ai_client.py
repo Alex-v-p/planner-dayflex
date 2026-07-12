@@ -30,6 +30,18 @@ FallbackReason = Literal[
     "invalid_response",
     "unable_to_parse",
 ]
+ScheduleReasonCode = Literal[
+    "placed_in_earliest_valid_window",
+    "moved_after_interruption",
+    "split_across_available_windows",
+    "blocked_by_fixed_event",
+    "blocked_by_interruption",
+    "missed_before_current_time",
+    "insufficient_time_before_deadline",
+    "insufficient_remaining_day_time",
+    "designated_free_time",
+    "locked_time_overlap_merged",
+]
 DATE_ONLY_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -150,6 +162,84 @@ class ParseInterruptionResultDTO(BaseModel):
         return self
 
 
+class ScheduleDecisionFactsDTO(BaseModel):
+    """Approved schedule facts sent to services/ai."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_title: StrictStr | None = Field(default=None, min_length=1, max_length=200)
+    task_estimated_minutes: StrictInt | None = Field(default=None, gt=0, le=1440)
+    task_priority: StrictInt | None = Field(default=None, ge=1, le=5)
+    task_due_date: StrictStr | None = Field(default=None, min_length=10, max_length=10)
+    scheduled_start_at: datetime | None = None
+    scheduled_end_at: datetime | None = None
+    previous_start_at: datetime | None = None
+    previous_end_at: datetime | None = None
+    interruption_start_at: datetime | None = None
+    interruption_end_at: datetime | None = None
+    day_start_at: datetime | None = None
+    day_end_at: datetime | None = None
+    free_window_minutes: StrictInt | None = Field(default=None, ge=1, le=1440)
+    reason_details: dict[StrictStr, StrictStr] = Field(default_factory=dict)
+
+    @field_validator(
+        "scheduled_start_at",
+        "scheduled_end_at",
+        "previous_start_at",
+        "previous_end_at",
+        "interruption_start_at",
+        "interruption_end_at",
+        "day_start_at",
+        "day_end_at",
+    )
+    @classmethod
+    def validate_datetimes(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else _aware_datetime(value)
+
+    @field_validator("task_title")
+    @classmethod
+    def validate_task_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("task_title must not be blank")
+        return stripped
+
+
+class ExplainScheduleDecisionRequestDTO(BaseModel):
+    """Validated request shape for services/ai explanations."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: ScheduleReasonCode
+    deterministic_reason: StrictStr = Field(min_length=1, max_length=500)
+    facts: ScheduleDecisionFactsDTO
+
+
+class ExplainScheduleDecisionResultDTO(BaseModel):
+    """Validated schedule explanation result from services/ai."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["explained", "fallback"]
+    confidence: StrictFloat = Field(ge=0.0, le=1.0)
+    explanation: StrictStr | None = Field(default=None, min_length=1, max_length=700)
+    fallback_reason: FallbackReason | None
+    error_code: StrictStr | None = Field(default=None, min_length=1, max_length=80)
+
+    @model_validator(mode="after")
+    def validate_fallback_metadata(self) -> Self:
+        if self.status == "explained":
+            if self.explanation is None:
+                raise ValueError("explained results require explanation")
+            if self.fallback_reason is not None or self.error_code is not None:
+                raise ValueError("explained results cannot include fallback metadata")
+        elif self.fallback_reason is None:
+            raise ValueError("fallback results require fallback_reason")
+        return self
+
+
 class AiClient(Protocol):
     """Explicit port used by authenticated planning routes."""
 
@@ -160,6 +250,11 @@ class AiClient(Protocol):
         self, request: dict[str, object]
     ) -> ParseInterruptionResultDTO:
         """Return an editable interruption proposal or deterministic fallback."""
+
+    def explain_schedule_decision(
+        self, request: dict[str, object]
+    ) -> ExplainScheduleDecisionResultDTO:
+        """Return optional schedule wording or deterministic fallback."""
 
 
 class DisabledAiClient:
@@ -172,6 +267,11 @@ class DisabledAiClient:
         self, request: dict[str, object]
     ) -> ParseInterruptionResultDTO:
         return _interruption_fallback("ai_disabled", "ai_disabled")
+
+    def explain_schedule_decision(
+        self, request: dict[str, object]
+    ) -> ExplainScheduleDecisionResultDTO:
+        return _explanation_fallback("ai_disabled", "ai_disabled")
 
 
 class HttpAiClient:
@@ -199,11 +299,25 @@ class HttpAiClient:
             _interruption_fallback,
         )
 
+    def explain_schedule_decision(
+        self, request: dict[str, object]
+    ) -> ExplainScheduleDecisionResultDTO:
+        return self._post_result(
+            "/v1/explain-schedule-decision",
+            request,
+            ExplainScheduleDecisionResultDTO,
+            _explanation_fallback,
+        )
+
     def _post_result(
         self,
         path: str,
         request: dict[str, object],
-        result_type: type[ParseTaskResultDTO] | type[ParseInterruptionResultDTO],
+        result_type: (
+            type[ParseTaskResultDTO]
+            | type[ParseInterruptionResultDTO]
+            | type[ExplainScheduleDecisionResultDTO]
+        ),
         fallback_factory,
     ):
         try:
@@ -245,6 +359,18 @@ def _interruption_fallback(
         status="fallback",
         confidence=0.0,
         proposed_fields=InterruptionProposalDTO(),
+        fallback_reason=reason,
+        error_code=error_code,
+    )
+
+
+def _explanation_fallback(
+    reason: FallbackReason, error_code: str
+) -> ExplainScheduleDecisionResultDTO:
+    return ExplainScheduleDecisionResultDTO(
+        status="fallback",
+        confidence=0.0,
+        explanation=None,
         fallback_reason=reason,
         error_code=error_code,
     )
