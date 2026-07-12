@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+import logging
 from threading import Lock
 from zoneinfo import ZoneInfo
 from uuid import uuid4
@@ -31,7 +32,6 @@ from api_service.contracts.planning import (
     UserPreferencesRequest,
 )
 from api_service.infrastructure.ai_client import (
-    AiClient,
     ExplainScheduleDecisionResultDTO,
     ScheduleDecisionFactsDTO,
 )
@@ -52,6 +52,17 @@ from api_service.infrastructure.models import (
     TaskProgress,
     UserPreferences,
 )
+from api_service.contracts.worker_jobs import (
+    ScheduleExplanationJobEnvelope,
+    ScheduleExplanationJobPayload,
+)
+from api_service.infrastructure.worker_queue import (
+    WorkerQueueClient,
+    schedule_explanation_result_key,
+)
+
+
+LOGGER = logging.getLogger("api_service")
 
 
 class PlanningResourceNotFoundError(Exception):
@@ -496,6 +507,7 @@ class PlanningService:
         user_id: str,
         planning_day_id: str,
         scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
         *,
         scheduler_version: str,
     ) -> ScheduleSnapshot:
@@ -548,7 +560,11 @@ class PlanningService:
             session.rollback()
             raise
         session.refresh(snapshot)
-        return self.get_schedule_snapshot(session, user_id, snapshot.id)
+        snapshot = self.get_schedule_snapshot(session, user_id, snapshot.id)
+        self._enqueue_schedule_explanation_jobs(
+            session, user_id, snapshot, worker_queue_client
+        )
+        return snapshot
 
     def report_interruption_and_reschedule(
         self,
@@ -557,6 +573,7 @@ class PlanningService:
         planning_day_id: str,
         request: InterruptionCreateRequest,
         scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
         *,
         scheduler_version: str,
     ) -> ScheduleSnapshot:
@@ -632,7 +649,11 @@ class PlanningService:
             session.rollback()
             raise
         session.refresh(snapshot)
-        return self.get_schedule_snapshot(session, user_id, snapshot.id)
+        snapshot = self.get_schedule_snapshot(session, user_id, snapshot.id)
+        self._enqueue_schedule_explanation_jobs(
+            session, user_id, snapshot, worker_queue_client
+        )
+        return snapshot
 
     def get_latest_schedule_snapshot(
         self, session: Session, user_id: str, planning_day_id: str
@@ -675,7 +696,7 @@ class PlanningService:
         user_id: str,
         planning_day_id: str,
         decision_id: str,
-        ai_client: AiClient,
+        worker_queue_client: WorkerQueueClient,
     ) -> ScheduleExplanationResponse:
         decision = session.scalar(
             select(ScheduleDecision)
@@ -693,19 +714,34 @@ class PlanningService:
         snapshot = self.get_schedule_snapshot(session, user_id, decision.snapshot_id)
         selected_task = _task_for_decision(session, user_id, decision)
         deterministic_reason = _deterministic_decision_text(decision, selected_task)
-        if decision.reason_code not in ALLOWED_SCHEDULER_DECISION_REASON_CODES:
+        try:
+            cached_result = worker_queue_client.get_schedule_explanation_result(
+                decision.id
+            )
+        except Exception:
+            LOGGER.warning(
+                "Worker queue unavailable",
+                extra={"event": "worker_queue_unavailable"},
+            )
+            cached_result = None
+        if cached_result is not None:
+            result = cached_result
+        elif decision.reason_code not in ALLOWED_SCHEDULER_DECISION_REASON_CODES:
             result = _explanation_client_fallback(
                 "invalid_response", "unsupported_reason_code"
             )
         else:
-            result = ai_client.explain_schedule_decision(
-                {
-                    "reason_code": decision.reason_code,
-                    "deterministic_reason": deterministic_reason,
-                    "facts": _schedule_decision_facts(
-                        snapshot, decision, selected_task
-                    ).model_dump(mode="json"),
-                }
+            _safe_enqueue_schedule_explanation(
+                worker_queue_client,
+                _schedule_explanation_job_envelope(
+                    snapshot,
+                    decision,
+                    deterministic_reason,
+                    _schedule_decision_facts(snapshot, decision, selected_task),
+                ),
+            )
+            result = _explanation_client_fallback(
+                "service_unavailable", "worker_result_pending"
             )
 
         return ScheduleExplanationResponse(
@@ -717,6 +753,29 @@ class PlanningService:
             fallback_reason=result.fallback_reason,
             error_code=result.error_code,
         )
+
+    def _enqueue_schedule_explanation_jobs(
+        self,
+        session: Session,
+        user_id: str,
+        snapshot: ScheduleSnapshot,
+        worker_queue_client: WorkerQueueClient,
+    ) -> None:
+        """Queue optional wording jobs after the schedule snapshot is durable."""
+        for decision in snapshot.decisions:
+            if decision.reason_code not in ALLOWED_SCHEDULER_DECISION_REASON_CODES:
+                continue
+            selected_task = _task_for_decision(session, user_id, decision)
+            deterministic_reason = _deterministic_decision_text(decision, selected_task)
+            _safe_enqueue_schedule_explanation(
+                worker_queue_client,
+                _schedule_explanation_job_envelope(
+                    snapshot,
+                    decision,
+                    deterministic_reason,
+                    _schedule_decision_facts(snapshot, decision, selected_task),
+                ),
+            )
 
     def _get_fixed_event(
         self, session: Session, planning_day_id: str, fixed_event_id: str
@@ -1310,6 +1369,42 @@ def _schedule_decision_facts(
             if isinstance(key, str) and isinstance(value, str)
         },
     )
+
+
+def _schedule_explanation_job_envelope(
+    snapshot: ScheduleSnapshot,
+    decision: ScheduleDecision,
+    deterministic_reason: str,
+    facts: ScheduleDecisionFactsDTO,
+) -> ScheduleExplanationJobEnvelope:
+    """Build the worker contract without user IDs, prompts, or provider payloads."""
+    return ScheduleExplanationJobEnvelope(
+        idempotency_key=(
+            f"schedule-explanation:v1:{snapshot.id}:{decision.id}:"
+            f"{decision.reason_code}"
+        ),
+        payload=ScheduleExplanationJobPayload(
+            decision_id=decision.id,
+            reason_code=decision.reason_code,
+            deterministic_reason=deterministic_reason,
+            facts=facts.model_dump(mode="json"),
+            result_cache_key=schedule_explanation_result_key(decision.id),
+        ),
+    )
+
+
+def _safe_enqueue_schedule_explanation(
+    worker_queue_client: WorkerQueueClient,
+    envelope: ScheduleExplanationJobEnvelope,
+) -> None:
+    """Best-effort queue producer; planning never depends on worker availability."""
+    try:
+        worker_queue_client.enqueue_schedule_explanation(envelope)
+    except Exception:
+        LOGGER.warning(
+            "Worker queue unavailable",
+            extra={"event": "worker_queue_unavailable"},
+        )
 
 
 def _task_for_decision(
