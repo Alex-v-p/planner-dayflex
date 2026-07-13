@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,8 @@ from scheduler_service.app import app
 
 
 client = TestClient(app)
+REQUEST_ID_RE = re.compile(r"^pdreq\.[0-9a-f]{32}$")
+SESSION_TOKEN_SHAPED_REQUEST_ID = "J2rfVdJdyPldm9HSOCjHgheYEkKAD5tnMqj8I8-M6LU"
 
 
 def _interval(start: str, end: str) -> dict[str, str]:
@@ -92,6 +95,27 @@ def test_health_reports_liveness() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert "x-request-id" in response.headers
+    assert REQUEST_ID_RE.fullmatch(response.headers["x-request-id"])
+
+
+def test_ready_accepts_canonical_request_id() -> None:
+    request_id = "pdreq.0123456789abcdef0123456789abcdef"
+    response = client.get("/ready", headers={"X-Request-ID": request_id})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert response.headers["x-request-id"] == request_id
+
+
+def test_request_id_header_is_sanitized() -> None:
+    response = client.get(
+        "/health", headers={"X-Request-ID": SESSION_TOKEN_SHAPED_REQUEST_ID}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] != SESSION_TOKEN_SHAPED_REQUEST_ID
+    assert REQUEST_ID_RE.fullmatch(response.headers["x-request-id"])
 
 
 def test_schedule_day_returns_the_explicit_contract_and_reason_codes() -> None:

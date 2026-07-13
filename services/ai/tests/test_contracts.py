@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi.testclient import TestClient
 import pytest
 from pydantic import ValidationError
@@ -9,6 +11,10 @@ from pydantic import ValidationError
 from ai_service.app import create_app
 from ai_service.contracts.parsing import TaskProposalDTO
 from ai_service.infrastructure.config import AiProvider, Settings
+
+
+REQUEST_ID_RE = re.compile(r"^pdreq\.[0-9a-f]{32}$")
+SESSION_TOKEN_SHAPED_REQUEST_ID = "J2rfVdJdyPldm9HSOCjHgheYEkKAD5tnMqj8I8-M6LU"
 
 
 def client(provider_enabled: bool = True, provider: AiProvider = AiProvider.MOCK):
@@ -22,6 +28,30 @@ def test_health_reports_liveness_when_provider_is_disabled() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert "x-request-id" in response.headers
+    assert REQUEST_ID_RE.fullmatch(response.headers["x-request-id"])
+
+
+def test_ready_accepts_canonical_request_id_without_provider_details() -> None:
+    request_id = "pdreq.0123456789abcdef0123456789abcdef"
+    response = client(provider_enabled=False).get(
+        "/ready", headers={"X-Request-ID": request_id}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert response.headers["x-request-id"] == request_id
+
+
+def test_token_shaped_request_id_is_replaced_without_log_reflection(capsys) -> None:
+    response = client(provider_enabled=False).get(
+        "/ready", headers={"X-Request-ID": SESSION_TOKEN_SHAPED_REQUEST_ID}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] != SESSION_TOKEN_SHAPED_REQUEST_ID
+    assert REQUEST_ID_RE.fullmatch(response.headers["x-request-id"])
+    assert SESSION_TOKEN_SHAPED_REQUEST_ID not in capsys.readouterr().err
 
 
 def test_mock_provider_returns_valid_task_suggestion() -> None:

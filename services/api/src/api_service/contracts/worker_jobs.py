@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 WORKER_JOB_CONTRACT_VERSION = 1
 SCHEDULE_EXPLANATION_JOB_KIND = "schedule_explanation_enrichment"
+REQUEST_ID_PATTERN = r"^pdreq\.[0-9a-f]{32}$"
 
 
 class ScheduleExplanationJobPayload(BaseModel):
@@ -31,4 +32,9 @@ class ScheduleExplanationJobEnvelope(BaseModel):
     contract_version: Literal[1] = WORKER_JOB_CONTRACT_VERSION
     kind: Literal["schedule_explanation_enrichment"] = SCHEDULE_EXPLANATION_JOB_KIND
     idempotency_key: str = Field(min_length=1, max_length=200)
+    correlation_id: str | None = Field(
+        default=None,
+        pattern=REQUEST_ID_PATTERN,
+        description="Optional canonical request ID: pdreq.<32 lowercase hex chars>.",
+    )
     payload: ScheduleExplanationJobPayload

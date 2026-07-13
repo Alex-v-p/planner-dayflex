@@ -6,9 +6,18 @@ import json
 import logging
 from datetime import UTC, datetime
 
+from ai_service.correlation import current_request_id
+
 
 LOGGER_NAME = "ai_service"
-SAFE_EVENTS = frozenset({"ai_started", "parse_completed", "explanation_completed"})
+SAFE_EVENTS = frozenset(
+    {
+        "ai_started",
+        "parse_completed",
+        "explanation_completed",
+        "request_completed",
+    }
+)
 DEFAULT_EVENT = "log_event"
 UVICORN_LOGGER_NAMES = ("uvicorn.error", "uvicorn.access")
 
@@ -26,6 +35,9 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "event": event,
         }
+        request_id = current_request_id()
+        if request_id is not None:
+            payload["request_id"] = request_id
         return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 
 WORKER_JOB_CONTRACT_VERSION = 1
+REQUEST_ID_PATTERN = r"^pdreq\.[0-9a-f]{32}$"
 SUPPORTED_JOB_KINDS = {
     "test_job",
     "schedule_explanation_enrichment",
@@ -57,6 +58,11 @@ class WorkerJobEnvelope(BaseModel):
         "cleanup_stale_observations",
     ]
     idempotency_key: str = Field(min_length=1, max_length=200)
+    correlation_id: str | None = Field(
+        default=None,
+        pattern=REQUEST_ID_PATTERN,
+        description="Optional canonical request ID: pdreq.<32 lowercase hex chars>.",
+    )
     payload: dict[str, object]
 
 

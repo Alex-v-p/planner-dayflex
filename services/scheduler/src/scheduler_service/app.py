@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from scheduler_core import SchedulerValidationError, reschedule, schedule
 
+from .correlation import REQUEST_ID_HEADER, safe_request_id, set_request_id
 from .contracts import (
     HealthResponseDTO,
     RescheduleRequestDTO,
@@ -14,6 +15,10 @@ from .contracts import (
     ScheduleResultDTO,
     ValidationErrorResponseDTO,
 )
+from .logging_config import configure_logging
+
+
+logger = configure_logging()
 
 
 app = FastAPI(
@@ -21,6 +26,20 @@ app = FastAPI(
     version="0.1.0",
     description="Thin deterministic scheduler transport boundary without persistence.",
 )
+
+
+@app.middleware("http")
+async def correlate_request(request: Request, call_next):
+    """Attach a safe request ID to logs and responses."""
+    request_id = safe_request_id(request.headers.get(REQUEST_ID_HEADER))
+    set_request_id(request_id)
+    try:
+        response = await call_next(request)
+        response.headers[REQUEST_ID_HEADER] = request_id
+        logger.info("Scheduler request completed", extra={"event": "request_completed"})
+        return response
+    finally:
+        set_request_id(None)
 
 
 class SchedulerRequestError(Exception):
@@ -54,6 +73,12 @@ async def scheduler_validation_error_handler(
 @app.get("/health", response_model=HealthResponseDTO)
 def health() -> HealthResponseDTO:
     """Return a liveness response without checking deferred infrastructure."""
+    return HealthResponseDTO()
+
+
+@app.get("/ready", response_model=HealthResponseDTO)
+def ready() -> HealthResponseDTO:
+    """Report readiness for the dependency-free scheduler process."""
     return HealthResponseDTO()
 
 

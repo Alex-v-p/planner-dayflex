@@ -5,8 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 import json
 import logging
+import re
 
 import fakeredis
+import httpx
 import pytest
 from redis.exceptions import RedisError
 from rq import Queue, SimpleWorker
@@ -17,10 +19,25 @@ from worker_service.application.jobs import (
     RetryableWorkerJobError,
     process_job,
 )
+from worker_service.correlation import set_request_id
+from worker_service.infrastructure.ai_client import explain_schedule_decision
+from worker_service.logging_config import JsonFormatter
 from worker_service.infrastructure.observations import (
     OBSERVATION_PREFIX,
     RESULT_PREFIX,
 )
+
+
+REQUEST_ID_RE = re.compile(r"^pdreq\.[0-9a-f]{32}$")
+SESSION_TOKEN_SHAPED_REQUEST_ID = "J2rfVdJdyPldm9HSOCjHgheYEkKAD5tnMqj8I8-M6LU"
+
+
+@pytest.fixture(autouse=True)
+def clear_request_id() -> None:
+    """Keep request-correlation context from leaking between worker tests."""
+    set_request_id(None)
+    yield
+    set_request_id(None)
 
 
 def test_job_can_be_enqueued_consumed_once_and_observed() -> None:
@@ -234,6 +251,101 @@ def test_schedule_explanation_job_caches_ai_result_from_approved_job_facts(
     assert "result_cache_key" not in json.dumps(captured_request)
 
 
+def test_schedule_explanation_job_uses_correlation_id_for_logs_and_ai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = fakeredis.FakeRedis()
+    captured_base_url: dict[str, object] = {}
+    rendered_logs: list[str] = []
+    monkeypatch.setattr(jobs, "_current_redis", lambda: redis)
+    monkeypatch.setattr(jobs, "Settings", lambda: FakeSettings("http://ai.test"))
+
+    class CapturingHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            rendered_logs.append(self.format(record))
+
+    logger = logging.getLogger("worker_service")
+    logger.handlers.clear()
+    logger.setLevel(logging.INFO)
+    handler = CapturingHandler()
+    handler.setFormatter(JsonFormatter())
+    logger.addHandler(handler)
+
+    def explain(base_url: str | None, request: dict[str, object]) -> dict[str, object]:
+        captured_base_url["base_url"] = base_url
+        captured_base_url["request"] = request
+        return {
+            "status": "fallback",
+            "confidence": 0.0,
+            "explanation": None,
+            "fallback_reason": "service_unavailable",
+            "error_code": "ai_service_unavailable",
+        }
+
+    monkeypatch.setattr(jobs, "explain_schedule_decision", explain)
+    envelope = make_schedule_explanation_envelope("schedule-key-1")
+    envelope["correlation_id"] = "pdreq.0123456789abcdef0123456789abcdef"
+
+    result = process_job(envelope)
+
+    assert result == {"status": "completed"}
+    assert captured_base_url["base_url"] == "http://ai.test"
+    rendered = rendered_logs[-1]
+    assert json.loads(rendered)["request_id"] == (
+        "pdreq.0123456789abcdef0123456789abcdef"
+    )
+    assert "Reply to inbox" not in rendered
+
+
+def test_schedule_explanation_job_replaces_unsafe_correlation_for_logs_and_ai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = fakeredis.FakeRedis()
+    captured_headers: dict[str, str] = {}
+    rendered_logs: list[str] = []
+    monkeypatch.setattr(jobs, "_current_redis", lambda: redis)
+    monkeypatch.setattr(jobs, "Settings", lambda: FakeSettings("http://ai.test"))
+
+    class CapturingHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            rendered_logs.append(self.format(record))
+
+    logger = logging.getLogger("worker_service")
+    logger.handlers.clear()
+    logger.setLevel(logging.INFO)
+    handler = CapturingHandler()
+    handler.setFormatter(JsonFormatter())
+    logger.addHandler(handler)
+
+    def fake_post(*args, **kwargs):
+        captured_headers.update(kwargs["headers"])
+        return httpx.Response(
+            200,
+            json={
+                "status": "fallback",
+                "confidence": 0.0,
+                "explanation": None,
+                "fallback_reason": "service_unavailable",
+                "error_code": "ai_service_unavailable",
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    envelope = make_schedule_explanation_envelope("schedule-key-unsafe-correlation")
+    envelope["correlation_id"] = SESSION_TOKEN_SHAPED_REQUEST_ID
+
+    result = process_job(envelope)
+
+    assert result == {"status": "completed"}
+    generated_request_id = captured_headers["X-Request-ID"]
+    assert generated_request_id != SESSION_TOKEN_SHAPED_REQUEST_ID
+    assert REQUEST_ID_RE.fullmatch(generated_request_id)
+    rendered = "\n".join(rendered_logs)
+    assert SESSION_TOKEN_SHAPED_REQUEST_ID not in rendered
+    assert SESSION_TOKEN_SHAPED_REQUEST_ID not in json.dumps(captured_headers)
+    assert json.loads(rendered_logs[-1])["request_id"] == generated_request_id
+
+
 def test_schedule_explanation_job_caches_ai_disabled_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -248,6 +360,35 @@ def test_schedule_explanation_job_caches_ai_disabled_fallback(
     assert cached["result"]["status"] == "fallback"
     assert cached["result"]["fallback_reason"] == "ai_disabled"
     assert cached["result"]["error_code"] == "ai_disabled"
+
+
+def test_worker_ai_client_propagates_current_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    def fake_post(*args, **kwargs):
+        captured["headers"] = kwargs["headers"]
+        return httpx.Response(
+            200,
+            json={
+                "status": "fallback",
+                "confidence": 0.0,
+                "explanation": None,
+                "fallback_reason": "service_unavailable",
+                "error_code": "ai_service_unavailable",
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    set_request_id("pdreq.0123456789abcdef0123456789abcdef")
+
+    result = explain_schedule_decision("http://ai.test", {"facts": {}})
+
+    assert result["status"] == "fallback"
+    assert captured["headers"] == {
+        "X-Request-ID": "pdreq.0123456789abcdef0123456789abcdef"
+    }
 
 
 def test_transient_redis_failure_after_claim_releases_claim_for_retry(

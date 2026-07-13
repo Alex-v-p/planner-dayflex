@@ -38,6 +38,15 @@ worker on the internal Redis queue network. The worker has no browser-facing
 port and no HTTP contract; its container health check verifies Redis
 reachability for the queue consumer process.
 
+The worker receives the API-owned canonical `X-Request-ID` as `correlation_id`
+in versioned job envelopes when one is available. Canonical IDs use the form
+`pdreq.<32 lowercase hex chars>`. Worker logs include only that canonical ID
+with allowlisted operational events, and worker-to-AI calls propagate it back as
+`X-Request-ID`. Missing correlation remains absent; non-canonical values are
+replaced without logging or sending the raw value. Job logs do not include
+payload bodies, task titles, Redis URLs, AI URLs, credentials, or provider
+payloads.
+
 ## Contracts and boundaries
 
 The API produces explicit version-1 job envelopes. The worker validates the
@@ -60,3 +69,5 @@ Service and container impact: introduces a separate non-critical worker runtime
 under `services/worker/`. TKT-025 adds its local-only Docker image and Compose
 wiring. The worker remains non-critical: API planning and recovery continue to
 use deterministic scheduler responses when Redis or the worker is unavailable.
+TKT-026 adds correlation propagation for existing worker jobs without changing
+Redis, queue, container, or service topology.

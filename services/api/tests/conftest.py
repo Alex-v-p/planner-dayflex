@@ -12,7 +12,18 @@ from fastapi.testclient import TestClient
 
 from api_service.app import create_app
 from api_service.config import Environment, Settings
+from api_service.correlation import set_request_id
 from api_service.database import Database
+
+
+@pytest.fixture(autouse=True)
+def clear_request_id() -> Iterator[None]:
+    """Keep request-correlation context from leaking between tests."""
+    set_request_id(None)
+    try:
+        yield
+    finally:
+        set_request_id(None)
 
 
 @pytest.fixture

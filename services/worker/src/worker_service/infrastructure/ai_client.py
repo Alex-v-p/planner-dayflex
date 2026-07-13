@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from worker_service.correlation import REQUEST_ID_HEADER, current_request_id
+
 
 def explain_schedule_decision(
     base_url: str | None, request: dict[str, Any]
@@ -17,6 +19,7 @@ def explain_schedule_decision(
         response = httpx.post(
             f"{base_url.rstrip('/')}/v1/explain-schedule-decision",
             json=request,
+            headers=_correlation_headers(),
             timeout=2.0,
         )
     except httpx.TimeoutException:
@@ -42,3 +45,10 @@ def _fallback(reason: str, error_code: str) -> dict[str, Any]:
         "fallback_reason": reason,
         "error_code": error_code,
     }
+
+
+def _correlation_headers() -> dict[str, str]:
+    request_id = current_request_id()
+    if request_id is None:
+        return {}
+    return {REQUEST_ID_HEADER: request_id}

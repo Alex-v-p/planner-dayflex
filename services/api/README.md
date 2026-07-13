@@ -79,18 +79,21 @@ events and do not roll back or block planning responses.
 
 `GET /health` returns `200` with `{"status":"ok"}` for process liveness. It
 does not run a database query: a database outage should not make a process
-liveness signal ambiguous. The explicit readiness convention is
-`app.state.database.check_connection()`, which executes `SELECT 1`; the
-isolated database integration test exercises it. A future operations ticket
-may expose that convention as a readiness endpoint once its contract and
-deployment use are scoped.
+liveness signal ambiguous. `GET /ready` checks the API-owned database boundary
+and scheduler readiness, returning only safe check names (`database` and
+`scheduler`) with `ok` or `unavailable`. It never returns database URLs,
+scheduler URLs, credentials, exception text, or request payloads.
 
-Logs are single-line JSON with only timestamp, severity, logger name, and a
-allowlisted service-controlled event name. The same formatter replaces the
-effective API, Uvicorn error, and Uvicorn access handlers, so access entries
-never render a request target or query string. Settings, URL values, request
-bodies, arbitrary event values, and arbitrary log-message text are not emitted
-by the formatter.
+Logs are single-line JSON with only timestamp, severity, logger name, an
+allowlisted service-controlled event name, and a canonical `request_id` when one
+is in scope. The same formatter replaces the effective API, Uvicorn error, and
+Uvicorn access handlers, so access entries never render a request target or
+query string. Settings, URL values, request bodies, arbitrary event values, and
+arbitrary log-message text are not emitted by the formatter. The API ignores
+browser-supplied `X-Request-ID` values, generates a fresh service-owned
+canonical ID in the form `pdreq.<32 lowercase hex chars>`, returns it in the
+response header, and propagates that ID only to internal scheduler, AI, and
+worker calls.
 
 ## Authentication
 
@@ -255,7 +258,9 @@ response and return `explanation: null` with stable fallback metadata.
 After schedule generation or interruption recovery commits a snapshot, the API
 also enqueues one schedule-explanation job per supported decision. Worker job
 payloads do not include raw prompts, provider payloads, user IDs, credentials,
-or URLs.
+or URLs. They do include the canonical request correlation ID when available so
+worker logs and worker-to-AI calls can be traced without exposing session IDs or
+private content.
 
 ## Migrations
 
@@ -302,6 +307,11 @@ and `users`.
 
 TKT-024 data-model impact: None. It adds no tables, fields, constraints,
 indexes, migrations, durable job storage, or audit tables.
+
+TKT-026 data-model impact: None. Operational hardening adds request
+correlation, readiness checks, smoke verification, and documentation only.
+Rollback is an application/configuration rollback; there is no schema downgrade,
+backfill, or data migration for this ticket.
 
 To validate local migration wiring against an explicitly configured PostgreSQL
 database, set the variables shown above and run:

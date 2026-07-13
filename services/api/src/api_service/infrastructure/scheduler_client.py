@@ -15,6 +15,8 @@ from pydantic import (
     model_validator,
 )
 
+from api_service.correlation import REQUEST_ID_HEADER, current_request_id
+
 
 class SchedulerUnavailableError(Exception):
     """Raised when the scheduler service cannot return a usable response."""
@@ -94,6 +96,9 @@ class SchedulerClient(Protocol):
     ) -> ScheduleResultDTO:
         """Return a revised deterministic scheduler result."""
 
+    def check_readiness(self) -> bool:
+        """Return whether the scheduler dependency is ready."""
+
 
 class HttpSchedulerClient:
     """Synchronous HTTP adapter for the scheduler service."""
@@ -126,6 +131,7 @@ class HttpSchedulerClient:
             response = httpx.post(
                 f"{self._base_url}{path}",
                 json=request,
+                headers=_correlation_headers(),
                 timeout=self._timeout,
             )
         except httpx.HTTPError as error:
@@ -141,6 +147,18 @@ class HttpSchedulerClient:
         except (ValueError, ValidationError) as error:
             raise SchedulerUnavailableError from error
 
+    def check_readiness(self) -> bool:
+        """Check scheduler readiness without exposing its URL or failure details."""
+        try:
+            response = httpx.get(
+                f"{self._base_url}/ready",
+                headers=_correlation_headers(),
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError:
+            return False
+        return response.status_code == 200
+
 
 def _parse_offset_datetime(value: str) -> datetime:
     try:
@@ -150,3 +168,10 @@ def _parse_offset_datetime(value: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("scheduler interval must include an explicit UTC offset")
     return parsed
+
+
+def _correlation_headers() -> dict[str, str]:
+    request_id = current_request_id()
+    if request_id is None:
+        return {}
+    return {REQUEST_ID_HEADER: request_id}

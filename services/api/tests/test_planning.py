@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
+import re
 from threading import Barrier
 from unittest.mock import Mock
 
@@ -18,6 +19,7 @@ from api_service.application.planning import (
 )
 from api_service.contracts.planning import TaskProgressCreateRequest
 from api_service.contracts.worker_jobs import ScheduleExplanationJobEnvelope
+from api_service.correlation import set_request_id
 from api_service.database import Database
 from api_service.domain.auth import SESSION_COOKIE_NAME
 from api_service.infrastructure.models import (
@@ -38,6 +40,8 @@ from api_service.infrastructure.ai_client import ExplainScheduleDecisionResultDT
 
 
 PASSWORD = "correct horse battery"
+REQUEST_ID_RE = re.compile(r"^pdreq\.[0-9a-f]{32}$")
+SESSION_TOKEN_SHAPED_REQUEST_ID = "J2rfVdJdyPldm9HSOCjHgheYEkKAD5tnMqj8I8-M6LU"
 
 
 def test_planning_preferences_and_days_are_user_scoped(
@@ -1834,6 +1838,8 @@ def test_reschedule_scheduler_failures_roll_back_interruption_and_snapshot(
 def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_request_id(None)
+
     class SuccessfulSchedulerResponse:
         status_code = 200
 
@@ -1872,10 +1878,14 @@ def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
             }
 
     def fake_post(
-        url: str, json: dict[str, object], timeout: float
+        url: str,
+        json: dict[str, object],
+        headers: dict[str, str],
+        timeout: float,
     ) -> SuccessfulSchedulerResponse:
         assert url == "http://scheduler.test/v1/schedule-day"
         assert json == {"request": "body"}
+        assert headers == {}
         assert timeout == 5.0
         return SuccessfulSchedulerResponse()
 
@@ -1895,6 +1905,8 @@ def test_http_scheduler_client_accepts_scheduler_style_success_envelope(
 def test_http_scheduler_client_posts_reschedule_day_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_request_id(None)
+
     class SuccessfulSchedulerResponse:
         status_code = 200
 
@@ -1914,13 +1926,17 @@ def test_http_scheduler_client_posts_reschedule_day_envelope(
             }
 
     def fake_post(
-        url: str, json: dict[str, object], timeout: float
+        url: str,
+        json: dict[str, object],
+        headers: dict[str, str],
+        timeout: float,
     ) -> SuccessfulSchedulerResponse:
         assert url == "http://scheduler.test/v1/reschedule-day"
         assert json == {
             "previous_result": {"items": []},
             "schedule_request": {"planning_day": "body"},
         }
+        assert headers == {}
         assert timeout == 5.0
         return SuccessfulSchedulerResponse()
 
@@ -1935,11 +1951,39 @@ def test_http_scheduler_client_posts_reschedule_day_envelope(
     assert [item.kind for item in result.items] == ["designated_free_time"]
 
 
+def test_http_scheduler_client_propagates_current_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ReadyResponse:
+        status_code = 200
+
+    captured: dict[str, object] = {}
+
+    def fake_get(url: str, headers: dict[str, str], timeout: float) -> ReadyResponse:
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return ReadyResponse()
+
+    monkeypatch.setattr(
+        "api_service.infrastructure.scheduler_client.httpx.get", fake_get
+    )
+    set_request_id("pdreq.0123456789abcdef0123456789abcdef")
+
+    assert HttpSchedulerClient("http://scheduler.test").check_readiness() is True
+    assert captured == {
+        "url": "http://scheduler.test/ready",
+        "headers": {"X-Request-ID": "pdreq.0123456789abcdef0123456789abcdef"},
+        "timeout": 5.0,
+    }
+
+
 def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
     client: TestClient,
     database: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    set_request_id(None)
     register(client, "alice")
     save_canonical_inputs(client)
     day = client.post(
@@ -1970,13 +2014,18 @@ def test_malformed_successful_scheduler_response_returns_503_without_snapshot(
             }
 
     def fake_post(
-        url: str, json: dict[str, object], timeout: float
+        url: str,
+        json: dict[str, object],
+        headers: dict[str, str],
+        timeout: float,
     ) -> MalformedSchedulerResponse:
         assert url == "http://scheduler.test/v1/schedule-day"
         assert json["planning_day"] == {
             "local_date": "2026-06-22",
             "time_zone": "Europe/Brussels",
         }
+        assert set(headers) == {"X-Request-ID"}
+        assert REQUEST_ID_RE.fullmatch(headers["X-Request-ID"])
         assert timeout == 5.0
         return MalformedSchedulerResponse()
 
@@ -2709,6 +2758,175 @@ def test_schedule_explanation_route_enqueues_safe_worker_job(
         "result_cache_key": f"worker:results:schedule-explanation:v1:{decision_id}",
     }
     assert "user" not in str(envelope).lower()
+
+
+def test_generate_plan_propagates_request_id_to_scheduler_and_worker(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    tasks = save_canonical_tasks(client)
+    worker_queue = CapturingWorkerQueueClient()
+    client.app.state.worker_queue_client = worker_queue
+    client.app.state.scheduler_client = HttpSchedulerClient("http://scheduler.test")
+    captured: dict[str, object] = {}
+
+    class SuccessfulSchedulerResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "items": [
+                    item("task", "08:00:00", "08:45:00", tasks["Reply to inbox"]),
+                    item("designated_free_time", "08:45:00", "18:00:00"),
+                ],
+                "decisions": [
+                    decision(
+                        "placed_in_earliest_valid_window",
+                        tasks["Reply to inbox"],
+                    ),
+                    decision("designated_free_time"),
+                ],
+                "warnings": [],
+            }
+
+    def fake_post(
+        url: str,
+        json: dict[str, object],
+        headers: dict[str, str],
+        timeout: float,
+    ) -> SuccessfulSchedulerResponse:
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        assert json["planning_day"] == {
+            "local_date": "2026-06-22",
+            "time_zone": "Europe/Brussels",
+        }
+        return SuccessfulSchedulerResponse()
+
+    monkeypatch.setattr(
+        "api_service.infrastructure.scheduler_client.httpx.post", fake_post
+    )
+
+    response = client.post(
+        f"/planning/days/{day['id']}/generate-plan",
+        headers={"X-Request-ID": SESSION_TOKEN_SHAPED_REQUEST_ID},
+    )
+
+    assert response.status_code == 201
+    generated_request_id = response.headers["x-request-id"]
+    assert generated_request_id != SESSION_TOKEN_SHAPED_REQUEST_ID
+    assert REQUEST_ID_RE.fullmatch(generated_request_id)
+    assert captured == {
+        "url": "http://scheduler.test/v1/schedule-day",
+        "headers": {"X-Request-ID": generated_request_id},
+        "timeout": 5.0,
+    }
+    assert worker_queue.enqueued
+    assert {envelope.correlation_id for envelope in worker_queue.enqueued} == {
+        generated_request_id
+    }
+
+
+def test_recovery_propagates_request_id_to_scheduler_and_worker(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = client.post(
+        "/planning/days",
+        json={"local_date": "2026-06-22", "time_zone": "Europe/Brussels"},
+    ).json()
+    save_canonical_fixed_events(client, day["id"])
+    tasks = save_canonical_tasks(client)
+    client.app.state.scheduler_client = CanonicalSchedulerClient()
+    first_snapshot = client.post(f"/planning/days/{day['id']}/generate-plan")
+    worker_queue = CapturingWorkerQueueClient()
+    client.app.state.worker_queue_client = worker_queue
+    client.app.state.scheduler_client = HttpSchedulerClient("http://scheduler.test")
+    captured: dict[str, object] = {}
+
+    class SuccessfulSchedulerResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "items": [
+                    {
+                        "kind": "interruption",
+                        "interval": {
+                            "start": "2026-06-22T14:00:00+02:00",
+                            "end": "2026-06-22T15:15:00+02:00",
+                        },
+                        "task_id": None,
+                    },
+                    item("task", "16:00:00", "16:30:00", tasks["Study notes"]),
+                    item("designated_free_time", "16:30:00", "18:00:00"),
+                ],
+                "decisions": [
+                    decision("moved_after_interruption", tasks["Study notes"]),
+                    decision("designated_free_time"),
+                ],
+                "warnings": [],
+            }
+
+    def fake_post(
+        url: str,
+        json: dict[str, object],
+        headers: dict[str, str],
+        timeout: float,
+    ) -> SuccessfulSchedulerResponse:
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        captured["schedule_request"] = json["schedule_request"]
+        assert json["previous_result"]["items"] != []
+        return SuccessfulSchedulerResponse()
+
+    monkeypatch.setattr(
+        "api_service.infrastructure.scheduler_client.httpx.post", fake_post
+    )
+
+    response = client.post(
+        f"/planning/days/{day['id']}/interruptions",
+        headers={"X-Request-ID": "client-recovery-req-123"},
+        json={
+            "start_at": "2026-06-22T14:00:00+02:00",
+            "end_at": "2026-06-22T15:15:00+02:00",
+            "time_zone": "Europe/Brussels",
+            "reported_at": "2026-06-22T14:00:00+02:00",
+        },
+    )
+
+    assert first_snapshot.status_code == 201
+    assert response.status_code == 201
+    generated_request_id = response.headers["x-request-id"]
+    assert generated_request_id != "client-recovery-req-123"
+    assert REQUEST_ID_RE.fullmatch(generated_request_id)
+    assert captured["url"] == "http://scheduler.test/v1/reschedule-day"
+    assert captured["headers"] == {"X-Request-ID": generated_request_id}
+    assert captured["timeout"] == 5.0
+    assert captured["schedule_request"]["interruptions"] == [
+        {
+            "id": response.json()["items"][0]["interruption_id"],
+            "interval": {
+                "start": "2026-06-22T14:00:00+02:00",
+                "end": "2026-06-22T15:15:00+02:00",
+            },
+        }
+    ]
+    assert worker_queue.enqueued
+    assert {envelope.correlation_id for envelope in worker_queue.enqueued} == {
+        generated_request_id
+    }
 
 
 def test_schedule_explanation_facts_distinguish_moved_task_segments(
