@@ -152,6 +152,7 @@ interface TimelineBlock {
   readonly label: string;
   readonly kindLabel: string;
   readonly marker: string;
+  readonly isCompact: boolean;
   readonly minutes: number;
   readonly topPercent: number;
   readonly heightPercent: number;
@@ -175,6 +176,7 @@ const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
   { label: "Month", value: "month", ariaLabel: "Show month overview" },
   { label: "Free time", value: "free", ariaLabel: "Show free-time finder" },
 ];
+const COMPACT_TIMELINE_BLOCK_MINUTES = 20;
 
 @Component({
   selector: "pdf-planner-workspace-page",
@@ -1051,9 +1053,10 @@ export class PlannerWorkspacePage implements OnInit {
     return formatKindLabel(item.kind);
   }
 
-  protected itemClass(kind: string): string {
-    const shared =
-      "absolute overflow-hidden rounded-md border border-mist-200 bg-white p-3 shadow-sm";
+  protected itemClass(kind: string, isCompact: boolean): string {
+    const shared = isCompact
+      ? "absolute overflow-hidden rounded-sm border border-mist-200 bg-white shadow-sm"
+      : "absolute overflow-hidden rounded-md border border-mist-200 bg-white p-3 shadow-sm";
 
     switch (kind) {
       case "task":
@@ -1102,6 +1105,7 @@ export class PlannerWorkspacePage implements OnInit {
         label: this.itemLabel(item, tasks, fixedEvents),
         kindLabel: this.kindLabel(item.kind),
         marker: itemMarker(item.kind),
+        isCompact: heightMinutes <= COMPACT_TIMELINE_BLOCK_MINUTES,
         minutes: heightMinutes,
         topPercent: (topMinutes / totalMinutes) * 100,
         heightPercent: (heightMinutes / totalMinutes) * 100,

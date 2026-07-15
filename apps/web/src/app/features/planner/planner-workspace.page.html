@@ -153,19 +153,30 @@
         view.data.fixedEvents, view.data.day?.time_zone ); track block.item.id)
         {
         <article
-          [class]="itemClass(block.item.kind)"
+          [class]="itemClass(block.item.kind, block.isCompact)"
           [style.top.%]="block.topPercent"
           [style.height.%]="block.heightPercent"
           [style.left.%]="block.leftPercent"
           [style.width.%]="block.widthPercent"
           [attr.data-kind]="block.item.kind"
+          [attr.data-compact]="block.isCompact ? 'true' : null"
           [attr.data-top-minutes]="block.topMinutes"
           [attr.data-height-minutes]="block.heightMinutes"
           [attr.data-lane-index]="block.laneIndex"
           [attr.data-lane-count]="block.laneCount"
           [attr.data-left-percent]="block.leftPercent"
           [attr.data-width-percent]="block.widthPercent"
+          [attr.aria-label]="block.label + ', ' + block.kindLabel + ', ' + formatDuration(block.minutes) + ', ' + formatScheduleTimeRange(block.item.start_at, block.item.end_at, view.data.day?.time_zone)"
         >
+          @if (block.isCompact) {
+          <div
+            class="flex h-full min-h-0 items-center gap-1 px-1 text-[0.625rem] font-semibold uppercase leading-none text-ink-700"
+            aria-hidden="true"
+          >
+            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-700"></span>
+            <span class="min-w-0 truncate">{{ block.marker }}</span>
+          </div>
+          } @else {
           <div
             class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"
           >
@@ -184,7 +195,33 @@
           <p class="mt-1 text-sm text-ink-600">
             {{ block.kindLabel }} &middot; {{ formatDuration(block.minutes) }}
           </p>
+          }
         </article>
+        }
+      </div>
+
+      <div
+        class="mt-4 grid gap-2 sm:grid-cols-2"
+        data-testid="timeline-detail-list"
+        aria-label="Timeline block details"
+      >
+        @for (block of timelineBlocks( snapshot, view.data.tasks,
+        view.data.fixedEvents, view.data.day?.time_zone ); track block.item.id)
+        {
+        <div class="rounded-md border border-mist-200 bg-white px-3 py-2">
+          <p class="text-sm font-medium text-ink-950">
+            <pdf-block-type-marker
+              [status]="block.item.kind"
+              [label]="block.marker"
+            />
+            <span class="ml-2">{{ block.label }}</span>
+          </p>
+          <p class="mt-1 text-xs font-medium text-ink-600">
+            {{ block.kindLabel }} &middot; {{ formatDuration(block.minutes) }}
+            &middot; {{ formatScheduleTimeRange( block.item.start_at,
+            block.item.end_at, view.data.day?.time_zone ) }}
+          </p>
+        </div>
         }
       </div>
 
