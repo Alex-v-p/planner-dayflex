@@ -101,7 +101,7 @@
     >
       <pdf-summary-value
         label="Snapshot"
-        [value]="headerView.data.snapshot ? 'v' + headerView.data.snapshot.version : headerView.data.day ? 'Inputs' : 'None'"
+        [value]="headerView.data.snapshot ? snapshotStateLabel(headerView.data.snapshot) : headerView.data.day ? 'Inputs' : 'None'"
       />
       <pdf-summary-value
         label="Scheduled work"
@@ -202,7 +202,7 @@
         </div>
         <pdf-status-chip
           [status]="view.data.snapshot ? 'planned' : view.data.day ? 'incomplete' : 'empty'"
-          [label]="view.data.snapshot ? snapshotItemCount(view.data.snapshot) + ' blocks' : view.data.day ? 'Saved inputs' : 'No saved day'"
+          [label]="view.data.snapshot ? snapshotStateLabel(view.data.snapshot) + ' - ' + snapshotItemCount(view.data.snapshot) + ' blocks' : view.data.day ? 'Saved inputs' : 'No saved day'"
         />
       </div>
 
@@ -248,6 +248,7 @@
             [attr.data-kind]="block.item.kind"
             [attr.data-item-id]="block.item.id"
             [attr.data-recovery]="block.recoveryLabel"
+            [attr.data-recovery-state]="block.recoveryState"
             [attr.data-completion]="block.completionLabel"
             [attr.data-compact]="block.isCompact ? 'true' : null"
             [attr.data-top-minutes]="block.topMinutes"
@@ -301,7 +302,10 @@
               {{ block.kindLabel }} &middot; {{ formatDuration(block.minutes) }}
               @if (block.recoveryLabel) {
               <span class="ml-2 inline-flex align-middle">
-                <pdf-status-chip status="moved" [label]="block.recoveryLabel" />
+                <pdf-status-chip
+                  [status]="block.recoveryState ?? 'empty'"
+                  [label]="block.recoveryLabel"
+                />
               </span>
               } @if (block.completionLabel) {
               <span class="ml-2 inline-flex align-middle">
@@ -491,7 +495,7 @@
           />
           <pdf-summary-value
             label="Snapshot"
-            [value]="view.data.snapshot ? 'v' + view.data.snapshot.version : 'None'"
+            [value]="view.data.snapshot ? snapshotStateLabel(view.data.snapshot) : 'None'"
           />
           <pdf-summary-value
             label="Scheduled work"
@@ -541,7 +545,7 @@
           />
           @if (selectedBlock.recoveryLabel) {
           <pdf-status-chip
-            status="moved"
+            [status]="selectedBlock.recoveryState ?? 'empty'"
             [label]="selectedBlock.recoveryLabel"
           />
           } @if (selectedBlock.completionLabel) {

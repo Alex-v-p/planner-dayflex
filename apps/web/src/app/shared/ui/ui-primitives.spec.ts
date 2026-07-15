@@ -67,6 +67,7 @@ describe("shared UI primitives", () => {
       "designated_free_time",
       "completed",
       "moved",
+      "split",
       "deferred",
     ]) {
       expect(source).toContain(`${status}:`);
@@ -117,6 +118,19 @@ describe("shared UI primitives", () => {
     expect(text(marker)).toContain("Free");
     expect(element(marker, "span")?.getAttribute("aria-label")).toContain(
       "Designated free time",
+    );
+  });
+
+  it("uses distinct accessible semantics for split recovery chips", async () => {
+    const chip = await render(StatusChipComponent, {
+      status: "split",
+      label: "Split",
+    });
+
+    expect(text(chip)).toContain("S");
+    expect(text(chip)).toContain("Split");
+    expect(element(chip, "span")?.getAttribute("aria-label")).toBe(
+      "Split: Split across available windows",
     );
   });
 

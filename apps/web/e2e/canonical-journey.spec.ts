@@ -196,7 +196,11 @@ test("canonical recovery journey works with a stubbed API", async ({
     .getByTestId("day-workspace-header")
     .getByRole("button", { name: "Generate plan" })
     .click();
-  await expect(page.getByText("Generated schedule snapshot v1.")).toBeVisible();
+  await expect(
+    page
+      .locator("[aria-labelledby='recovery-title']")
+      .getByText("Generated schedule snapshot v1."),
+  ).toBeVisible();
   await expect(page.getByTestId("daily-timeline")).toContainText("Free");
 
   await page.locator("#progress-task").selectOption(task.id);
@@ -204,7 +208,11 @@ test("canonical recovery journey works with a stubbed API", async ({
   await page.locator("#progress-recorded").fill("2026-07-04T10:45");
   await page.locator("#progress-time-zone").fill("Europe/Brussels");
   await page.getByRole("button", { name: "Record progress" }).click();
-  await expect(page.getByText("Progress saved.")).toBeVisible();
+  await expect(
+    page
+      .locator("[aria-labelledby='progress-title']")
+      .getByText("Progress saved."),
+  ).toBeVisible();
   await expect(page.getByText("45 min completed")).toBeVisible();
 
   await page.locator("#interruption-start").fill("2026-07-04T14:00");
@@ -213,7 +221,9 @@ test("canonical recovery journey works with a stubbed API", async ({
   await page.locator("#interruption-reported").fill("2026-07-04T14:00");
   await page.getByRole("button", { name: "Submit interruption" }).click();
   await expect(
-    page.getByText("Revised schedule snapshot v2 is now shown."),
+    page
+      .locator("[aria-labelledby='interruption-title']")
+      .getByText("Revised schedule snapshot v2 is now shown."),
   ).toBeVisible();
   await expect(page.getByTestId("daily-timeline")).toContainText("Unavailable");
 

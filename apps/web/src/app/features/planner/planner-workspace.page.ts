@@ -115,6 +115,7 @@ type GeneratePlanState =
   | { readonly status: "error"; readonly message: string };
 
 type RecoveryMutationState = GeneratePlanState;
+type TimelineRecoveryState = "moved" | "split";
 
 type SuggestionState<T> =
   | { readonly status: "idle"; readonly message: string; readonly result: null }
@@ -158,6 +159,7 @@ interface TimelineBlock {
   readonly label: string;
   readonly kindLabel: string;
   readonly marker: string;
+  readonly recoveryState: TimelineRecoveryState | null;
   readonly recoveryLabel: string | null;
   readonly completionLabel: string | null;
   readonly isCompact: boolean;
@@ -267,12 +269,24 @@ export class PlannerWorkspacePage implements OnInit {
   protected readonly selectedScheduleItemId = signal<string | null>(null);
   protected readonly announcement = computed(() => {
     const state = this.state();
+    const interruptionState = this.interruptionState();
+    const progressState = this.progressState();
+    const generatePlanState = this.generatePlanState();
 
     if (state.status === "loading") {
       return `Loading planner workspace for ${formatDateLabel(state.selectedDate)}.`;
     }
 
     if (state.status === "ready") {
+      if (interruptionState.message) {
+        return interruptionState.message;
+      }
+      if (progressState.message) {
+        return progressState.message;
+      }
+      if (generatePlanState.message) {
+        return generatePlanState.message;
+      }
       return `Planner workspace loaded for ${formatDateLabel(state.selectedDate)}.`;
     }
 
@@ -1219,6 +1233,18 @@ export class PlannerWorkspacePage implements OnInit {
     return snapshot?.items.length ?? 0;
   }
 
+  protected snapshotStateLabel(snapshot: ScheduleSnapshot | null): string {
+    if (snapshot === null) {
+      return "No plan";
+    }
+
+    return snapshot.version > 1
+      ? snapshotHasRecoveryEvidence(snapshot)
+        ? `Revised plan v${snapshot.version}`
+        : `Generated plan v${snapshot.version}`
+      : `Initial plan v${snapshot.version}`;
+  }
+
   protected selectScheduleItem(itemId: string): void {
     this.selectedScheduleItemId.set(itemId);
   }
@@ -1254,6 +1280,7 @@ export class PlannerWorkspacePage implements OnInit {
         label: "No selected block",
         kindLabel: "No block",
         marker: "Block",
+        recoveryState: null,
         recoveryLabel: null,
         completionLabel: null,
         isCompact: false,
@@ -1281,7 +1308,7 @@ export class PlannerWorkspacePage implements OnInit {
           (decision) =>
             decision.task_id !== null &&
             decision.task_id === block.item.task_id &&
-            isBlockSafeTaskReasonCode(decision.reason_code),
+            isBlockReasonForTimelineBlock(decision.reason_code, block),
         )
         .map((decision) => this.decisionText(decision, tasks));
 
@@ -1399,6 +1426,7 @@ export class PlannerWorkspacePage implements OnInit {
       progress,
       timeZone,
     );
+    const taskRecoveryStates = recoveryStatesByTask(snapshot.decisions);
 
     return snapshot.items.map((item) => {
       const startMinutes = minutesFromIsoInZone(item.start_at, timeZone);
@@ -1407,14 +1435,23 @@ export class PlannerWorkspacePage implements OnInit {
       const heightMinutes = Math.max(1, endMinutes - startMinutes);
       const lanes = laneLayout.get(item.id) ?? { laneIndex: 0, laneCount: 1 };
       const widthPercent = 100 / lanes.laneCount;
+      const completionLabel = completedItemIds.has(item.id) ? "Done" : null;
+      const recoveryState =
+        item.kind === "task" &&
+        item.task_id !== null &&
+        completionLabel === null
+          ? (taskRecoveryStates.get(item.task_id) ?? null)
+          : null;
 
       return {
         item,
         label: this.itemLabel(item, tasks, fixedEvents),
         kindLabel: this.kindLabel(item.kind),
         marker: itemMarker(item.kind),
-        recoveryLabel: null,
-        completionLabel: completedItemIds.has(item.id) ? "Done" : null,
+        recoveryState,
+        recoveryLabel:
+          recoveryState === null ? null : recoveryLabelForState(recoveryState),
+        completionLabel,
         isCompact: heightMinutes <= COMPACT_TIMELINE_BLOCK_MINUTES,
         minutes: heightMinutes,
         topPercent: (topMinutes / totalMinutes) * 100,
@@ -2762,6 +2799,68 @@ function isBlockSafeTaskReasonCode(reasonCode: string): boolean {
     reasonCode === "placed_in_earliest_valid_window" ||
     reasonCode === "split_across_available_windows"
   );
+}
+
+function isBlockReasonForTimelineBlock(
+  reasonCode: string,
+  block: TimelineBlock,
+): boolean {
+  if (block.completionLabel !== null) {
+    return isBlockSafeTaskReasonCode(reasonCode);
+  }
+
+  return (
+    isBlockSafeTaskReasonCode(reasonCode) ||
+    reasonCode === "moved_after_interruption"
+  );
+}
+
+function snapshotHasRecoveryEvidence(snapshot: ScheduleSnapshot): boolean {
+  return (
+    snapshot.items.some((item) => item.kind === "interruption") ||
+    snapshot.decisions.some((decision) =>
+      isRecoveryReasonCode(decision.reason_code),
+    )
+  );
+}
+
+function isRecoveryReasonCode(reasonCode: string): boolean {
+  return (
+    reasonCode === "blocked_by_interruption" ||
+    reasonCode === "moved_after_interruption"
+  );
+}
+
+function recoveryStatesByTask(
+  decisions: readonly ScheduleDecision[],
+): ReadonlyMap<string, TimelineRecoveryState> {
+  const states = new Map<string, TimelineRecoveryState>();
+
+  for (const decision of decisions) {
+    if (decision.task_id === null) {
+      continue;
+    }
+
+    if (decision.reason_code === "moved_after_interruption") {
+      states.set(decision.task_id, "moved");
+    } else if (
+      decision.reason_code === "split_across_available_windows" &&
+      !states.has(decision.task_id)
+    ) {
+      states.set(decision.task_id, "split");
+    }
+  }
+
+  return states;
+}
+
+function recoveryLabelForState(state: TimelineRecoveryState): string {
+  switch (state) {
+    case "moved":
+      return "Moved";
+    case "split":
+      return "Split";
+  }
 }
 
 function validationErrorsFor(

@@ -6,6 +6,7 @@ export type PlannerStatusTreatment =
   | "designated_free_time"
   | "completed"
   | "moved"
+  | "split"
   | "deferred"
   | "planned"
   | "incomplete"
@@ -70,6 +71,13 @@ export const PLANNER_STATUS_TREATMENTS: Readonly<
     description: "Moved after interruption",
     chipClass: "border-indigo-500 bg-indigo-50 text-indigo-800",
     markerClass: "border-indigo-500 bg-indigo-50 text-indigo-800",
+  },
+  split: {
+    label: "Split",
+    cue: "S",
+    description: "Split across available windows",
+    chipClass: "border-sky-600 bg-sky-50 text-sky-800",
+    markerClass: "border-sky-600 bg-sky-50 text-sky-800",
   },
   deferred: {
     label: "Deferred",
