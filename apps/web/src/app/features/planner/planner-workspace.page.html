@@ -11,6 +11,7 @@
   <header
     class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-5"
     data-testid="day-workspace-header"
+    tabindex="-1"
   >
     <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_30rem] lg:items-start">
       <div>
@@ -948,129 +949,198 @@
           >
             Fixed events
           </h3>
-          @if (fixedEventForm().id) {
           <button
             type="button"
-            class="text-sm font-medium text-meadow-700 hover:text-meadow-600 focus-visible:shadow-focus"
-            (click)="resetFixedEventForm()"
+            class="inline-flex min-h-9 items-center rounded-md bg-meadow-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+            (click)="openNewFixedEventEditor()"
+            data-editor-trigger="fixed-event-add"
           >
-            New event
+            Add event
           </button>
-          }
         </div>
-        <form
-          class="mt-3 space-y-3 rounded-md border border-mist-200 p-4"
-          (submit)="$event.preventDefault(); submitFixedEvent()"
-          aria-label="Fixed event details"
+        @if (fixedEventEditorOpen()) {
+        <div
+          class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/30 p-4 sm:p-6"
+          role="presentation"
+          (keydown.escape)="cancelFixedEventEditor()"
         >
-          <div>
-            <label
-              for="fixed-event-title"
-              class="text-sm font-medium text-ink-800"
-            >
-              Title
-            </label>
-            <input
-              id="fixed-event-title"
-              name="fixed-event-title"
-              type="text"
-              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-              [ngModel]="fixedEventForm().title"
-              (ngModelChange)="updateFixedEventForm({ title: $event })"
-              [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'title') ? 'true' : null"
-              [attr.aria-describedby]="fieldError(fixedEventFormErrors(), 'title') ? 'fixed-event-title-error' : null"
-            />
-            @if (fieldError(fixedEventFormErrors(), "title")) {
-            <p
-              id="fixed-event-title-error"
-              class="mt-1 text-sm text-signal-700"
-            >
-              {{ fieldError(fixedEventFormErrors(), "title") }}
-            </p>
-            }
-          </div>
-          <div class="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label
-                for="fixed-event-start"
-                class="text-sm font-medium text-ink-800"
-              >
-                Start
-              </label>
-              <input
-                id="fixed-event-start"
-                name="fixed-event-start"
-                type="datetime-local"
-                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-                [ngModel]="fixedEventForm().startLocal"
-                (ngModelChange)="updateFixedEventForm({ startLocal: $event })"
-                [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'startLocal') ? 'true' : null"
-              />
-              @if (fieldError(fixedEventFormErrors(), "startLocal")) {
-              <p class="mt-1 text-sm text-signal-700">
-                {{ fieldError(fixedEventFormErrors(), "startLocal") }}
-              </p>
-              }
-            </div>
-            <div>
-              <label
-                for="fixed-event-end"
-                class="text-sm font-medium text-ink-800"
-              >
-                End
-              </label>
-              <input
-                id="fixed-event-end"
-                name="fixed-event-end"
-                type="datetime-local"
-                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-                [ngModel]="fixedEventForm().endLocal"
-                (ngModelChange)="updateFixedEventForm({ endLocal: $event })"
-                [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'endLocal') ? 'true' : null"
-              />
-              @if (fieldError(fixedEventFormErrors(), "endLocal")) {
-              <p class="mt-1 text-sm text-signal-700">
-                {{ fieldError(fixedEventFormErrors(), "endLocal") }}
-              </p>
-              }
-            </div>
-          </div>
-          <div>
-            <label
-              for="fixed-event-time-zone"
-              class="text-sm font-medium text-ink-800"
-            >
-              Time zone
-            </label>
-            <input
-              id="fixed-event-time-zone"
-              name="fixed-event-time-zone"
-              type="text"
-              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-              [ngModel]="fixedEventForm().timeZone"
-              (ngModelChange)="updateFixedEventForm({ timeZone: $event })"
-              [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'timeZone') ? 'true' : null"
-            />
-            @if (fieldError(fixedEventFormErrors(), "timeZone")) {
-            <p class="mt-1 text-sm text-signal-700">
-              {{ fieldError(fixedEventFormErrors(), "timeZone") }}
-            </p>
-            }
-          </div>
-          @if (fixedEventFormMessage()) {
-          <p class="text-sm text-signal-700" role="alert">
-            {{ fixedEventFormMessage() }}
-          </p>
-          }
-          <button
-            type="submit"
-            class="inline-flex min-h-10 items-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
-            [disabled]="busyAction() !== null"
+          <div
+            id="fixed-event-editor-dialog"
+            class="w-full max-w-xl rounded-lg border border-mist-200 bg-white p-4 shadow-lg sm:p-5"
+            role="dialog"
+            tabindex="-1"
+            aria-modal="true"
+            aria-labelledby="fixed-event-editor-title"
+            (keydown)="trapEditorFocus($event, 'fixed-event-editor-dialog')"
           >
-            {{ fixedEventForm().id ? "Save event" : "Add event" }}
-          </button>
-        </form>
-        @if (view.data.fixedEvents.length > 0) {
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h4
+                  id="fixed-event-editor-title"
+                  class="text-base font-semibold text-ink-950"
+                >
+                  {{ fixedEventForm().id ? "Edit fixed event" : "Add fixed
+                  event" }}
+                </h4>
+                <p class="mt-1 text-sm leading-6 text-ink-600">
+                  Reserve time that the scheduler must work around.
+                </p>
+              </div>
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                (click)="cancelFixedEventEditor()"
+                aria-label="Close fixed event editor"
+              >
+                Close
+              </button>
+            </div>
+            <form
+              class="mt-3 space-y-3 rounded-md border border-mist-200 p-4"
+              (submit)="$event.preventDefault(); submitFixedEvent()"
+              aria-label="Fixed event details"
+            >
+              <div>
+                <label
+                  for="fixed-event-title"
+                  class="text-sm font-medium text-ink-800"
+                >
+                  Title
+                </label>
+                <input
+                  id="fixed-event-title"
+                  name="fixed-event-title"
+                  type="text"
+                  class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                  [ngModel]="fixedEventForm().title"
+                  (ngModelChange)="updateFixedEventForm({ title: $event })"
+                  [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'title') ? 'true' : null"
+                  [attr.aria-describedby]="fieldError(fixedEventFormErrors(), 'title') ? 'fixed-event-title-error' : null"
+                />
+                @if (fieldError(fixedEventFormErrors(), "title")) {
+                <p
+                  id="fixed-event-title-error"
+                  class="mt-1 text-sm text-signal-700"
+                >
+                  {{ fieldError(fixedEventFormErrors(), "title") }}
+                </p>
+                }
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label
+                    for="fixed-event-start"
+                    class="text-sm font-medium text-ink-800"
+                  >
+                    Start
+                  </label>
+                  <input
+                    id="fixed-event-start"
+                    name="fixed-event-start"
+                    type="datetime-local"
+                    class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                    [ngModel]="fixedEventForm().startLocal"
+                    (ngModelChange)="updateFixedEventForm({ startLocal: $event })"
+                    [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'startLocal') ? 'true' : null"
+                    [attr.aria-describedby]="fieldError(fixedEventFormErrors(), 'startLocal') ? 'fixed-event-start-error' : null"
+                  />
+                  @if (fieldError(fixedEventFormErrors(), "startLocal")) {
+                  <p
+                    id="fixed-event-start-error"
+                    class="mt-1 text-sm text-signal-700"
+                  >
+                    {{ fieldError(fixedEventFormErrors(), "startLocal") }}
+                  </p>
+                  }
+                </div>
+                <div>
+                  <label
+                    for="fixed-event-end"
+                    class="text-sm font-medium text-ink-800"
+                  >
+                    End
+                  </label>
+                  <input
+                    id="fixed-event-end"
+                    name="fixed-event-end"
+                    type="datetime-local"
+                    class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                    [ngModel]="fixedEventForm().endLocal"
+                    (ngModelChange)="updateFixedEventForm({ endLocal: $event })"
+                    [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'endLocal') ? 'true' : null"
+                    [attr.aria-describedby]="fieldError(fixedEventFormErrors(), 'endLocal') ? 'fixed-event-end-error' : null"
+                  />
+                  @if (fieldError(fixedEventFormErrors(), "endLocal")) {
+                  <p
+                    id="fixed-event-end-error"
+                    class="mt-1 text-sm text-signal-700"
+                  >
+                    {{ fieldError(fixedEventFormErrors(), "endLocal") }}
+                  </p>
+                  }
+                </div>
+              </div>
+              <div>
+                <label
+                  for="fixed-event-time-zone"
+                  class="text-sm font-medium text-ink-800"
+                >
+                  Time zone
+                </label>
+                <input
+                  id="fixed-event-time-zone"
+                  name="fixed-event-time-zone"
+                  type="text"
+                  class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                  [ngModel]="fixedEventForm().timeZone"
+                  (ngModelChange)="updateFixedEventForm({ timeZone: $event })"
+                  [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'timeZone') ? 'true' : null"
+                  [attr.aria-describedby]="fieldError(fixedEventFormErrors(), 'timeZone') ? 'fixed-event-time-zone-error' : null"
+                />
+                @if (fieldError(fixedEventFormErrors(), "timeZone")) {
+                <p
+                  id="fixed-event-time-zone-error"
+                  class="mt-1 text-sm text-signal-700"
+                >
+                  {{ fieldError(fixedEventFormErrors(), "timeZone") }}
+                </p>
+                }
+              </div>
+              @if (fixedEventFormMessage()) {
+              <p class="text-sm text-signal-700" role="alert">
+                {{ fixedEventFormMessage() }}
+              </p>
+              }
+              <div class="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  class="inline-flex min-h-10 items-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
+                  [disabled]="busyAction() !== null"
+                >
+                  {{ fixedEventForm().id ? "Save event" : "Add event" }}
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                  (click)="cancelFixedEventEditor()"
+                >
+                  Cancel
+                </button>
+                @if (fixedEventForm().id) {
+                <button
+                  type="button"
+                  class="inline-flex min-h-10 items-center rounded-md border border-signal-600 px-4 py-2 text-sm font-medium text-signal-700 transition hover:bg-mist-50 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
+                  (click)="deleteCurrentFixedEvent()"
+                  [disabled]="busyAction() !== null"
+                >
+                  Delete event
+                </button>
+                }
+              </div>
+            </form>
+          </div>
+        </div>
+        } @if (view.data.fixedEvents.length > 0) {
         <ul class="mt-3 space-y-3">
           @for (event of view.data.fixedEvents; track event.id) {
           <li class="rounded-md border border-mist-200 p-4">
@@ -1084,16 +1154,10 @@
                 type="button"
                 class="inline-flex min-h-9 items-center rounded-md border border-mist-200 px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
                 (click)="editFixedEvent(event)"
+                data-editor-trigger="fixed-event-edit"
+                [attr.data-item-id]="event.id"
               >
                 Edit
-              </button>
-              <button
-                type="button"
-                class="inline-flex min-h-9 items-center rounded-md border border-signal-600 px-3 py-1.5 text-sm font-medium text-signal-700 transition hover:bg-mist-50 focus-visible:shadow-focus"
-                (click)="deleteFixedEvent(event)"
-                [disabled]="busyAction() !== null"
-              >
-                Delete
               </button>
             </div>
           </li>
@@ -1116,270 +1180,358 @@
           >
             Flexible tasks
           </h3>
-          @if (taskForm().id) {
           <button
             type="button"
-            class="text-sm font-medium text-meadow-700 hover:text-meadow-600 focus-visible:shadow-focus"
-            (click)="resetTaskForm()"
+            class="inline-flex min-h-9 items-center rounded-md bg-meadow-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+            (click)="openNewTaskEditor()"
+            data-editor-trigger="task-add"
           >
-            New task
+            Add task
           </button>
-          }
         </div>
-        <form
-          class="mt-3 space-y-3 rounded-md border border-mist-200 p-4"
-          (submit)="$event.preventDefault(); submitTask()"
-          aria-label="Flexible task details"
+        @if (taskEditorOpen()) {
+        <div
+          class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/30 p-4 sm:p-6"
+          role="presentation"
+          (keydown.escape)="cancelTaskEditor()"
         >
-          <div class="rounded-md border border-mist-200 bg-mist-50 p-3">
-            <label for="task-ai-text" class="text-sm font-medium text-ink-800">
-              Describe a task
-            </label>
-            <textarea
-              id="task-ai-text"
-              name="task-ai-text"
-              rows="3"
-              class="mt-1 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-              [ngModel]="taskAiText()"
-              (ngModelChange)="updateTaskAiText($event)"
-            ></textarea>
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
-                (click)="suggestTask()"
-                [disabled]="busyAction() !== null || taskSuggestion().status === 'pending'"
-              >
-                Suggest details
-              </button>
-              @if (taskSuggestion().message) {
-              <span class="text-sm text-ink-600" role="status">
-                {{ taskSuggestion().message }}
-              </span>
-              }
-            </div>
-            @if (taskSuggestion().result; as suggestion) {
-            <div class="mt-2 rounded-md border border-mist-200 bg-white p-3">
-              <p class="text-sm text-ink-700">
-                Confidence {{ suggestion.confidence }}
-              </p>
-              @if (suggestion.status === "suggested") {
-              <button
-                type="button"
-                class="mt-2 inline-flex min-h-9 items-center rounded-md bg-meadow-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
-                (click)="applyTaskSuggestion(suggestion)"
-              >
-                Apply to form
-              </button>
-              } @else {
-              <p class="mt-1 text-sm text-ink-600">
-                {{ suggestion.fallback_reason }}
-              </p>
-              }
-            </div>
-            }
-          </div>
-          <div>
-            <label for="task-title" class="text-sm font-medium text-ink-800">
-              Title
-            </label>
-            <input
-              id="task-title"
-              name="task-title"
-              type="text"
-              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-              [ngModel]="taskForm().title"
-              (ngModelChange)="updateTaskForm({ title: $event })"
-              [attr.aria-invalid]="fieldError(taskFormErrors(), 'title') ? 'true' : null"
-            />
-            @if (fieldError(taskFormErrors(), "title")) {
-            <p class="mt-1 text-sm text-signal-700">
-              {{ fieldError(taskFormErrors(), "title") }}
-            </p>
-            }
-          </div>
-          <div class="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label
-                for="task-estimate"
-                class="text-sm font-medium text-ink-800"
-              >
-                Estimate minutes
-              </label>
-              <input
-                id="task-estimate"
-                name="task-estimate"
-                type="number"
-                min="1"
-                step="1"
-                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-                [ngModel]="taskForm().estimatedMinutes"
-                (ngModelChange)="updateTaskForm({ estimatedMinutes: $event })"
-                [attr.aria-invalid]="fieldError(taskFormErrors(), 'estimatedMinutes') ? 'true' : null"
-              />
-              @if (fieldError(taskFormErrors(), "estimatedMinutes")) {
-              <p class="mt-1 text-sm text-signal-700">
-                {{ fieldError(taskFormErrors(), "estimatedMinutes") }}
-              </p>
-              }
-            </div>
-            <div>
-              <label
-                for="task-priority"
-                class="text-sm font-medium text-ink-800"
-              >
-                Priority
-              </label>
-              <input
-                id="task-priority"
-                name="task-priority"
-                type="number"
-                min="1"
-                max="5"
-                step="1"
-                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-                [ngModel]="taskForm().priority"
-                (ngModelChange)="updateTaskForm({ priority: $event })"
-                [attr.aria-invalid]="fieldError(taskFormErrors(), 'priority') ? 'true' : null"
-              />
-              @if (fieldError(taskFormErrors(), "priority")) {
-              <p class="mt-1 text-sm text-signal-700">
-                {{ fieldError(taskFormErrors(), "priority") }}
-              </p>
-              }
-            </div>
-          </div>
-          <div class="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label
-                for="task-due-date"
-                class="text-sm font-medium text-ink-800"
-              >
-                Due date
-              </label>
-              <input
-                id="task-due-date"
-                name="task-due-date"
-                type="date"
-                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-                [ngModel]="taskForm().dueDate"
-                (ngModelChange)="updateTaskForm({ dueDate: $event })"
-                [attr.aria-invalid]="fieldError(taskFormErrors(), 'dueDate') ? 'true' : null"
-                [attr.aria-describedby]="fieldError(taskFormErrors(), 'dueDate') ? 'task-due-date-error' : null"
-              />
-              @if (fieldError(taskFormErrors(), "dueDate")) {
-              <p id="task-due-date-error" class="mt-1 text-sm text-signal-700">
-                {{ fieldError(taskFormErrors(), "dueDate") }}
-              </p>
-              }
-            </div>
-            <div>
-              <label
-                for="task-earliest"
-                class="text-sm font-medium text-ink-800"
-              >
-                Earliest start
-              </label>
-              <input
-                id="task-earliest"
-                name="task-earliest"
-                type="datetime-local"
-                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-                [ngModel]="taskForm().earliestStartLocal"
-                (ngModelChange)="updateTaskForm({ earliestStartLocal: $event })"
-                [attr.aria-invalid]="fieldError(taskFormErrors(), 'earliestStartLocal') ? 'true' : null"
-                [attr.aria-describedby]="fieldError(taskFormErrors(), 'earliestStartLocal') ? 'task-earliest-error' : null"
-              />
-              @if (fieldError(taskFormErrors(), "earliestStartLocal")) {
-              <p id="task-earliest-error" class="mt-1 text-sm text-signal-700">
-                {{ fieldError(taskFormErrors(), "earliestStartLocal") }}
-              </p>
-              }
-            </div>
-          </div>
-          <div>
-            <label
-              for="task-earliest-zone"
-              class="text-sm font-medium text-ink-800"
-            >
-              Earliest start time zone
-            </label>
-            <input
-              id="task-earliest-zone"
-              name="task-earliest-zone"
-              type="text"
-              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-              [ngModel]="taskForm().earliestStartTimeZone"
-              (ngModelChange)="updateTaskForm({ earliestStartTimeZone: $event })"
-              [attr.aria-invalid]="fieldError(taskFormErrors(), 'earliestStartTimeZone') ? 'true' : null"
-            />
-            @if (fieldError(taskFormErrors(), "earliestStartTimeZone")) {
-            <p class="mt-1 text-sm text-signal-700">
-              {{ fieldError(taskFormErrors(), "earliestStartTimeZone") }}
-            </p>
-            }
-          </div>
-          <div class="flex items-center gap-3">
-            <input
-              id="task-splitting"
-              name="task-splitting"
-              type="checkbox"
-              class="h-5 w-5 rounded border-mist-300 text-meadow-700 focus-visible:shadow-focus"
-              [ngModel]="taskForm().splittingAllowed"
-              (ngModelChange)="updateTaskForm({ splittingAllowed: $event })"
-              [attr.aria-invalid]="fieldError(taskFormErrors(), 'splittingAllowed') ? 'true' : null"
-              [attr.aria-describedby]="fieldError(taskFormErrors(), 'splittingAllowed') ? 'task-splitting-error' : null"
-            />
-            <label
-              for="task-splitting"
-              class="text-sm font-medium text-ink-800"
-            >
-              Allow splitting
-            </label>
-          </div>
-          @if (fieldError(taskFormErrors(), "splittingAllowed")) {
-          <p id="task-splitting-error" class="text-sm text-signal-700">
-            {{ fieldError(taskFormErrors(), "splittingAllowed") }}
-          </p>
-          }
-          <div>
-            <label
-              for="task-min-segment"
-              class="text-sm font-medium text-ink-800"
-            >
-              Minimum segment minutes
-            </label>
-            <input
-              id="task-min-segment"
-              name="task-min-segment"
-              type="number"
-              min="15"
-              step="1"
-              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-              [ngModel]="taskForm().minSegmentMinutes"
-              (ngModelChange)="updateTaskForm({ minSegmentMinutes: $event })"
-              [attr.aria-invalid]="fieldError(taskFormErrors(), 'minSegmentMinutes') ? 'true' : null"
-            />
-            @if (fieldError(taskFormErrors(), "minSegmentMinutes")) {
-            <p class="mt-1 text-sm text-signal-700">
-              {{ fieldError(taskFormErrors(), "minSegmentMinutes") }}
-            </p>
-            }
-          </div>
-          @if (taskFormMessage()) {
-          <p class="text-sm text-signal-700" role="alert">
-            {{ taskFormMessage() }}
-          </p>
-          }
-          <button
-            type="submit"
-            class="inline-flex min-h-10 items-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
-            [disabled]="busyAction() !== null"
+          <div
+            id="task-editor-dialog"
+            class="w-full max-w-2xl rounded-lg border border-mist-200 bg-white p-4 shadow-lg sm:p-5"
+            role="dialog"
+            tabindex="-1"
+            aria-modal="true"
+            aria-labelledby="task-editor-title"
+            (keydown)="trapEditorFocus($event, 'task-editor-dialog')"
           >
-            {{ taskForm().id ? "Save task" : "Add task" }}
-          </button>
-        </form>
-        @if (view.data.tasks.length > 0) {
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h4
+                  id="task-editor-title"
+                  class="text-base font-semibold text-ink-950"
+                >
+                  {{ taskForm().id ? "Edit flexible task" : "Add flexible task"
+                  }}
+                </h4>
+                <p class="mt-1 text-sm leading-6 text-ink-600">
+                  Add work that can move around fixed time.
+                </p>
+              </div>
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                (click)="cancelTaskEditor()"
+                aria-label="Close task editor"
+              >
+                Close
+              </button>
+            </div>
+            <form
+              class="mt-3 space-y-3 rounded-md border border-mist-200 p-4"
+              (submit)="$event.preventDefault(); submitTask()"
+              aria-label="Flexible task details"
+            >
+              <div>
+                <label
+                  for="task-title"
+                  class="text-sm font-medium text-ink-800"
+                >
+                  Title
+                </label>
+                <input
+                  id="task-title"
+                  name="task-title"
+                  type="text"
+                  class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                  [ngModel]="taskForm().title"
+                  (ngModelChange)="updateTaskForm({ title: $event })"
+                  [attr.aria-invalid]="fieldError(taskFormErrors(), 'title') ? 'true' : null"
+                  [attr.aria-describedby]="fieldError(taskFormErrors(), 'title') ? 'task-title-error' : null"
+                />
+                @if (fieldError(taskFormErrors(), "title")) {
+                <p id="task-title-error" class="mt-1 text-sm text-signal-700">
+                  {{ fieldError(taskFormErrors(), "title") }}
+                </p>
+                }
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label
+                    for="task-estimate"
+                    class="text-sm font-medium text-ink-800"
+                  >
+                    Estimate minutes
+                  </label>
+                  <input
+                    id="task-estimate"
+                    name="task-estimate"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                    [ngModel]="taskForm().estimatedMinutes"
+                    (ngModelChange)="updateTaskForm({ estimatedMinutes: $event })"
+                    [attr.aria-invalid]="fieldError(taskFormErrors(), 'estimatedMinutes') ? 'true' : null"
+                    [attr.aria-describedby]="fieldError(taskFormErrors(), 'estimatedMinutes') ? 'task-estimate-error' : null"
+                  />
+                  @if (fieldError(taskFormErrors(), "estimatedMinutes")) {
+                  <p
+                    id="task-estimate-error"
+                    class="mt-1 text-sm text-signal-700"
+                  >
+                    {{ fieldError(taskFormErrors(), "estimatedMinutes") }}
+                  </p>
+                  }
+                </div>
+                <div>
+                  <label
+                    for="task-priority"
+                    class="text-sm font-medium text-ink-800"
+                  >
+                    Priority
+                  </label>
+                  <input
+                    id="task-priority"
+                    name="task-priority"
+                    type="number"
+                    min="1"
+                    max="5"
+                    step="1"
+                    class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                    [ngModel]="taskForm().priority"
+                    (ngModelChange)="updateTaskForm({ priority: $event })"
+                    [attr.aria-invalid]="fieldError(taskFormErrors(), 'priority') ? 'true' : null"
+                    [attr.aria-describedby]="fieldError(taskFormErrors(), 'priority') ? 'task-priority-error' : null"
+                  />
+                  @if (fieldError(taskFormErrors(), "priority")) {
+                  <p
+                    id="task-priority-error"
+                    class="mt-1 text-sm text-signal-700"
+                  >
+                    {{ fieldError(taskFormErrors(), "priority") }}
+                  </p>
+                  }
+                </div>
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label
+                    for="task-due-date"
+                    class="text-sm font-medium text-ink-800"
+                  >
+                    Due date
+                  </label>
+                  <input
+                    id="task-due-date"
+                    name="task-due-date"
+                    type="date"
+                    class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                    [ngModel]="taskForm().dueDate"
+                    (ngModelChange)="updateTaskForm({ dueDate: $event })"
+                    [attr.aria-invalid]="fieldError(taskFormErrors(), 'dueDate') ? 'true' : null"
+                    [attr.aria-describedby]="fieldError(taskFormErrors(), 'dueDate') ? 'task-due-date-error' : null"
+                  />
+                  @if (fieldError(taskFormErrors(), "dueDate")) {
+                  <p
+                    id="task-due-date-error"
+                    class="mt-1 text-sm text-signal-700"
+                  >
+                    {{ fieldError(taskFormErrors(), "dueDate") }}
+                  </p>
+                  }
+                </div>
+                <div>
+                  <label
+                    for="task-earliest"
+                    class="text-sm font-medium text-ink-800"
+                  >
+                    Earliest start
+                  </label>
+                  <input
+                    id="task-earliest"
+                    name="task-earliest"
+                    type="datetime-local"
+                    class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                    [ngModel]="taskForm().earliestStartLocal"
+                    (ngModelChange)="updateTaskForm({ earliestStartLocal: $event })"
+                    [attr.aria-invalid]="fieldError(taskFormErrors(), 'earliestStartLocal') ? 'true' : null"
+                    [attr.aria-describedby]="fieldError(taskFormErrors(), 'earliestStartLocal') ? 'task-earliest-error' : null"
+                  />
+                  @if (fieldError(taskFormErrors(), "earliestStartLocal")) {
+                  <p
+                    id="task-earliest-error"
+                    class="mt-1 text-sm text-signal-700"
+                  >
+                    {{ fieldError(taskFormErrors(), "earliestStartLocal") }}
+                  </p>
+                  }
+                </div>
+              </div>
+              <div>
+                <label
+                  for="task-earliest-zone"
+                  class="text-sm font-medium text-ink-800"
+                >
+                  Earliest start time zone
+                </label>
+                <input
+                  id="task-earliest-zone"
+                  name="task-earliest-zone"
+                  type="text"
+                  class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                  [ngModel]="taskForm().earliestStartTimeZone"
+                  (ngModelChange)="updateTaskForm({ earliestStartTimeZone: $event })"
+                  [attr.aria-invalid]="fieldError(taskFormErrors(), 'earliestStartTimeZone') ? 'true' : null"
+                  [attr.aria-describedby]="fieldError(taskFormErrors(), 'earliestStartTimeZone') ? 'task-earliest-zone-error' : null"
+                />
+                @if (fieldError(taskFormErrors(), "earliestStartTimeZone")) {
+                <p
+                  id="task-earliest-zone-error"
+                  class="mt-1 text-sm text-signal-700"
+                >
+                  {{ fieldError(taskFormErrors(), "earliestStartTimeZone") }}
+                </p>
+                }
+              </div>
+              <div class="flex items-center gap-3">
+                <input
+                  id="task-splitting"
+                  name="task-splitting"
+                  type="checkbox"
+                  class="h-5 w-5 rounded border-mist-300 text-meadow-700 focus-visible:shadow-focus"
+                  [ngModel]="taskForm().splittingAllowed"
+                  (ngModelChange)="updateTaskForm({ splittingAllowed: $event })"
+                  [attr.aria-invalid]="fieldError(taskFormErrors(), 'splittingAllowed') ? 'true' : null"
+                  [attr.aria-describedby]="fieldError(taskFormErrors(), 'splittingAllowed') ? 'task-splitting-error' : null"
+                />
+                <label
+                  for="task-splitting"
+                  class="text-sm font-medium text-ink-800"
+                >
+                  Allow splitting
+                </label>
+              </div>
+              @if (fieldError(taskFormErrors(), "splittingAllowed")) {
+              <p id="task-splitting-error" class="text-sm text-signal-700">
+                {{ fieldError(taskFormErrors(), "splittingAllowed") }}
+              </p>
+              }
+              <div>
+                <label
+                  for="task-min-segment"
+                  class="text-sm font-medium text-ink-800"
+                >
+                  Minimum segment minutes
+                </label>
+                <input
+                  id="task-min-segment"
+                  name="task-min-segment"
+                  type="number"
+                  min="15"
+                  step="1"
+                  class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                  [ngModel]="taskForm().minSegmentMinutes"
+                  (ngModelChange)="updateTaskForm({ minSegmentMinutes: $event })"
+                  [attr.aria-invalid]="fieldError(taskFormErrors(), 'minSegmentMinutes') ? 'true' : null"
+                  [attr.aria-describedby]="fieldError(taskFormErrors(), 'minSegmentMinutes') ? 'task-min-segment-error' : null"
+                />
+                @if (fieldError(taskFormErrors(), "minSegmentMinutes")) {
+                <p
+                  id="task-min-segment-error"
+                  class="mt-1 text-sm text-signal-700"
+                >
+                  {{ fieldError(taskFormErrors(), "minSegmentMinutes") }}
+                </p>
+                }
+              </div>
+              <div class="rounded-md border border-mist-200 bg-mist-50 p-3">
+                <label
+                  for="task-ai-text"
+                  class="text-sm font-medium text-ink-800"
+                >
+                  Describe a task
+                </label>
+                <textarea
+                  id="task-ai-text"
+                  name="task-ai-text"
+                  rows="3"
+                  class="mt-1 w-full rounded-md border border-mist-300 bg-white px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                  [ngModel]="taskAiText()"
+                  (ngModelChange)="updateTaskAiText($event)"
+                ></textarea>
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    class="inline-flex min-h-9 items-center rounded-md border border-mist-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
+                    (click)="suggestTask()"
+                    [disabled]="busyAction() !== null || taskSuggestion().status === 'pending'"
+                  >
+                    Suggest details
+                  </button>
+                  @if (taskSuggestion().message) {
+                  <span class="text-sm text-ink-600" role="status">
+                    {{ taskSuggestion().message }}
+                  </span>
+                  }
+                </div>
+                @if (taskSuggestion().result; as suggestion) {
+                <div
+                  class="mt-2 rounded-md border border-mist-200 bg-white p-3"
+                >
+                  <p class="text-sm text-ink-700">
+                    Confidence {{ suggestion.confidence }}
+                  </p>
+                  @if (suggestion.status === "suggested") {
+                  <button
+                    type="button"
+                    class="mt-2 inline-flex min-h-9 items-center rounded-md bg-meadow-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+                    (click)="applyTaskSuggestion(suggestion)"
+                  >
+                    Apply to form
+                  </button>
+                  } @else {
+                  <p class="mt-1 text-sm text-ink-600">
+                    {{ suggestion.fallback_reason }}
+                  </p>
+                  }
+                </div>
+                }
+              </div>
+              @if (taskFormMessage()) {
+              <p class="text-sm text-signal-700" role="alert">
+                {{ taskFormMessage() }}
+              </p>
+              }
+              <div class="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  class="inline-flex min-h-10 items-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
+                  [disabled]="busyAction() !== null"
+                >
+                  {{ taskForm().id ? "Save task" : "Add task" }}
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                  (click)="cancelTaskEditor()"
+                >
+                  Cancel
+                </button>
+                @if (taskForm().id) {
+                <button
+                  type="button"
+                  class="inline-flex min-h-10 items-center rounded-md border border-signal-600 px-4 py-2 text-sm font-medium text-signal-700 transition hover:bg-mist-50 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
+                  (click)="deleteCurrentTask()"
+                  [disabled]="busyAction() !== null"
+                >
+                  Delete task
+                </button>
+                }
+              </div>
+            </form>
+          </div>
+        </div>
+        } @if (view.data.tasks.length > 0) {
         <ul class="mt-3 space-y-3">
           @for (task of view.data.tasks; track task.id) {
           <li class="rounded-md border border-mist-200 p-4">
@@ -1431,16 +1583,10 @@
                 type="button"
                 class="inline-flex min-h-9 items-center rounded-md border border-mist-200 px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
                 (click)="editTask(task)"
+                data-editor-trigger="task-edit"
+                [attr.data-item-id]="task.id"
               >
                 Edit
-              </button>
-              <button
-                type="button"
-                class="inline-flex min-h-9 items-center rounded-md border border-signal-600 px-3 py-1.5 text-sm font-medium text-signal-700 transition hover:bg-mist-50 focus-visible:shadow-focus"
-                (click)="deleteTask(task)"
-                [disabled]="busyAction() !== null"
-              >
-                Delete
               </button>
             </div>
           </li>

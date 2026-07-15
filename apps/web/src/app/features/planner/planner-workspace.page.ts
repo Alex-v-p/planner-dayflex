@@ -101,6 +101,12 @@ interface InterruptionFormModel {
 }
 
 type FormErrors = Readonly<Record<string, string>>;
+type EditorKind = "task" | "fixedEvent";
+type PendingMutationFocus = {
+  readonly loadingSelector: string;
+  readonly readySelector: string;
+  readonly fallbackReadySelector: string;
+};
 
 type GeneratePlanState =
   | { readonly status: "idle"; readonly message: string }
@@ -224,6 +230,8 @@ export class PlannerWorkspacePage implements OnInit {
   protected readonly interruptionFormErrors = signal<FormErrors>({});
   protected readonly taskFormMessage = signal("");
   protected readonly fixedEventFormMessage = signal("");
+  protected readonly taskEditorOpen = signal(false);
+  protected readonly fixedEventEditorOpen = signal(false);
   protected readonly taskAiText = signal("");
   protected readonly interruptionAiText = signal("");
   protected readonly taskSuggestion = signal<
@@ -276,6 +284,10 @@ export class PlannerWorkspacePage implements OnInit {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly reloadRequests = new Subject<string>();
+  private taskEditorReturnFocus: HTMLElement | null = null;
+  private fixedEventEditorReturnFocus: HTMLElement | null = null;
+  private pendingMutationFocus: PendingMutationFocus | null = null;
+  private taskSuggestionRequestVersion = 0;
 
   ngOnInit(): void {
     const routeDates = this.route.queryParamMap.pipe(
@@ -330,6 +342,7 @@ export class PlannerWorkspacePage implements OnInit {
           if (isBlankInterruptionForm(this.interruptionForm())) {
             this.interruptionForm.set(emptyInterruptionForm(timeZone));
           }
+          this.restorePendingMutationFocus();
         }
       });
   }
@@ -414,7 +427,56 @@ export class PlannerWorkspacePage implements OnInit {
     this.interruptionForm.update((form) => ({ ...form, ...patch }));
   }
 
+  protected trapEditorFocus(event: Event, dialogId: string): void {
+    const keyboardEvent = event as KeyboardEvent;
+    if (keyboardEvent.key !== "Tab") {
+      return;
+    }
+
+    const dialog = document.getElementById(dialogId);
+    if (dialog === null) {
+      return;
+    }
+
+    const focusableElements = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter(
+      (element) =>
+        element.offsetParent !== null || element === document.activeElement,
+    );
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements.at(-1);
+
+    if (firstElement === undefined || lastElement === undefined) {
+      keyboardEvent.preventDefault();
+      dialog.focus();
+      return;
+    }
+
+    if (keyboardEvent.shiftKey && document.activeElement === firstElement) {
+      keyboardEvent.preventDefault();
+      lastElement.focus();
+      return;
+    }
+
+    if (!keyboardEvent.shiftKey && document.activeElement === lastElement) {
+      keyboardEvent.preventDefault();
+      firstElement.focus();
+    }
+  }
+
+  protected openNewTaskEditor(): void {
+    this.rememberEditorReturnFocus("task");
+    this.resetTaskForm();
+    this.resetTaskSuggestion();
+    this.taskEditorOpen.set(true);
+    this.focusEditorControl("#task-title");
+  }
+
   protected editTask(task: Task): void {
+    this.rememberEditorReturnFocus("task");
     const timeZone =
       currentWorkspaceDay(this.state())?.time_zone ?? guessTimeZone();
     this.taskForm.set({
@@ -436,12 +498,21 @@ export class PlannerWorkspacePage implements OnInit {
     });
     this.taskFormErrors.set({});
     this.taskFormMessage.set("");
+    this.resetTaskSuggestion();
+    this.taskEditorOpen.set(true);
+    this.focusEditorControl("#task-title");
   }
 
   protected resetTaskForm(): void {
     this.taskForm.set(emptyTaskForm());
     this.taskFormErrors.set({});
     this.taskFormMessage.set("");
+  }
+
+  protected cancelTaskEditor(): void {
+    this.resetTaskForm();
+    this.resetTaskSuggestion();
+    this.closeTaskEditor();
   }
 
   protected submitTask(): void {
@@ -463,6 +534,7 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected suggestTask(): void {
+    const requestVersion = ++this.taskSuggestionRequestVersion;
     const text = this.taskAiText().trim();
     if (text === "") {
       this.taskSuggestion.set({
@@ -492,6 +564,9 @@ export class PlannerWorkspacePage implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
+          if (requestVersion !== this.taskSuggestionRequestVersion) {
+            return;
+          }
           this.taskSuggestion.set({
             status: result.status === "suggested" ? "ready" : "fallback",
             message: suggestionMessage(result),
@@ -499,6 +574,9 @@ export class PlannerWorkspacePage implements OnInit {
           });
         },
         error: () => {
+          if (requestVersion !== this.taskSuggestionRequestVersion) {
+            return;
+          }
           this.taskSuggestion.set({
             status: "fallback",
             message: fallbackMessage("service_unavailable"),
@@ -599,7 +677,25 @@ export class PlannerWorkspacePage implements OnInit {
     );
   }
 
+  protected deleteCurrentTask(): void {
+    const form = this.taskForm();
+    const task = this.currentTasks().find(
+      (candidate) => candidate.id === form.id,
+    );
+    if (task) {
+      this.deleteTask(task);
+    }
+  }
+
+  protected openNewFixedEventEditor(): void {
+    this.rememberEditorReturnFocus("fixedEvent");
+    this.resetFixedEventForm();
+    this.fixedEventEditorOpen.set(true);
+    this.focusEditorControl("#fixed-event-title");
+  }
+
   protected editFixedEvent(event: FixedEvent): void {
+    this.rememberEditorReturnFocus("fixedEvent");
     this.fixedEventForm.set({
       id: event.id,
       planningDayId: event.planning_day_id,
@@ -610,6 +706,8 @@ export class PlannerWorkspacePage implements OnInit {
     });
     this.fixedEventFormErrors.set({});
     this.fixedEventFormMessage.set("");
+    this.fixedEventEditorOpen.set(true);
+    this.focusEditorControl("#fixed-event-title");
   }
 
   protected resetFixedEventForm(): void {
@@ -618,6 +716,11 @@ export class PlannerWorkspacePage implements OnInit {
     );
     this.fixedEventFormErrors.set({});
     this.fixedEventFormMessage.set("");
+  }
+
+  protected cancelFixedEventEditor(): void {
+    this.resetFixedEventForm();
+    this.closeFixedEventEditor();
   }
 
   protected submitFixedEvent(): void {
@@ -667,6 +770,16 @@ export class PlannerWorkspacePage implements OnInit {
       this.plannerApi.deleteFixedEvent(event.planning_day_id, event.id),
       "fixedEvent",
     );
+  }
+
+  protected deleteCurrentFixedEvent(): void {
+    const form = this.fixedEventForm();
+    const event = this.currentFixedEvents().find(
+      (candidate) => candidate.id === form.id,
+    );
+    if (event) {
+      this.deleteFixedEvent(event);
+    }
   }
 
   protected generatePlan(): void {
@@ -1466,6 +1579,16 @@ export class PlannerWorkspacePage implements OnInit {
     }));
   }
 
+  private currentTasks(): readonly Task[] {
+    const state = this.state();
+    return state.status === "ready" ? state.data.tasks : [];
+  }
+
+  private currentFixedEvents(): readonly FixedEvent[] {
+    const state = this.state();
+    return state.status === "ready" ? state.data.fixedEvents : [];
+  }
+
   private runMutation<T>(
     action: string,
     request$: Observable<T>,
@@ -1475,11 +1598,15 @@ export class PlannerWorkspacePage implements OnInit {
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.busyAction.set(null);
+        this.pendingMutationFocus = mutationFocusTarget(action, formKind);
         if (formKind === "task") {
           this.resetTaskForm();
+          this.closeTaskEditor({ restoreFocus: false });
         } else {
           this.resetFixedEventForm();
+          this.closeFixedEventEditor({ restoreFocus: false });
         }
+        this.focusSelector(this.pendingMutationFocus.loadingSelector);
         this.reload();
       },
       error: (error: unknown) => {
@@ -1498,6 +1625,91 @@ export class PlannerWorkspacePage implements OnInit {
           this.fixedEventFormMessage.set(message);
         }
       },
+    });
+  }
+
+  private rememberEditorReturnFocus(kind: EditorKind): void {
+    const activeElement = document.activeElement;
+    const returnFocus =
+      activeElement instanceof HTMLElement ? activeElement : null;
+    if (kind === "task") {
+      this.taskEditorReturnFocus = returnFocus;
+    } else {
+      this.fixedEventEditorReturnFocus = returnFocus;
+    }
+  }
+
+  private closeTaskEditor(
+    options: { readonly restoreFocus: boolean } = { restoreFocus: true },
+  ): void {
+    this.taskSuggestionRequestVersion += 1;
+    this.taskEditorOpen.set(false);
+    if (options.restoreFocus) {
+      this.restoreEditorFocus("task");
+    } else {
+      this.taskEditorReturnFocus = null;
+    }
+  }
+
+  private closeFixedEventEditor(
+    options: { readonly restoreFocus: boolean } = { restoreFocus: true },
+  ): void {
+    this.fixedEventEditorOpen.set(false);
+    if (options.restoreFocus) {
+      this.restoreEditorFocus("fixedEvent");
+    } else {
+      this.fixedEventEditorReturnFocus = null;
+    }
+  }
+
+  private restoreEditorFocus(kind: EditorKind): void {
+    const target =
+      kind === "task"
+        ? this.taskEditorReturnFocus
+        : this.fixedEventEditorReturnFocus;
+    if (kind === "task") {
+      this.taskEditorReturnFocus = null;
+    } else {
+      this.fixedEventEditorReturnFocus = null;
+    }
+    queueMicrotask(() => target?.focus());
+  }
+
+  private focusEditorControl(selector: string): void {
+    this.focusSelector(selector);
+  }
+
+  private focusSelector(selector: string, fallbackSelector?: string): void {
+    queueMicrotask(() => {
+      const control =
+        document.querySelector(selector) ??
+        (fallbackSelector ? document.querySelector(fallbackSelector) : null);
+      if (control instanceof HTMLElement) {
+        control.focus();
+      }
+    });
+  }
+
+  private restorePendingMutationFocus(): void {
+    const pendingFocus = this.pendingMutationFocus;
+    if (pendingFocus === null) {
+      return;
+    }
+
+    this.pendingMutationFocus = null;
+    this.focusSelector(
+      pendingFocus.readySelector,
+      pendingFocus.fallbackReadySelector,
+    );
+  }
+
+  private resetTaskSuggestion(): void {
+    this.taskSuggestionRequestVersion += 1;
+    this.taskAiText.set("");
+    this.taskSuggestion.set({
+      status: "idle",
+      message: "",
+      result: null,
     });
   }
 }
@@ -2036,6 +2248,38 @@ function mutationErrorMessage(error: unknown): string {
   }
 
   return "We could not save that change. Try again when the API is available.";
+}
+
+function mutationFocusTarget(
+  action: string,
+  formKind: "task" | "fixedEvent",
+): PendingMutationFocus {
+  const itemId = action.slice(action.lastIndexOf(":") + 1);
+  const addSelector =
+    formKind === "task"
+      ? '[data-editor-trigger="task-add"]'
+      : '[data-editor-trigger="fixed-event-add"]';
+  const editSelector =
+    formKind === "task"
+      ? `[data-editor-trigger="task-edit"][data-item-id="${cssEscape(itemId)}"]`
+      : `[data-editor-trigger="fixed-event-edit"][data-item-id="${cssEscape(itemId)}"]`;
+
+  return {
+    loadingSelector: '[data-testid="day-workspace-header"]',
+    readySelector: action.includes(":update:") ? editSelector : addSelector,
+    fallbackReadySelector: addSelector,
+  };
+}
+
+function cssEscape(value: string): string {
+  const css = globalThis.CSS as
+    | { escape?: (input: string) => string }
+    | undefined;
+  if (css !== undefined && typeof css.escape === "function") {
+    return css.escape(value);
+  }
+
+  return value.replace(/["\\]/g, "\\$&");
 }
 
 function generatePlanErrorMessage(error: unknown): string {
