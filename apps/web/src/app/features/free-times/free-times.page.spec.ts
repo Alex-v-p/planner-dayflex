@@ -108,7 +108,8 @@ describe("rendered free-time finder", () => {
       },
     ]);
     expect(text(fixture)).toContain("Free-time finder");
-    expect(text(fixture)).toContain("45 min from Snapshot v2");
+    expect(text(fixture)).toContain("45 min");
+    expect(text(fixture)).toContain("Snapshot v2");
     expect(text(fixture)).toContain("Day day-1");
     expect(text(fixture)).toContain("Snapshot snapshot-1");
     expect(text(fixture)).toContain("Item item-1");

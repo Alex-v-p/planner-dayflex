@@ -1,0 +1,9 @@
+<div class="rounded-md border border-mist-200 bg-white px-3 py-2">
+  <p class="text-xs font-medium uppercase tracking-normal text-ink-600">
+    {{ label }}
+  </p>
+  <p class="mt-1 text-base font-semibold text-ink-950">{{ value }}</p>
+  @if (note) {
+    <p class="mt-1 text-xs text-ink-600">{{ note }}</p>
+  }
+</div>

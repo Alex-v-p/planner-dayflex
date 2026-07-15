@@ -646,7 +646,7 @@ describe("rendered planner workspace", () => {
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
-    expect(text(fixture)).toContain("Signed in as daily_user");
+    expect(text(fixture)).toContain("Day planner");
     expect(text(fixture)).toContain("Day timeline");
     expect(text(fixture)).toContain("Write report");
     expect(text(fixture)).toContain("Team meeting");
@@ -1230,7 +1230,7 @@ describe("rendered planner workspace", () => {
     const dateControlGroup = query(fixture, "#planner-date")?.parentElement;
 
     expect(query(fixture, "header")?.className).toContain("lg:grid-cols");
-    expect(query(fixture, "form")?.className).toContain("rounded-lg");
+    expect(query(fixture, "form")?.className).toContain("rounded-md");
     expect(timeline?.parentElement?.className).toContain("lg:grid-cols");
     expect(fixedEvents?.parentElement?.className).toContain("lg:grid-cols-2");
     expect(query(fixture, "#planner-date")?.className).toContain("w-full");

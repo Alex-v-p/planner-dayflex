@@ -21,7 +21,14 @@ import {
   tap,
 } from "rxjs";
 
-import { AuthSessionService } from "../../core/auth/auth-session.service";
+import { BlockTypeMarkerComponent } from "../../shared/ui/block-type-marker/block-type-marker.component";
+import { IconButtonComponent } from "../../shared/ui/icon-button/icon-button.component";
+import {
+  SegmentedControlComponent,
+  SegmentedControlOption,
+} from "../../shared/ui/segmented-control/segmented-control.component";
+import { StatusChipComponent } from "../../shared/ui/status-chip/status-chip.component";
+import { SummaryValueComponent } from "../../shared/ui/summary-value/summary-value.component";
 import {
   FixedEvent,
   FixedEventInputRequest,
@@ -162,14 +169,29 @@ interface ScheduleSummary {
   readonly deferredWorkCount: number;
 }
 
+const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
+  { label: "Day", value: "day", ariaLabel: "Show day planner" },
+  { label: "Week", value: "week", ariaLabel: "Show week overview" },
+  { label: "Month", value: "month", ariaLabel: "Show month overview" },
+  { label: "Free time", value: "free", ariaLabel: "Show free-time finder" },
+];
+
 @Component({
   selector: "pdf-planner-workspace-page",
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [
+    BlockTypeMarkerComponent,
+    FormsModule,
+    IconButtonComponent,
+    RouterLink,
+    SegmentedControlComponent,
+    StatusChipComponent,
+    SummaryValueComponent,
+  ],
   templateUrl: "./planner-workspace.page.html",
 })
 export class PlannerWorkspacePage implements OnInit {
-  protected readonly auth = inject(AuthSessionService);
+  protected readonly plannerViewOptions = PLANNER_VIEW_OPTIONS;
   protected readonly state = signal<WorkspaceLoadState>({
     status: "loading",
     selectedDate: todayLocalDate(),
@@ -303,6 +325,16 @@ export class PlannerWorkspacePage implements OnInit {
     });
   }
 
+  protected openToday(): void {
+    const nextDate = todayLocalDate();
+    this.selectedDate.set(nextDate);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { date: nextDate },
+      queryParamsHandling: "merge",
+    });
+  }
+
   protected moveDate(days: number): void {
     const nextDate = addDays(this.selectedDate(), days);
     this.selectedDate.set(nextDate);
@@ -311,6 +343,28 @@ export class PlannerWorkspacePage implements OnInit {
       queryParams: { date: nextDate },
       queryParamsHandling: "merge",
     });
+  }
+
+  protected switchPlannerView(view: string): void {
+    const date = this.selectedDate();
+    const route =
+      view === "week"
+        ? "/planner/week"
+        : view === "month"
+          ? "/planner/month"
+          : view === "free"
+            ? "/free-times"
+            : "/planner";
+    const queryParams =
+      view === "free"
+        ? {
+            start_date: date,
+            end_date: addDays(date, 6),
+            minimum_minutes: 30,
+          }
+        : { date };
+
+    void this.router.navigate([route], { queryParams });
   }
 
   protected reload(): void {
@@ -999,19 +1053,19 @@ export class PlannerWorkspacePage implements OnInit {
 
   protected itemClass(kind: string): string {
     const shared =
-      "absolute overflow-hidden rounded-md border border-mist-200 border-l-4 bg-white p-3 shadow-sm";
+      "absolute overflow-hidden rounded-md border border-mist-200 bg-white p-3 shadow-sm";
 
     switch (kind) {
       case "task":
-        return `${shared} border-meadow-600`;
+        return `${shared} border-l-4 border-l-meadow-600`;
       case "fixed_event":
-        return `${shared} border-signal-600`;
+        return `${shared} border-l-4 border-l-signal-600`;
       case "interruption":
-        return `${shared} border-rose-500`;
+        return `${shared} border-l-4 border-l-rose-500`;
       case "designated_free_time":
-        return `${shared} border-sky-500`;
+        return `${shared} border-l-4 border-l-sky-500`;
       default:
-        return `${shared} border-mist-300`;
+        return `${shared} border-l-4 border-l-mist-300`;
     }
   }
 

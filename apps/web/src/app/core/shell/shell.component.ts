@@ -17,7 +17,12 @@ import { SHELL_NAV_ITEMS } from "./nav-item";
 })
 export class ShellComponent implements OnInit {
   protected readonly auth = inject(AuthSessionService);
-  protected readonly navItems = SHELL_NAV_ITEMS;
+  protected readonly plannerNavItems = SHELL_NAV_ITEMS.filter(
+    (item) => item.section === "plan",
+  );
+  protected readonly systemNavItems = SHELL_NAV_ITEMS.filter(
+    (item) => item.section === "system",
+  );
   private readonly router = inject(Router);
 
   ngOnInit(): void {

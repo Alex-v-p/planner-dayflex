@@ -207,7 +207,7 @@ describe("rendered planner overviews", () => {
       router,
     );
 
-    buttonByText(fixture, "Next").click();
+    buttonByAriaLabel(fixture, "Next week").click();
     fixture.detectChanges();
 
     expect(router.navigations).toEqual([
@@ -386,19 +386,16 @@ function linkByText<T>(
   );
 }
 
-function buttonByText<T>(
+function buttonByAriaLabel<T>(
   fixture: ComponentFixture<T>,
-  buttonText: string,
+  label: string,
 ): HTMLButtonElement {
-  const buttons = Array.from(
-    (fixture.nativeElement as HTMLElement).querySelectorAll("button"),
-  );
-  const button = buttons.find((candidate) =>
-    candidate.textContent?.includes(buttonText),
+  const button = (fixture.nativeElement as HTMLElement).querySelector(
+    `button[aria-label="${label}"]`,
   );
 
   if (!button) {
-    throw new Error(`Could not find ${buttonText} button`);
+    throw new Error(`Could not find ${label} button`);
   }
 
   return button as HTMLButtonElement;

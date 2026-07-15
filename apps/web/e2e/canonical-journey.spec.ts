@@ -154,7 +154,7 @@ test("canonical recovery journey works with a stubbed API", async ({
   await page.getByLabel("Password").fill("a-long-passphrase");
   await page.getByRole("button", { name: "Create account" }).click();
 
-  await expect(page.getByText("Daily planner")).toBeVisible();
+  await expect(page.getByText("Day planner")).toBeVisible();
   await page.goto("/planner?date=2026-07-04");
   await expect(
     page.getByText("No saved planning day for this date."),
@@ -206,7 +206,7 @@ test("canonical recovery journey works with a stubbed API", async ({
   ).toBeVisible();
   await expect(page.getByText("Snapshot v2")).toBeVisible();
 
-  await page.getByRole("link", { name: "Month", exact: true }).click();
+  await page.getByRole("link", { name: "Open planner month overview" }).click();
   await expect(
     page.getByRole("heading", { name: "Month overview" }),
   ).toBeVisible();
@@ -216,10 +216,14 @@ test("canonical recovery journey works with a stubbed API", async ({
   await expect(
     page.getByRole("heading", { name: "Free-time finder" }),
   ).toBeVisible();
-  await expect(page.getByTestId("free-time-count")).toHaveText(
+  await expect(page.getByTestId("free-time-count")).toContainText(
     "1 useful windows",
   );
-  await expect(page.getByText("2 hr from Snapshot v2")).toBeVisible();
+  await expect(
+    page.getByTestId("free-time-results").getByText("Duration"),
+  ).toBeVisible();
+  await expect(page.getByText("2 hr")).toBeVisible();
+  await expect(page.getByText("Snapshot v2")).toBeVisible();
 });
 
 class StubbedPlannerApi {

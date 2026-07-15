@@ -12,6 +12,13 @@ import { FormsModule } from "@angular/forms";
 import { ActivatedRoute, Router, RouterLink } from "@angular/router";
 import { catchError, combineLatest, map, of, switchMap, tap } from "rxjs";
 
+import { IconButtonComponent } from "../../shared/ui/icon-button/icon-button.component";
+import {
+  SegmentedControlComponent,
+  SegmentedControlOption,
+} from "../../shared/ui/segmented-control/segmented-control.component";
+import { StatusChipComponent } from "../../shared/ui/status-chip/status-chip.component";
+import { SummaryValueComponent } from "../../shared/ui/summary-value/summary-value.component";
 import {
   PlannerApiService,
   PlanningDaySummary,
@@ -42,13 +49,28 @@ type OverviewState =
       readonly message: string;
     };
 
+const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
+  { label: "Day", value: "day", ariaLabel: "Show day planner" },
+  { label: "Week", value: "week", ariaLabel: "Show week overview" },
+  { label: "Month", value: "month", ariaLabel: "Show month overview" },
+  { label: "Free time", value: "free", ariaLabel: "Show free-time finder" },
+];
+
 @Component({
   selector: "pdf-planner-overview-page",
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [
+    FormsModule,
+    IconButtonComponent,
+    RouterLink,
+    SegmentedControlComponent,
+    StatusChipComponent,
+    SummaryValueComponent,
+  ],
   templateUrl: "./planner-overview.page.html",
 })
 export class PlannerOverviewPage implements OnInit {
+  protected readonly plannerViewOptions = PLANNER_VIEW_OPTIONS;
   protected readonly mode = signal<OverviewMode>("week");
   protected readonly anchorDate = signal(todayLocalDate());
   protected readonly state = signal<OverviewState>({
@@ -125,6 +147,16 @@ export class PlannerOverviewPage implements OnInit {
     });
   }
 
+  protected openToday(): void {
+    const nextDate = todayLocalDate();
+    this.anchorDate.set(nextDate);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { date: nextDate },
+      queryParamsHandling: "merge",
+    });
+  }
+
   protected moveRange(direction: -1 | 1): void {
     const nextDate =
       this.mode() === "week"
@@ -136,6 +168,28 @@ export class PlannerOverviewPage implements OnInit {
       queryParams: { date: nextDate },
       queryParamsHandling: "merge",
     });
+  }
+
+  protected switchPlannerView(view: string): void {
+    const date = this.anchorDate();
+    const route =
+      view === "week"
+        ? "/planner/week"
+        : view === "month"
+          ? "/planner/month"
+          : view === "free"
+            ? "/free-times"
+            : "/planner";
+    const queryParams =
+      view === "free"
+        ? {
+            start_date: date,
+            end_date: addDays(date, 6),
+            minimum_minutes: 30,
+          }
+        : { date };
+
+    void this.router.navigate([route], { queryParams });
   }
 
   protected retry(): void {

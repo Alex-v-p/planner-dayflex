@@ -8,58 +8,67 @@
     {{ announcement() }}
   </div>
 
-  <header class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-end">
+  <header class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_28rem] lg:items-end">
     <div>
       <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
-        Daily planner
+        Day planner
       </p>
-      <h1 class="mt-2 text-3xl font-semibold tracking-normal text-ink-950">
+      <h1
+        class="mt-2 text-2xl font-semibold tracking-normal text-ink-950 sm:text-3xl"
+      >
         {{ formatDateLabel(state().selectedDate) }}
       </h1>
-      <p class="mt-3 max-w-2xl text-base leading-7 text-ink-600">
-        Signed in as {{ auth.currentUser()?.username }}. This workspace shows
-        the selected day from your authenticated API session.
+      <p class="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
+        Build and recover one day at a time from saved fixed events, flexible
+        work, interruptions, buffers, and designated free time.
       </p>
     </div>
 
     <form
-      class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm"
+      class="rounded-md border border-mist-200 bg-white p-3 shadow-sm"
       (submit)="$event.preventDefault(); openSelectedDate()"
       aria-label="Select planning day"
     >
-      <label for="planner-date" class="text-sm font-medium text-ink-800">
-        Planning day
-      </label>
-      <div class="mt-3 flex flex-col gap-3 sm:flex-row">
+      <div
+        class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <pdf-segmented-control
+          [options]="plannerViewOptions"
+          selected="day"
+          ariaLabel="Planner view"
+          (selectedChange)="switchPlannerView($event)"
+        />
+        <div class="flex items-center gap-2">
+          <pdf-icon-button
+            label="Previous day"
+            glyph="&lt;"
+            (pressed)="moveDate(-1)"
+          />
+          <button
+            type="button"
+            class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 bg-white px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+            (click)="openToday()"
+          >
+            Today
+          </button>
+          <pdf-icon-button label="Next day" glyph=">" (pressed)="moveDate(1)" />
+        </div>
+      </div>
+      <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+        <label for="planner-date" class="sr-only">Planning day</label>
         <input
           id="planner-date"
           name="planner-date"
           type="date"
-          class="min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+          class="min-h-10 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
           [ngModel]="selectedDate()"
           (ngModelChange)="selectedDate.set($event)"
         />
         <button
           type="submit"
-          class="inline-flex min-h-11 items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+          class="inline-flex min-h-10 items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
         >
-          Open
-        </button>
-      </div>
-      <div class="mt-3 grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-          (click)="moveDate(-1)"
-        >
-          Previous day
-        </button>
-        <button
-          type="button"
-          class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-          (click)="moveDate(1)"
-        >
-          Next day
+          Open date
         </button>
       </div>
     </form>
@@ -128,9 +137,10 @@
             from the persisted schedule snapshot.
           </p>
         </div>
-        <span class="text-sm font-medium text-ink-600">
-          {{ snapshotItemCount(view.data.snapshot) }} blocks
-        </span>
+        <pdf-status-chip
+          [status]="view.data.snapshot ? 'planned' : view.data.day ? 'incomplete' : 'empty'"
+          [label]="view.data.snapshot ? snapshotItemCount(view.data.snapshot) + ' blocks' : view.data.day ? 'Saved inputs' : 'No saved day'"
+        />
       </div>
 
       @if (view.data.snapshot; as snapshot) {
@@ -160,11 +170,10 @@
             class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"
           >
             <p class="font-medium text-ink-950">
-              <span
-                class="text-xs font-semibold uppercase tracking-normal text-ink-600"
-              >
-                {{ block.marker }}
-              </span>
+              <pdf-block-type-marker
+                [status]="block.item.kind"
+                [label]="block.marker"
+              />
               <span class="ml-2">{{ block.label }}</span>
             </p>
             <p class="text-sm font-medium text-ink-600">
@@ -191,7 +200,8 @@
           @for (decision of movedDecisions(snapshot, view.data.tasks); track
           decision.id) {
           <li class="text-sm leading-6 text-ink-700">
-            <span class="font-medium text-ink-950"
+            <pdf-status-chip status="moved" />
+            <span class="ml-2 font-medium text-ink-950"
               >{{ decision.taskTitle }}</span
             >
             <span> - {{ decisionText(decision, view.data.tasks) }}</span>
@@ -216,7 +226,8 @@
           @for (decision of deferredDecisions(snapshot, view.data.tasks); track
           decision.id) {
           <li class="text-sm leading-6 text-ink-700">
-            <span class="font-medium text-ink-950"
+            <pdf-status-chip status="deferred" />
+            <span class="ml-2 font-medium text-ink-950"
               >{{ decision.taskTitle }}</span
             >
             <span> - {{ decisionText(decision, view.data.tasks) }}</span>
@@ -318,49 +329,32 @@
         <h2 id="summary-title" class="text-base font-semibold text-ink-950">
           Summary
         </h2>
-        <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <dt class="text-ink-600">Saved day</dt>
-            <dd class="mt-1 font-semibold text-ink-950">
-              {{ view.data.day ? "Yes" : "No" }}
-            </dd>
-          </div>
-          <div>
-            <dt class="text-ink-600">Snapshot</dt>
-            <dd class="mt-1 font-semibold text-ink-950">
-              {{ view.data.snapshot ? "v" + view.data.snapshot.version : "None"
-              }}
-            </dd>
-          </div>
-          <div>
-            <dt class="text-ink-600">Scheduled work</dt>
-            <dd class="mt-1 font-semibold text-ink-950">
-              {{
-              formatDuration(scheduleSummary(view.data.snapshot).scheduledWorkMinutes)
-              }}
-            </dd>
-          </div>
-          <div>
-            <dt class="text-ink-600">Free time</dt>
-            <dd class="mt-1 font-semibold text-ink-950">
-              {{
-              formatDuration(scheduleSummary(view.data.snapshot).freeTimeMinutes)
-              }}
-            </dd>
-          </div>
-          <div>
-            <dt class="text-ink-600">Deferred work</dt>
-            <dd class="mt-1 font-semibold text-ink-950">
-              {{ scheduleSummary(view.data.snapshot).deferredWorkCount }}
-            </dd>
-          </div>
-          <div>
-            <dt class="text-ink-600">Completed work</dt>
-            <dd class="mt-1 font-semibold text-ink-950">
-              {{ formatDuration(totalCompletedMinutes(view.data.progress)) }}
-            </dd>
-          </div>
-        </dl>
+        <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <pdf-summary-value
+            label="Saved day"
+            [value]="view.data.day ? 'Yes' : 'No'"
+          />
+          <pdf-summary-value
+            label="Snapshot"
+            [value]="view.data.snapshot ? 'v' + view.data.snapshot.version : 'None'"
+          />
+          <pdf-summary-value
+            label="Scheduled work"
+            [value]="formatDuration(scheduleSummary(view.data.snapshot).scheduledWorkMinutes)"
+          />
+          <pdf-summary-value
+            label="Free time"
+            [value]="formatDuration(scheduleSummary(view.data.snapshot).freeTimeMinutes)"
+          />
+          <pdf-summary-value
+            label="Deferred work"
+            [value]="'' + scheduleSummary(view.data.snapshot).deferredWorkCount"
+          />
+          <pdf-summary-value
+            label="Completed work"
+            [value]="formatDuration(totalCompletedMinutes(view.data.progress))"
+          />
+        </div>
       </section>
 
       <section
@@ -1205,10 +1199,8 @@
                 Mark complete
               </button>
               } @else {
-              <span
-                class="inline-flex min-h-9 items-center rounded-md border border-meadow-600 px-3 py-1.5 text-sm font-medium text-meadow-700"
-              >
-                Completed
+              <span class="inline-flex min-h-9 items-center">
+                <pdf-status-chip status="completed" label="Completed" />
               </span>
               }
               <button

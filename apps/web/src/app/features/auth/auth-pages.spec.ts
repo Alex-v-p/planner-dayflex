@@ -230,10 +230,7 @@ describe("rendered protected route authentication flow", () => {
     await harness.navigateByUrl("/planner");
 
     expect(TestBed.inject(Router).url).toBe("/planner");
-    expect(harness.routeNativeElement?.textContent).toContain("Daily planner");
-    expect(harness.routeNativeElement?.textContent).toContain(
-      "Signed in as daily_user",
-    );
+    expect(harness.routeNativeElement?.textContent).toContain("Day planner");
     expect(storageDump()).not.toContain("a-long-passphrase");
   });
 });
