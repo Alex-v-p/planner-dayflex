@@ -115,6 +115,7 @@ type GeneratePlanState =
   | { readonly status: "error"; readonly message: string };
 
 type RecoveryMutationState = GeneratePlanState;
+type TimelineRecoveryState = "moved" | "split";
 
 type SuggestionState<T> =
   | { readonly status: "idle"; readonly message: string; readonly result: null }
@@ -158,6 +159,7 @@ interface TimelineBlock {
   readonly label: string;
   readonly kindLabel: string;
   readonly marker: string;
+  readonly recoveryState: TimelineRecoveryState | null;
   readonly recoveryLabel: string | null;
   readonly completionLabel: string | null;
   readonly isCompact: boolean;
@@ -1237,7 +1239,9 @@ export class PlannerWorkspacePage implements OnInit {
     }
 
     return snapshot.version > 1
-      ? `Revised plan v${snapshot.version}`
+      ? snapshotHasRecoveryEvidence(snapshot)
+        ? `Revised plan v${snapshot.version}`
+        : `Generated plan v${snapshot.version}`
       : `Initial plan v${snapshot.version}`;
   }
 
@@ -1276,6 +1280,7 @@ export class PlannerWorkspacePage implements OnInit {
         label: "No selected block",
         kindLabel: "No block",
         marker: "Block",
+        recoveryState: null,
         recoveryLabel: null,
         completionLabel: null,
         isCompact: false,
@@ -1421,7 +1426,7 @@ export class PlannerWorkspacePage implements OnInit {
       progress,
       timeZone,
     );
-    const taskRecoveryLabels = recoveryLabelsByTask(snapshot.decisions);
+    const taskRecoveryStates = recoveryStatesByTask(snapshot.decisions);
 
     return snapshot.items.map((item) => {
       const startMinutes = minutesFromIsoInZone(item.start_at, timeZone);
@@ -1431,18 +1436,21 @@ export class PlannerWorkspacePage implements OnInit {
       const lanes = laneLayout.get(item.id) ?? { laneIndex: 0, laneCount: 1 };
       const widthPercent = 100 / lanes.laneCount;
       const completionLabel = completedItemIds.has(item.id) ? "Done" : null;
+      const recoveryState =
+        item.kind === "task" &&
+        item.task_id !== null &&
+        completionLabel === null
+          ? (taskRecoveryStates.get(item.task_id) ?? null)
+          : null;
 
       return {
         item,
         label: this.itemLabel(item, tasks, fixedEvents),
         kindLabel: this.kindLabel(item.kind),
         marker: itemMarker(item.kind),
+        recoveryState,
         recoveryLabel:
-          item.kind === "task" &&
-          item.task_id !== null &&
-          completionLabel === null
-            ? (taskRecoveryLabels.get(item.task_id) ?? null)
-            : null,
+          recoveryState === null ? null : recoveryLabelForState(recoveryState),
         completionLabel,
         isCompact: heightMinutes <= COMPACT_TIMELINE_BLOCK_MINUTES,
         minutes: heightMinutes,
@@ -2807,10 +2815,26 @@ function isBlockReasonForTimelineBlock(
   );
 }
 
-function recoveryLabelsByTask(
+function snapshotHasRecoveryEvidence(snapshot: ScheduleSnapshot): boolean {
+  return (
+    snapshot.items.some((item) => item.kind === "interruption") ||
+    snapshot.decisions.some((decision) =>
+      isRecoveryReasonCode(decision.reason_code),
+    )
+  );
+}
+
+function isRecoveryReasonCode(reasonCode: string): boolean {
+  return (
+    reasonCode === "blocked_by_interruption" ||
+    reasonCode === "moved_after_interruption"
+  );
+}
+
+function recoveryStatesByTask(
   decisions: readonly ScheduleDecision[],
-): ReadonlyMap<string, string> {
-  const labels = new Map<string, string>();
+): ReadonlyMap<string, TimelineRecoveryState> {
+  const states = new Map<string, TimelineRecoveryState>();
 
   for (const decision of decisions) {
     if (decision.task_id === null) {
@@ -2818,16 +2842,25 @@ function recoveryLabelsByTask(
     }
 
     if (decision.reason_code === "moved_after_interruption") {
-      labels.set(decision.task_id, "Moved");
+      states.set(decision.task_id, "moved");
     } else if (
       decision.reason_code === "split_across_available_windows" &&
-      !labels.has(decision.task_id)
+      !states.has(decision.task_id)
     ) {
-      labels.set(decision.task_id, "Split");
+      states.set(decision.task_id, "split");
     }
   }
 
-  return labels;
+  return states;
+}
+
+function recoveryLabelForState(state: TimelineRecoveryState): string {
+  switch (state) {
+    case "moved":
+      return "Moved";
+    case "split":
+      return "Split";
+  }
 }
 
 function validationErrorsFor(

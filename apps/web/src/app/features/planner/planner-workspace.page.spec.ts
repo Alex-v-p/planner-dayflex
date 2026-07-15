@@ -1038,6 +1038,7 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("Generate schedule");
     expect(dayHeaderText(fixture)).toContain("Generate plan");
     expect(dayHeaderSummaryText(fixture)).toContain("Snapshot");
+    expect(dayHeaderSummaryText(fixture)).toContain("Revised plan v2");
     expect(dayHeaderSummaryText(fixture)).toContain("v2");
     expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
     expect(dayHeaderSummaryText(fixture)).toContain("1 hr 30 min");
@@ -1071,6 +1072,17 @@ describe("rendered planner workspace", () => {
       "designated_free_time",
     ]);
     expect(announcement(fixture)).toContain("Planner workspace loaded");
+  });
+
+  it("labels later generated snapshots without recovery evidence as generated plans", async () => {
+    plannerApi.result = workspaceData({ snapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    expect(dayHeaderSummaryText(fixture)).toContain("Generated plan v2");
+    expect(dayHeaderSummaryText(fixture)).not.toContain("Revised plan");
+    expect(
+      query(fixture, "[aria-labelledby='timeline-title']")?.textContent,
+    ).toContain("Generated plan v2 - 2 blocks");
   });
 
   it("renders the documented canonical initial day with accurate times and summary values", async () => {
@@ -1215,6 +1227,11 @@ describe("rendered planner workspace", () => {
     ).toBe("Moved");
     expect(
       scheduleBlockById(fixture, "canonical-study-moved-item").getAttribute(
+        "data-recovery-state",
+      ),
+    ).toBe("moved");
+    expect(
+      scheduleBlockById(fixture, "canonical-study-moved-item").getAttribute(
         "data-completion",
       ),
     ).toBeNull();
@@ -1323,9 +1340,22 @@ describe("rendered planner workspace", () => {
     for (const itemId of ["split-study-morning", "split-study-afternoon"]) {
       const block = scheduleBlockById(fixture, itemId);
       expect(block.getAttribute("data-recovery")).toBe("Split");
+      expect(block.getAttribute("data-recovery-state")).toBe("split");
       expect(block.getAttribute("aria-label")).toContain("Split");
     }
 
+    expect(
+      query(
+        fixture,
+        "pdf-status-chip span[aria-label='Split: Split across available windows']",
+      ),
+    ).not.toBeNull();
+    expect(
+      query(
+        fixture,
+        "pdf-status-chip span[aria-label='Split: Moved after interruption']",
+      ),
+    ).toBeNull();
     expect(
       query(fixture, "[data-testid='daily-timeline']")?.textContent,
     ).toContain("Split");
