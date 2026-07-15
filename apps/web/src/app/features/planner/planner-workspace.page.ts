@@ -102,6 +102,11 @@ interface InterruptionFormModel {
 
 type FormErrors = Readonly<Record<string, string>>;
 type EditorKind = "task" | "fixedEvent";
+type PendingMutationFocus = {
+  readonly loadingSelector: string;
+  readonly readySelector: string;
+  readonly fallbackReadySelector: string;
+};
 
 type GeneratePlanState =
   | { readonly status: "idle"; readonly message: string }
@@ -281,6 +286,7 @@ export class PlannerWorkspacePage implements OnInit {
   private readonly reloadRequests = new Subject<string>();
   private taskEditorReturnFocus: HTMLElement | null = null;
   private fixedEventEditorReturnFocus: HTMLElement | null = null;
+  private pendingMutationFocus: PendingMutationFocus | null = null;
 
   ngOnInit(): void {
     const routeDates = this.route.queryParamMap.pipe(
@@ -335,6 +341,7 @@ export class PlannerWorkspacePage implements OnInit {
           if (isBlankInterruptionForm(this.interruptionForm())) {
             this.interruptionForm.set(emptyInterruptionForm(timeZone));
           }
+          this.restorePendingMutationFocus();
         }
       });
   }
@@ -420,7 +427,8 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected trapEditorFocus(event: Event, dialogId: string): void {
-    if (!(event instanceof KeyboardEvent)) {
+    const keyboardEvent = event as KeyboardEvent;
+    if (keyboardEvent.key !== "Tab") {
       return;
     }
 
@@ -441,19 +449,19 @@ export class PlannerWorkspacePage implements OnInit {
     const lastElement = focusableElements.at(-1);
 
     if (firstElement === undefined || lastElement === undefined) {
-      event.preventDefault();
+      keyboardEvent.preventDefault();
       dialog.focus();
       return;
     }
 
-    if (event.shiftKey && document.activeElement === firstElement) {
-      event.preventDefault();
+    if (keyboardEvent.shiftKey && document.activeElement === firstElement) {
+      keyboardEvent.preventDefault();
       lastElement.focus();
       return;
     }
 
-    if (!event.shiftKey && document.activeElement === lastElement) {
-      event.preventDefault();
+    if (!keyboardEvent.shiftKey && document.activeElement === lastElement) {
+      keyboardEvent.preventDefault();
       firstElement.focus();
     }
   }
@@ -1582,13 +1590,15 @@ export class PlannerWorkspacePage implements OnInit {
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.busyAction.set(null);
+        this.pendingMutationFocus = mutationFocusTarget(action, formKind);
         if (formKind === "task") {
           this.resetTaskForm();
-          this.closeTaskEditor();
+          this.closeTaskEditor({ restoreFocus: false });
         } else {
           this.resetFixedEventForm();
-          this.closeFixedEventEditor();
+          this.closeFixedEventEditor({ restoreFocus: false });
         }
+        this.focusSelector(this.pendingMutationFocus.loadingSelector);
         this.reload();
       },
       error: (error: unknown) => {
@@ -1621,14 +1631,26 @@ export class PlannerWorkspacePage implements OnInit {
     }
   }
 
-  private closeTaskEditor(): void {
+  private closeTaskEditor(
+    options: { readonly restoreFocus: boolean } = { restoreFocus: true },
+  ): void {
     this.taskEditorOpen.set(false);
-    this.restoreEditorFocus("task");
+    if (options.restoreFocus) {
+      this.restoreEditorFocus("task");
+    } else {
+      this.taskEditorReturnFocus = null;
+    }
   }
 
-  private closeFixedEventEditor(): void {
+  private closeFixedEventEditor(
+    options: { readonly restoreFocus: boolean } = { restoreFocus: true },
+  ): void {
     this.fixedEventEditorOpen.set(false);
-    this.restoreEditorFocus("fixedEvent");
+    if (options.restoreFocus) {
+      this.restoreEditorFocus("fixedEvent");
+    } else {
+      this.fixedEventEditorReturnFocus = null;
+    }
   }
 
   private restoreEditorFocus(kind: EditorKind): void {
@@ -1645,12 +1667,31 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   private focusEditorControl(selector: string): void {
+    this.focusSelector(selector);
+  }
+
+  private focusSelector(selector: string, fallbackSelector?: string): void {
     queueMicrotask(() => {
-      const control = document.querySelector(selector);
+      const control =
+        document.querySelector(selector) ??
+        (fallbackSelector ? document.querySelector(fallbackSelector) : null);
       if (control instanceof HTMLElement) {
         control.focus();
       }
     });
+  }
+
+  private restorePendingMutationFocus(): void {
+    const pendingFocus = this.pendingMutationFocus;
+    if (pendingFocus === null) {
+      return;
+    }
+
+    this.pendingMutationFocus = null;
+    this.focusSelector(
+      pendingFocus.readySelector,
+      pendingFocus.fallbackReadySelector,
+    );
   }
 
   private resetTaskSuggestion(): void {
@@ -2197,6 +2238,38 @@ function mutationErrorMessage(error: unknown): string {
   }
 
   return "We could not save that change. Try again when the API is available.";
+}
+
+function mutationFocusTarget(
+  action: string,
+  formKind: "task" | "fixedEvent",
+): PendingMutationFocus {
+  const itemId = action.slice(action.lastIndexOf(":") + 1);
+  const addSelector =
+    formKind === "task"
+      ? '[data-editor-trigger="task-add"]'
+      : '[data-editor-trigger="fixed-event-add"]';
+  const editSelector =
+    formKind === "task"
+      ? `[data-editor-trigger="task-edit"][data-item-id="${cssEscape(itemId)}"]`
+      : `[data-editor-trigger="fixed-event-edit"][data-item-id="${cssEscape(itemId)}"]`;
+
+  return {
+    loadingSelector: '[data-testid="day-workspace-header"]',
+    readySelector: action.includes(":update:") ? editSelector : addSelector,
+    fallbackReadySelector: addSelector,
+  };
+}
+
+function cssEscape(value: string): string {
+  const css = globalThis.CSS as
+    | { escape?: (input: string) => string }
+    | undefined;
+  if (css !== undefined && typeof css.escape === "function") {
+    return css.escape(value);
+  }
+
+  return value.replace(/["\\]/g, "\\$&");
 }
 
 function generatePlanErrorMessage(error: unknown): string {

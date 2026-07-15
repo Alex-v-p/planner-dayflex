@@ -1359,6 +1359,198 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.savedFixedEvents).toEqual([]);
   });
 
+  it("returns focus to recreated planning controls after successful editor mutations", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openNewTaskEditor(fixture);
+    setInput(fixture, "#task-title", "Draft outline");
+    setInput(fixture, "#task-estimate", "30");
+    setInput(fixture, "#task-priority", "3");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    await settleEditorMutation(fixture);
+
+    expect(document.activeElement).toBe(
+      query(fixture, '[data-editor-trigger="task-add"]'),
+    );
+
+    await openExistingTaskEditor(fixture);
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    await settleEditorMutation(fixture);
+
+    expect(document.activeElement).toBe(
+      query(
+        fixture,
+        '[data-editor-trigger="task-edit"][data-item-id="task-1"]',
+      ),
+    );
+
+    await openExistingTaskEditor(fixture);
+    buttonByText(fixture, "Delete task", "Flexible tasks").click();
+    await settleEditorMutation(fixture);
+
+    expect(document.activeElement).toBe(
+      query(fixture, '[data-editor-trigger="task-add"]'),
+    );
+
+    await openNewFixedEventEditor(fixture);
+    setInput(fixture, "#fixed-event-title", "Planning review");
+    setInput(fixture, "#fixed-event-start", "2026-07-04T11:00");
+    setInput(fixture, "#fixed-event-end", "2026-07-04T12:00");
+    setInput(fixture, "#fixed-event-time-zone", "Europe/Brussels");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    await settleEditorMutation(fixture);
+
+    expect(document.activeElement).toBe(
+      query(fixture, '[data-editor-trigger="fixed-event-add"]'),
+    );
+
+    await openExistingFixedEventEditor(fixture);
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    await settleEditorMutation(fixture);
+
+    expect(document.activeElement).toBe(
+      query(
+        fixture,
+        '[data-editor-trigger="fixed-event-edit"][data-item-id="event-1"]',
+      ),
+    );
+
+    await openExistingFixedEventEditor(fixture);
+    buttonByText(fixture, "Delete event", "Fixed events").click();
+    await settleEditorMutation(fixture);
+
+    expect(document.activeElement).toBe(
+      query(fixture, '[data-editor-trigger="fixed-event-add"]'),
+    );
+    confirm.mockRestore();
+  });
+
+  it("closes contextual editors with Escape and returns focus to the opener", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const addTaskButton = buttonByText(fixture, "Add task", "Flexible tasks");
+
+    addTaskButton.focus();
+    addTaskButton.click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(document.activeElement).toBe(query(fixture, "#task-title"));
+    query(fixture, "#task-title")?.dispatchEvent(
+      keyboardEvent("keydown", "Escape"),
+    );
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(query(fixture, "#task-editor-dialog")).toBeNull();
+    expect(document.activeElement).toBe(addTaskButton);
+    expect(plannerApi.createdTasks).toEqual([]);
+
+    const addEventButton = buttonByText(fixture, "Add event", "Fixed events");
+    addEventButton.focus();
+    addEventButton.click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(document.activeElement).toBe(query(fixture, "#fixed-event-title"));
+    query(fixture, "#fixed-event-title")?.dispatchEvent(
+      keyboardEvent("keydown", "Escape"),
+    );
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(query(fixture, "#fixed-event-editor-dialog")).toBeNull();
+    expect(document.activeElement).toBe(addEventButton);
+    expect(plannerApi.savedFixedEvents).toEqual([]);
+  });
+
+  it("traps Tab focus inside each contextual editor", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const offsetParentDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetParent",
+    );
+    Object.defineProperty(HTMLElement.prototype, "offsetParent", {
+      configurable: true,
+      get: () => document.body,
+    });
+
+    try {
+      await openNewTaskEditor(fixture);
+      const taskClose = query(
+        fixture,
+        "button[aria-label='Close task editor']",
+      ) as HTMLButtonElement;
+      const taskCancel = buttonByText(fixture, "Cancel", "Flexible tasks");
+
+      taskClose.focus();
+      const taskShiftTab = keyboardEvent("keydown", "Tab", {
+        shiftKey: true,
+      });
+      taskClose.dispatchEvent(taskShiftTab);
+      fixture.detectChanges();
+
+      expect(taskShiftTab.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(taskCancel);
+
+      taskCancel.focus();
+      const taskTab = keyboardEvent("keydown", "Tab");
+      taskCancel.dispatchEvent(taskTab);
+      fixture.detectChanges();
+
+      expect(taskTab.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(taskClose);
+
+      buttonByText(fixture, "Cancel", "Flexible tasks").click();
+      fixture.detectChanges();
+      await nextMicrotask();
+      fixture.detectChanges();
+
+      await openNewFixedEventEditor(fixture);
+      const eventClose = query(
+        fixture,
+        "button[aria-label='Close fixed event editor']",
+      ) as HTMLButtonElement;
+      const eventCancel = buttonByText(fixture, "Cancel", "Fixed events");
+
+      eventClose.focus();
+      const eventShiftTab = keyboardEvent("keydown", "Tab", {
+        shiftKey: true,
+      });
+      eventClose.dispatchEvent(eventShiftTab);
+      fixture.detectChanges();
+
+      expect(eventShiftTab.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(eventCancel);
+
+      eventCancel.focus();
+      const eventTab = keyboardEvent("keydown", "Tab");
+      eventCancel.dispatchEvent(eventTab);
+      fixture.detectChanges();
+
+      expect(eventTab.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(eventClose);
+    } finally {
+      if (offsetParentDescriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetParent",
+          offsetParentDescriptor,
+        );
+      } else {
+        delete (HTMLElement.prototype as { offsetParent?: unknown })
+          .offsetParent;
+      }
+    }
+  });
+
   it("shows a task suggestion and applies it only into editable fields", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const suggestionResponse = new Subject<unknown>();
@@ -2484,6 +2676,9 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain("Enter the minimum split segment.");
+    expect(inputAriaDescribedBy(fixture, "#task-min-segment")).toBe(
+      "task-min-segment-error",
+    );
     expect(plannerApi.createdTasks).toEqual([]);
   });
 
@@ -2499,6 +2694,35 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain("Priority must be from 1 to 5.");
+    expect(inputAriaDescribedBy(fixture, "#task-priority")).toBe(
+      "task-priority-error",
+    );
+    expect(plannerApi.createdTasks).toEqual([]);
+  });
+
+  it("associates task estimate and time-zone validation errors with their fields", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openNewTaskEditor(fixture);
+    setInput(fixture, "#task-title", "Draft outline");
+    setInput(fixture, "#task-estimate", "0");
+    setInput(fixture, "#task-priority", "3");
+    updateTaskFormForTest(fixture, {
+      earliestStartLocal: "2026-07-04T09:00",
+      earliestStartTimeZone: "Not/AZone",
+    });
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Estimate must be at least 1 minute.");
+    expect(text(fixture)).toContain("Use a valid IANA time zone.");
+    expect(inputAriaDescribedBy(fixture, "#task-estimate")).toBe(
+      "task-estimate-error",
+    );
+    expect(inputAriaDescribedBy(fixture, "#task-earliest-zone")).toBe(
+      "task-earliest-zone-error",
+    );
     expect(plannerApi.createdTasks).toEqual([]);
   });
 
@@ -2560,6 +2784,9 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("Use a date without a time.");
     expect(inputAriaInvalid(fixture, "#task-title")).toBe("true");
     expect(inputAriaInvalid(fixture, "#task-due-date")).toBe("true");
+    expect(inputValue(fixture, "#task-title")).toBe("Server rejected task");
+    expect(inputValue(fixture, "#task-estimate")).toBe("30");
+    expect(inputValue(fixture, "#task-priority")).toBe("3");
   });
 
   it("defaults a new fixed event to the selected planning day's time zone", async () => {
@@ -2622,6 +2849,32 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain("End time must be after start time.");
+    expect(inputAriaDescribedBy(fixture, "#fixed-event-end")).toBe(
+      "fixed-event-end-error",
+    );
+    expect(plannerApi.savedFixedEvents).toEqual([]);
+  });
+
+  it("associates fixed-event start and time-zone validation errors with their fields", async () => {
+    plannerApi.result = workspaceData({ fixedEvents: [], snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openNewFixedEventEditor(fixture);
+    setInput(fixture, "#fixed-event-title", "Invalid event");
+    setInput(fixture, "#fixed-event-start", "");
+    setInput(fixture, "#fixed-event-end", "2026-07-04T10:00");
+    setInput(fixture, "#fixed-event-time-zone", "Not/AZone");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Enter a valid start time.");
+    expect(text(fixture)).toContain("Use a valid IANA time zone.");
+    expect(inputAriaDescribedBy(fixture, "#fixed-event-start")).toBe(
+      "fixed-event-start-error",
+    );
+    expect(inputAriaDescribedBy(fixture, "#fixed-event-time-zone")).toBe(
+      "fixed-event-time-zone-error",
+    );
     expect(plannerApi.savedFixedEvents).toEqual([]);
   });
 
@@ -2629,17 +2882,12 @@ describe("rendered planner workspace", () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Edit", "Flexible tasks").click();
-    fixture.detectChanges();
-    await nextMicrotask();
-    fixture.detectChanges();
+    await openExistingTaskEditor(fixture);
     setInput(fixture, "#task-title", "Write final report");
     setInput(fixture, "#task-estimate", "75");
     setInput(fixture, "#task-priority", "4");
     formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
-    fixture.detectChanges();
-    await nextMicrotask();
-    fixture.detectChanges();
+    await settleEditorMutation(fixture);
 
     expect(plannerApi.updatedTasks).toEqual([
       {
@@ -2663,17 +2911,12 @@ describe("rendered planner workspace", () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Edit", "Fixed events").click();
-    fixture.detectChanges();
-    await nextMicrotask();
-    fixture.detectChanges();
+    await openExistingFixedEventEditor(fixture);
     setInput(fixture, "#fixed-event-title", "Planning review");
     setInput(fixture, "#fixed-event-start", "2026-07-04T11:00");
     setInput(fixture, "#fixed-event-end", "2026-07-04T12:00");
     formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
-    fixture.detectChanges();
-    await nextMicrotask();
-    fixture.detectChanges();
+    await settleEditorMutation(fixture);
 
     expect(plannerApi.updatedFixedEvents).toEqual([
       {
@@ -2698,11 +2941,9 @@ describe("rendered planner workspace", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Edit", "Flexible tasks").click();
-    fixture.detectChanges();
+    await openExistingTaskEditor(fixture);
     buttonByText(fixture, "Delete task", "Flexible tasks").click();
-    fixture.detectChanges();
-    await nextMicrotask();
+    await settleEditorMutation(fixture);
 
     expect(confirm).toHaveBeenCalledWith(
       'Delete "Write report" from active flexible tasks?',
@@ -2717,12 +2958,30 @@ describe("rendered planner workspace", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Edit", "Fixed events").click();
-    fixture.detectChanges();
+    await openExistingFixedEventEditor(fixture);
     buttonByText(fixture, "Delete event", "Fixed events").click();
 
     expect(plannerApi.deletedFixedEvents).toEqual([]);
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
+    confirm.mockRestore();
+  });
+
+  it("confirms deletion before removing a fixed event and refreshing", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openExistingFixedEventEditor(fixture);
+    buttonByText(fixture, "Delete event", "Fixed events").click();
+    await settleEditorMutation(fixture);
+
+    expect(confirm).toHaveBeenCalledWith(
+      'Delete "Team meeting" from this planning day?',
+    );
+    expect(plannerApi.deletedFixedEvents).toEqual([
+      { planningDayId: "day-1", fixedEventId: "event-1" },
+    ]);
+    expect(plannerApi.loadedDates).toEqual([selectedDate, selectedDate]);
     confirm.mockRestore();
   });
 
@@ -2734,8 +2993,7 @@ describe("rendered planner workspace", () => {
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Edit", "Fixed events").click();
-    fixture.detectChanges();
+    await openExistingFixedEventEditor(fixture);
     setInput(fixture, "#fixed-event-title", "Overlap");
     formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
     fixture.detectChanges();
@@ -2768,8 +3026,7 @@ describe("rendered planner workspace", () => {
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Edit", "Fixed events").click();
-    fixture.detectChanges();
+    await openExistingFixedEventEditor(fixture);
     setInput(fixture, "#fixed-event-title", "Server rejected event");
     formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
     fixture.detectChanges();
@@ -2783,6 +3040,17 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("End time must be after start time.");
     expect(inputAriaInvalid(fixture, "#fixed-event-time-zone")).toBe("true");
     expect(inputAriaInvalid(fixture, "#fixed-event-end")).toBe("true");
+    expect(inputAriaDescribedBy(fixture, "#fixed-event-time-zone")).toBe(
+      "fixed-event-time-zone-error",
+    );
+    expect(inputAriaDescribedBy(fixture, "#fixed-event-end")).toBe(
+      "fixed-event-end-error",
+    );
+    expect(inputValue(fixture, "#fixed-event-title")).toBe(
+      "Server rejected event",
+    );
+    expect(inputValue(fixture, "#fixed-event-start")).toBe("2026-07-04T09:00");
+    expect(inputValue(fixture, "#fixed-event-end")).toBe("2026-07-04T10:00");
   });
 });
 
@@ -3262,6 +3530,15 @@ function inputAriaInvalid<T>(
   );
 }
 
+function inputAriaDescribedBy<T>(
+  fixture: ComponentFixture<T>,
+  selector: string,
+): string | null {
+  return (query(fixture, selector) as HTMLInputElement).getAttribute(
+    "aria-describedby",
+  );
+}
+
 function updateTaskFormForTest(
   fixture: ComponentFixture<PlannerWorkspacePage>,
   patch: Record<string, unknown>,
@@ -3331,6 +3608,34 @@ async function openNewFixedEventEditor(
   fixture.detectChanges();
 }
 
+async function openExistingTaskEditor(
+  fixture: ComponentFixture<PlannerWorkspacePage>,
+): Promise<void> {
+  buttonByText(fixture, "Edit", "Flexible tasks").click();
+  fixture.detectChanges();
+  await nextMicrotask();
+  fixture.detectChanges();
+}
+
+async function openExistingFixedEventEditor(
+  fixture: ComponentFixture<PlannerWorkspacePage>,
+): Promise<void> {
+  buttonByText(fixture, "Edit", "Fixed events").click();
+  fixture.detectChanges();
+  await nextMicrotask();
+  fixture.detectChanges();
+}
+
+async function settleEditorMutation(
+  fixture: ComponentFixture<PlannerWorkspacePage>,
+): Promise<void> {
+  fixture.detectChanges();
+  await nextMicrotask();
+  fixture.detectChanges();
+  await nextMicrotask();
+  fixture.detectChanges();
+}
+
 function buttonsByText(
   region: Element | null,
   buttonText: string,
@@ -3388,6 +3693,19 @@ function timelineBlocks<T>(fixture: ComponentFixture<T>): Array<{
 
 function submitEvent(): SubmitEvent {
   return new SubmitEvent("submit", { bubbles: true, cancelable: true });
+}
+
+function keyboardEvent(
+  type: string,
+  key: string,
+  options: KeyboardEventInit = {},
+): KeyboardEvent {
+  return new KeyboardEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    key,
+    ...options,
+  });
 }
 
 function todayLocalDate(): string {
