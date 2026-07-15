@@ -1092,7 +1092,7 @@ describe("rendered planner workspace", () => {
       query(fixture, "[aria-labelledby='timeline-title']")?.textContent,
     ).toContain("Day bounds 08:00-18:00");
     expect(dayHeaderSummaryText(fixture)).toContain("Snapshot");
-    expect(dayHeaderSummaryText(fixture)).toContain("v1");
+    expect(dayHeaderSummaryText(fixture)).toContain("Initial plan v1");
     expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
     expect(dayHeaderSummaryText(fixture)).toContain("4 hr 15 min");
     expect(dayHeaderSummaryText(fixture)).toContain("Free time");
@@ -1165,6 +1165,7 @@ describe("rendered planner workspace", () => {
     const blocks = timelineBlocks(fixture);
 
     expect(dayHeaderText(fixture)).toContain("June 22, 2026");
+    expect(dayHeaderText(fixture)).toContain("Revised plan v2");
     expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
     expect(dayHeaderSummaryText(fixture)).toContain("2 hr");
     expect(dayHeaderSummaryText(fixture)).toContain("Free time");
@@ -1211,7 +1212,7 @@ describe("rendered planner workspace", () => {
       scheduleBlockById(fixture, "canonical-study-moved-item").getAttribute(
         "data-recovery",
       ),
-    ).toBeNull();
+    ).toBe("Moved");
     expect(
       scheduleBlockById(fixture, "canonical-study-moved-item").getAttribute(
         "data-completion",
@@ -1221,7 +1222,17 @@ describe("rendered planner workspace", () => {
       scheduleBlockById(fixture, "canonical-groceries-moved-item").getAttribute(
         "data-recovery",
       ),
-    ).toBeNull();
+    ).toBe("Moved");
+    expect(
+      scheduleBlockById(fixture, "canonical-groceries-moved-item").getAttribute(
+        "aria-label",
+      ),
+    ).toContain("Moved");
+    expect(
+      scheduleBlockById(fixture, "canonical-interruption-item").getAttribute(
+        "aria-label",
+      ),
+    ).toContain("Interruption");
 
     scheduleBlockById(fixture, "canonical-study-completed-item").dispatchEvent(
       new FocusEvent("focus", { bubbles: true }),
@@ -1244,6 +1255,7 @@ describe("rendered planner workspace", () => {
 
     expect(selectedBlockDetailText(fixture)).toContain("Buy groceries");
     expect(selectedBlockDetailText(fixture)).toContain("Task");
+    expect(selectedBlockDetailText(fixture)).toContain("Moved");
     expect(selectedBlockDetailText(fixture)).toContain("30 min");
     expect(selectedBlockDetailText(fixture)).toContain(
       expectedTimeRange(
@@ -1253,10 +1265,79 @@ describe("rendered planner workspace", () => {
       ),
     );
     expect(selectedBlockDetailText(fixture)).toContain(
-      "Scheduled from the persisted snapshot.",
-    );
-    expect(selectedBlockDetailText(fixture)).not.toContain(
       "Buy groceries was moved after reported unavailable time.",
+    );
+
+    scheduleBlockById(fixture, "canonical-revised-free-item").dispatchEvent(
+      new FocusEvent("focus", { bubbles: true }),
+    );
+    fixture.detectChanges();
+
+    expect(selectedBlockDetailText(fixture)).toContain("Designated Free Time");
+    expect(selectedBlockDetailText(fixture)).toContain("40 min");
+    expect(selectedBlockDetailText(fixture)).toContain(
+      "A remaining useful window was kept as free time.",
+    );
+  });
+
+  it("shows split task state from scheduler decisions without relying on color alone", async () => {
+    const splitSnapshot: ScheduleSnapshot = {
+      ...snapshot,
+      id: "split-snapshot",
+      version: 2,
+      items: [
+        {
+          id: "split-study-morning",
+          kind: "task",
+          task_id: "task-study",
+          fixed_event_id: null,
+          interruption_id: null,
+          start_at: "2026-07-04T10:00:00+02:00",
+          end_at: "2026-07-04T10:45:00+02:00",
+        },
+        {
+          id: "split-study-afternoon",
+          kind: "task",
+          task_id: "task-study",
+          fixed_event_id: null,
+          interruption_id: null,
+          start_at: "2026-07-04T13:00:00+02:00",
+          end_at: "2026-07-04T13:45:00+02:00",
+        },
+      ],
+      decisions: [
+        {
+          id: "split-study-decision",
+          task_id: "task-study",
+          reason_code: "split_across_available_windows",
+          details: {},
+        },
+      ],
+    };
+    plannerApi.result = workspaceData({
+      tasks: [task, studyTask],
+      snapshot: splitSnapshot,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    for (const itemId of ["split-study-morning", "split-study-afternoon"]) {
+      const block = scheduleBlockById(fixture, itemId);
+      expect(block.getAttribute("data-recovery")).toBe("Split");
+      expect(block.getAttribute("aria-label")).toContain("Split");
+    }
+
+    expect(
+      query(fixture, "[data-testid='daily-timeline']")?.textContent,
+    ).toContain("Split");
+
+    scheduleBlockById(fixture, "split-study-afternoon").dispatchEvent(
+      new FocusEvent("focus", { bubbles: true }),
+    );
+    fixture.detectChanges();
+
+    expect(selectedBlockDetailText(fixture)).toContain("Split");
+    expect(selectedBlockDetailText(fixture)).toContain(
+      "Study notes was split across available windows.",
     );
   });
 
@@ -1867,7 +1948,7 @@ describe("rendered planner workspace", () => {
       scheduleBlockById(fixture, "study-after-interruption").getAttribute(
         "data-recovery",
       ),
-    ).toBeNull();
+    ).toBe("Moved");
     expect(
       scheduleBlockById(fixture, "study-after-interruption").getAttribute(
         "data-completion",
@@ -1894,6 +1975,9 @@ describe("rendered planner workspace", () => {
       "interruption",
       "task",
     ]);
+    expect(announcement(fixture)).toContain(
+      "Revised schedule snapshot v3 is now shown.",
+    );
   });
 
   it("keeps progress details available for retry when saving progress fails", async () => {
@@ -1916,6 +2000,9 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
+      "We could not save progress. Your details are still here; try again when the API is available.",
+    );
+    expect(announcement(fixture)).toContain(
       "We could not save progress. Your details are still here; try again when the API is available.",
     );
     expect((query(fixture, "#progress-task") as HTMLSelectElement).value).toBe(
@@ -1950,6 +2037,7 @@ describe("rendered planner workspace", () => {
       },
     ]);
     expect(text(fixture)).toContain("Progress saved.");
+    expect(announcement(fixture)).toContain("Progress saved.");
   });
 
   it("keeps interruption details available for retry when rescheduling fails", async () => {
@@ -1967,6 +2055,9 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
+      "The scheduler is unavailable right now. Saved progress is unchanged; try again when scheduling is available.",
+    );
+    expect(announcement(fixture)).toContain(
       "The scheduler is unavailable right now. Saved progress is unchanged; try again when scheduling is available.",
     );
     expect(inputValue(fixture, "#interruption-start")).toBe("2026-07-04T14:00");
@@ -2004,6 +2095,9 @@ describe("rendered planner workspace", () => {
       },
     ]);
     expect(text(fixture)).toContain(
+      "Revised schedule snapshot v3 is now shown.",
+    );
+    expect(announcement(fixture)).toContain(
       "Revised schedule snapshot v3 is now shown.",
     );
   });

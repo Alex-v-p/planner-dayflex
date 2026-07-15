@@ -101,7 +101,7 @@
     >
       <pdf-summary-value
         label="Snapshot"
-        [value]="headerView.data.snapshot ? 'v' + headerView.data.snapshot.version : headerView.data.day ? 'Inputs' : 'None'"
+        [value]="headerView.data.snapshot ? snapshotStateLabel(headerView.data.snapshot) : headerView.data.day ? 'Inputs' : 'None'"
       />
       <pdf-summary-value
         label="Scheduled work"
@@ -202,7 +202,7 @@
         </div>
         <pdf-status-chip
           [status]="view.data.snapshot ? 'planned' : view.data.day ? 'incomplete' : 'empty'"
-          [label]="view.data.snapshot ? snapshotItemCount(view.data.snapshot) + ' blocks' : view.data.day ? 'Saved inputs' : 'No saved day'"
+          [label]="view.data.snapshot ? snapshotStateLabel(view.data.snapshot) + ' - ' + snapshotItemCount(view.data.snapshot) + ' blocks' : view.data.day ? 'Saved inputs' : 'No saved day'"
         />
       </div>
 
@@ -491,7 +491,7 @@
           />
           <pdf-summary-value
             label="Snapshot"
-            [value]="view.data.snapshot ? 'v' + view.data.snapshot.version : 'None'"
+            [value]="view.data.snapshot ? snapshotStateLabel(view.data.snapshot) : 'None'"
           />
           <pdf-summary-value
             label="Scheduled work"
