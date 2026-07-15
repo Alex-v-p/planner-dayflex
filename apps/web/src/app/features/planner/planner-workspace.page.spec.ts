@@ -1277,9 +1277,6 @@ describe("rendered planner workspace", () => {
     expect(selectedBlockDetailText(fixture)).toContain("Task");
     expect(selectedBlockDetailText(fixture)).toContain("1 hr 30 min");
     expect(selectedBlockDetailText(fixture)).toContain(
-      "Scheduled from the persisted snapshot.",
-    );
-    expect(selectedBlockDetailText(fixture)).not.toContain(
       "Write report was placed in the earliest valid window.",
     );
     expect(

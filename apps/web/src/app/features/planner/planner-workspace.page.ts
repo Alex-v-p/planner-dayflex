@@ -1163,7 +1163,18 @@ export class PlannerWorkspacePage implements OnInit {
     tasks: readonly Task[],
   ): readonly string[] {
     if (block.item.kind === "task") {
-      return [fallbackScheduleReason(block.item.kind)];
+      const placementReasons = snapshot.decisions
+        .filter(
+          (decision) =>
+            decision.task_id !== null &&
+            decision.task_id === block.item.task_id &&
+            isBlockSafeTaskReasonCode(decision.reason_code),
+        )
+        .map((decision) => this.decisionText(decision, tasks));
+
+      return placementReasons.length > 0
+        ? placementReasons
+        : [fallbackScheduleReason(block.item.kind)];
     }
 
     const kindReason = snapshot.decisions.find(
@@ -2499,6 +2510,13 @@ function isDeferredReasonCode(reasonCode: string): boolean {
     reasonCode === "missed_before_current_time" ||
     reasonCode === "insufficient_time_before_deadline" ||
     reasonCode === "insufficient_remaining_day_time"
+  );
+}
+
+function isBlockSafeTaskReasonCode(reasonCode: string): boolean {
+  return (
+    reasonCode === "placed_in_earliest_valid_window" ||
+    reasonCode === "split_across_available_windows"
   );
 }
 
