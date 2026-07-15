@@ -1,0 +1,251 @@
+name: Planner Dayflex CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  scheduler-core-quality:
+    name: Scheduler core quality
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: packages/scheduler-core
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install scheduler-core
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest
+
+  scheduler-service-quality:
+    name: Scheduler service quality
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/scheduler
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install scheduler-service
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest
+
+  api-service-quality:
+    name: API service quality
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install API service
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest
+
+  ai-service-quality:
+    name: AI service quality
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/ai
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install AI service
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest
+
+      - name: Build AI service image
+        run: docker build -t planner-dayflex-ai:test .
+
+      - name: Smoke health with mock provider
+        run: |
+          docker run --rm -d --name planner-dayflex-ai-smoke -p 8002:8002 \
+            -e PLANNER_AI_PROVIDER_ENABLED=true \
+            -e PLANNER_AI_PROVIDER=mock \
+            planner-dayflex-ai:test
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent http://127.0.0.1:8002/health; then
+              docker stop planner-dayflex-ai-smoke
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs planner-dayflex-ai-smoke
+          docker stop planner-dayflex-ai-smoke
+          exit 1
+
+  worker-service-quality:
+    name: Worker service quality
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/worker
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install worker service
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest
+
+  web-application-quality:
+    name: Web application quality
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.3"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end test
+        run: npm run test:e2e
+
+  local-compose-topology:
+    name: Local Compose topology
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Static topology checks
+        run: python infra/docker/tests/test_topology_static.py
+
+      - name: Render Compose config
+        shell: pwsh
+        run: ./infra/docker/validate-compose.ps1
+
+      - name: Build local service images
+        shell: pwsh
+        run: ./infra/docker/build-images.ps1
+
+      - name: Smoke local topology
+        shell: pwsh
+        run: ./infra/docker/smoke-local.ps1
+
+      - name: Smoke reduced topology without optional services
+        shell: pwsh
+        run: ./infra/docker/tests/smoke-optional-services-disabled.ps1

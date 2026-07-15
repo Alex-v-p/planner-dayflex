@@ -1,0 +1,1269 @@
+<section class="space-y-6">
+  <div
+    aria-live="polite"
+    aria-atomic="true"
+    class="sr-only"
+    data-testid="planner-announcement"
+  >
+    {{ announcement() }}
+  </div>
+
+  <header class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-end">
+    <div>
+      <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
+        Daily planner
+      </p>
+      <h1 class="mt-2 text-3xl font-semibold tracking-normal text-ink-950">
+        {{ formatDateLabel(state().selectedDate) }}
+      </h1>
+      <p class="mt-3 max-w-2xl text-base leading-7 text-ink-600">
+        Signed in as {{ auth.currentUser()?.username }}. This workspace shows
+        the selected day from your authenticated API session.
+      </p>
+    </div>
+
+    <form
+      class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm"
+      (submit)="$event.preventDefault(); openSelectedDate()"
+      aria-label="Select planning day"
+    >
+      <label for="planner-date" class="text-sm font-medium text-ink-800">
+        Planning day
+      </label>
+      <div class="mt-3 flex flex-col gap-3 sm:flex-row">
+        <input
+          id="planner-date"
+          name="planner-date"
+          type="date"
+          class="min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+          [ngModel]="selectedDate()"
+          (ngModelChange)="selectedDate.set($event)"
+        />
+        <button
+          type="submit"
+          class="inline-flex min-h-11 items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+        >
+          Open
+        </button>
+      </div>
+      <div class="mt-3 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+          (click)="moveDate(-1)"
+        >
+          Previous day
+        </button>
+        <button
+          type="button"
+          class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+          (click)="moveDate(1)"
+        >
+          Next day
+        </button>
+      </div>
+    </form>
+  </header>
+
+  @if (state(); as view) { @if (view.status === "loading") {
+  <section
+    class="rounded-lg border border-mist-200 bg-white p-6 shadow-sm"
+    aria-busy="true"
+  >
+    <p class="text-sm font-medium text-ink-950">
+      Loading {{ formatDateLabel(view.selectedDate) }}
+    </p>
+    <p class="mt-2 text-sm leading-6 text-ink-600">
+      Keeping your selected day in view while its inputs and latest schedule
+      snapshot load.
+    </p>
+  </section>
+  } @else if (view.status === "permission") {
+  <section
+    class="rounded-lg border border-signal-600 bg-white p-6 shadow-sm"
+    role="alert"
+  >
+    <p class="text-sm font-semibold text-ink-950">
+      We cannot open {{ formatDateLabel(view.selectedDate) }}
+    </p>
+    <p class="mt-2 text-sm leading-6 text-ink-600">{{ view.message }}</p>
+    <a
+      routerLink="/sign-in"
+      [queryParams]="{ returnUrl: '/planner?date=' + view.selectedDate }"
+      class="mt-4 inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+    >
+      Sign in again
+    </a>
+  </section>
+  } @else if (view.status === "error") {
+  <section
+    class="rounded-lg border border-signal-600 bg-white p-6 shadow-sm"
+    role="alert"
+  >
+    <p class="text-sm font-semibold text-ink-950">Planner data did not load</p>
+    <p class="mt-2 text-sm leading-6 text-ink-600">{{ view.message }}</p>
+    <button
+      type="button"
+      class="mt-4 inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+      (click)="reload()"
+    >
+      Try again
+    </button>
+  </section>
+  } @else {
+  <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <section
+      aria-labelledby="timeline-title"
+      class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
+    >
+      <div
+        class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"
+      >
+        <div>
+          <h2 id="timeline-title" class="text-lg font-semibold text-ink-950">
+            Day timeline
+          </h2>
+          <p class="mt-1 text-sm leading-6 text-ink-600">
+            Fixed events, work, buffers, unavailable time, and useful free time
+            from the persisted schedule snapshot.
+          </p>
+        </div>
+        <span class="text-sm font-medium text-ink-600">
+          {{ snapshotItemCount(view.data.snapshot) }} blocks
+        </span>
+      </div>
+
+      @if (view.data.snapshot; as snapshot) {
+      <div
+        class="relative mt-5 min-h-[26rem] rounded-md border border-mist-200 bg-mist-50 p-3 sm:p-4"
+        data-testid="daily-timeline"
+        [style.height.rem]="timelineHeight(snapshot, view.data.day?.time_zone) / 16"
+      >
+        @for (block of timelineBlocks( snapshot, view.data.tasks,
+        view.data.fixedEvents, view.data.day?.time_zone ); track block.item.id)
+        {
+        <article
+          [class]="itemClass(block.item.kind)"
+          [style.top.%]="block.topPercent"
+          [style.height.%]="block.heightPercent"
+          [style.left.%]="block.leftPercent"
+          [style.width.%]="block.widthPercent"
+          [attr.data-kind]="block.item.kind"
+          [attr.data-top-minutes]="block.topMinutes"
+          [attr.data-height-minutes]="block.heightMinutes"
+          [attr.data-lane-index]="block.laneIndex"
+          [attr.data-lane-count]="block.laneCount"
+          [attr.data-left-percent]="block.leftPercent"
+          [attr.data-width-percent]="block.widthPercent"
+        >
+          <div
+            class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"
+          >
+            <p class="font-medium text-ink-950">
+              <span
+                class="text-xs font-semibold uppercase tracking-normal text-ink-600"
+              >
+                {{ block.marker }}
+              </span>
+              <span class="ml-2">{{ block.label }}</span>
+            </p>
+            <p class="text-sm font-medium text-ink-600">
+              {{ formatScheduleTimeRange( block.item.start_at,
+              block.item.end_at, view.data.day?.time_zone ) }}
+            </p>
+          </div>
+          <p class="mt-1 text-sm text-ink-600">
+            {{ block.kindLabel }} &middot; {{ formatDuration(block.minutes) }}
+          </p>
+        </article>
+        }
+      </div>
+
+      @if (movedDecisions(snapshot, view.data.tasks).length > 0) {
+      <section
+        class="mt-5 rounded-md border border-meadow-600 bg-mist-50 p-4"
+        aria-labelledby="moved-title"
+      >
+        <h3 id="moved-title" class="text-sm font-semibold text-ink-950">
+          Moved work
+        </h3>
+        <ul class="mt-3 space-y-2">
+          @for (decision of movedDecisions(snapshot, view.data.tasks); track
+          decision.id) {
+          <li class="text-sm leading-6 text-ink-700">
+            <span class="font-medium text-ink-950"
+              >{{ decision.taskTitle }}</span
+            >
+            <span> - {{ decisionText(decision, view.data.tasks) }}</span>
+            <code
+              class="ml-1 rounded bg-white px-1 py-0.5 text-xs text-ink-600"
+            >
+              {{ decisionCode(decision) }}
+            </code>
+          </li>
+          }
+        </ul>
+      </section>
+      } @if (deferredDecisions(snapshot, view.data.tasks).length > 0) {
+      <section
+        class="mt-5 rounded-md border border-mist-200 bg-mist-50 p-4"
+        aria-labelledby="unscheduled-title"
+      >
+        <h3 id="unscheduled-title" class="text-sm font-semibold text-ink-950">
+          Deferred or unscheduled work
+        </h3>
+        <ul class="mt-3 space-y-2">
+          @for (decision of deferredDecisions(snapshot, view.data.tasks); track
+          decision.id) {
+          <li class="text-sm leading-6 text-ink-700">
+            <span class="font-medium text-ink-950"
+              >{{ decision.taskTitle }}</span
+            >
+            <span> - {{ decisionText(decision, view.data.tasks) }}</span>
+            <code
+              class="ml-1 rounded bg-white px-1 py-0.5 text-xs text-ink-600"
+            >
+              {{ decisionCode(decision) }}
+            </code>
+          </li>
+          }
+        </ul>
+      </section>
+      } @if (snapshot.decisions.length > 0) {
+      <section
+        class="mt-5 rounded-md border border-mist-200 p-4"
+        aria-labelledby="decisions-title"
+      >
+        <h3 id="decisions-title" class="text-sm font-semibold text-ink-950">
+          Schedule reasons
+        </h3>
+        <ul class="mt-3 space-y-2">
+          @for (decision of snapshot.decisions; track decision.id) {
+          <li
+            class="rounded-md border border-mist-200 p-3 text-sm leading-6 text-ink-700"
+          >
+            <p>
+              {{ decisionText(decision, view.data.tasks) }}
+              <code
+                class="ml-1 rounded bg-mist-50 px-1 py-0.5 text-xs text-ink-600"
+              >
+                {{ decisionCode(decision) }}
+              </code>
+            </p>
+            <div class="mt-2">
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
+                (click)="explainDecision(decision)"
+                [disabled]="decisionExplanationState(decision.id).status === 'pending'"
+              >
+                Explain with AI
+              </button>
+            </div>
+            @if (decisionExplanationState(decision.id); as explanationState) {
+            @if (explanationState.status !== "idle") {
+            <div
+              class="mt-3 rounded-md border border-mist-200 bg-mist-50 p-3"
+              role="status"
+            >
+              <p
+                class="text-xs font-semibold uppercase tracking-normal text-ink-600"
+              >
+                Optional AI explanation
+              </p>
+              <p class="mt-1 text-sm text-ink-700">
+                {{ explanationState.message }}
+              </p>
+              @if (explanationState.result; as explanationResult) { @if
+              (explanationResult.status === "explained") {
+              <p class="mt-2 text-sm text-ink-700">
+                {{ explanationResult.explanation }}
+              </p>
+              } @else if (explanationResult.fallback_reason) {
+              <p class="mt-2 text-sm text-ink-600">
+                {{ explanationResult.fallback_reason }}
+              </p>
+              } }
+            </div>
+            } }
+          </li>
+          }
+        </ul>
+      </section>
+      } } @else if (view.data.day) {
+      <div class="mt-5 rounded-md border border-dashed border-mist-300 p-5">
+        <p class="font-medium text-ink-950">No schedule snapshot yet.</p>
+        <p class="mt-2 text-sm leading-6 text-ink-600">
+          Saved inputs are still shown below so the day remains easy to review.
+        </p>
+      </div>
+      } @else {
+      <div class="mt-5 rounded-md border border-dashed border-mist-300 p-5">
+        <p class="font-medium text-ink-950">
+          No saved planning day for this date.
+        </p>
+        <p class="mt-2 text-sm leading-6 text-ink-600">
+          Choose another date with saved planning data, or keep this empty day
+          in view.
+        </p>
+      </div>
+      }
+    </section>
+
+    <aside class="space-y-6">
+      <section
+        aria-labelledby="summary-title"
+        class="rounded-lg border border-mist-200 bg-white p-5 shadow-sm"
+      >
+        <h2 id="summary-title" class="text-base font-semibold text-ink-950">
+          Summary
+        </h2>
+        <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <dt class="text-ink-600">Saved day</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{ view.data.day ? "Yes" : "No" }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-ink-600">Snapshot</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{ view.data.snapshot ? "v" + view.data.snapshot.version : "None"
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-ink-600">Scheduled work</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{
+              formatDuration(scheduleSummary(view.data.snapshot).scheduledWorkMinutes)
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-ink-600">Free time</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{
+              formatDuration(scheduleSummary(view.data.snapshot).freeTimeMinutes)
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-ink-600">Deferred work</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{ scheduleSummary(view.data.snapshot).deferredWorkCount }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-ink-600">Completed work</dt>
+            <dd class="mt-1 font-semibold text-ink-950">
+              {{ formatDuration(totalCompletedMinutes(view.data.progress)) }}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section
+        aria-labelledby="progress-title"
+        class="rounded-lg border border-mist-200 bg-white p-5 shadow-sm"
+      >
+        <h2 id="progress-title" class="text-base font-semibold text-ink-950">
+          Work progress
+        </h2>
+        <form
+          class="mt-4 space-y-3"
+          (submit)="$event.preventDefault(); submitTaskProgress()"
+          aria-label="Record task progress"
+        >
+          <div>
+            <label for="progress-task" class="text-sm font-medium text-ink-800">
+              Unfinished work
+            </label>
+            <select
+              id="progress-task"
+              name="progress-task"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="progressForm().taskId"
+              (ngModelChange)="updateProgressForm({ taskId: $event })"
+              [attr.aria-invalid]="fieldError(progressFormErrors(), 'taskId') ? 'true' : null"
+            >
+              <option value="">Choose work</option>
+              @for (task of unfinishedTasks(view.data.tasks,
+              view.data.progress); track task.id) {
+              <option [value]="task.id">
+                {{ task.title }} ({{
+                formatDuration(remainingMinutesForTask(task,
+                view.data.progress)) }} left)
+              </option>
+              }
+            </select>
+            @if (fieldError(progressFormErrors(), "taskId")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(progressFormErrors(), "taskId") }}
+            </p>
+            }
+          </div>
+          <div>
+            <label
+              for="progress-minutes"
+              class="text-sm font-medium text-ink-800"
+            >
+              Completed minutes
+            </label>
+            <input
+              id="progress-minutes"
+              name="progress-minutes"
+              type="number"
+              min="1"
+              step="1"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="progressForm().completedMinutes"
+              (ngModelChange)="updateProgressForm({ completedMinutes: $event })"
+              [attr.aria-invalid]="fieldError(progressFormErrors(), 'completedMinutes') ? 'true' : null"
+            />
+            @if (fieldError(progressFormErrors(), "completedMinutes")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(progressFormErrors(), "completedMinutes") }}
+            </p>
+            }
+          </div>
+          <div>
+            <label
+              for="progress-recorded"
+              class="text-sm font-medium text-ink-800"
+            >
+              Recorded time
+            </label>
+            <input
+              id="progress-recorded"
+              name="progress-recorded"
+              type="datetime-local"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="progressForm().recordedLocal"
+              (ngModelChange)="updateProgressForm({ recordedLocal: $event })"
+              [attr.aria-invalid]="fieldError(progressFormErrors(), 'recordedLocal') ? 'true' : null"
+            />
+            @if (fieldError(progressFormErrors(), "recordedLocal")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(progressFormErrors(), "recordedLocal") }}
+            </p>
+            }
+          </div>
+          <div>
+            <label
+              for="progress-time-zone"
+              class="text-sm font-medium text-ink-800"
+            >
+              Time zone
+            </label>
+            <input
+              id="progress-time-zone"
+              name="progress-time-zone"
+              type="text"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="progressForm().timeZone"
+              (ngModelChange)="updateProgressForm({ timeZone: $event })"
+              [attr.aria-invalid]="fieldError(progressFormErrors(), 'timeZone') ? 'true' : null"
+            />
+            @if (fieldError(progressFormErrors(), "timeZone")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(progressFormErrors(), "timeZone") }}
+            </p>
+            }
+          </div>
+          <button
+            type="submit"
+            class="inline-flex min-h-10 w-full items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
+            [disabled]="busyAction() !== null || view.data.day === null || unfinishedTasks(view.data.tasks, view.data.progress).length === 0"
+          >
+            Record progress
+          </button>
+          @if (progressState().message) {
+          <p
+            class="text-sm leading-6"
+            [class.text-signal-700]="progressState().status === 'error'"
+            [class.text-ink-600]="progressState().status !== 'error'"
+            role="status"
+          >
+            {{ progressState().message }}
+          </p>
+          }
+        </form>
+      </section>
+
+      <section
+        aria-labelledby="interruption-title"
+        class="rounded-lg border border-mist-200 bg-white p-5 shadow-sm"
+      >
+        <h2
+          id="interruption-title"
+          class="text-base font-semibold text-ink-950"
+        >
+          Report interruption
+        </h2>
+        <form
+          class="mt-4 space-y-3"
+          (submit)="$event.preventDefault(); submitInterruption()"
+          aria-label="Report interruption"
+        >
+          <div class="rounded-md border border-mist-200 bg-mist-50 p-3">
+            <label
+              for="interruption-ai-text"
+              class="text-sm font-medium text-ink-800"
+            >
+              Describe it
+            </label>
+            <textarea
+              id="interruption-ai-text"
+              name="interruption-ai-text"
+              rows="3"
+              class="mt-1 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="interruptionAiText()"
+              (ngModelChange)="updateInterruptionAiText($event)"
+            ></textarea>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
+                (click)="suggestInterruption()"
+                [disabled]="busyAction() !== null || interruptionSuggestion().status === 'pending'"
+              >
+                Suggest details
+              </button>
+              @if (interruptionSuggestion().message) {
+              <span class="text-sm text-ink-600" role="status">
+                {{ interruptionSuggestion().message }}
+              </span>
+              }
+            </div>
+            @if (interruptionSuggestion().result; as suggestion) {
+            <div class="mt-2 rounded-md border border-mist-200 bg-white p-3">
+              <p class="text-sm text-ink-700">
+                Confidence {{ suggestion.confidence }}
+              </p>
+              @if (suggestion.status === "suggested") {
+              <button
+                type="button"
+                class="mt-2 inline-flex min-h-9 items-center rounded-md bg-meadow-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+                (click)="applyInterruptionSuggestion(suggestion)"
+              >
+                Apply to form
+              </button>
+              } @else {
+              <p class="mt-1 text-sm text-ink-600">
+                {{ suggestion.fallback_reason }}
+              </p>
+              }
+            </div>
+            }
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                for="interruption-start"
+                class="text-sm font-medium text-ink-800"
+              >
+                Start
+              </label>
+              <input
+                id="interruption-start"
+                name="interruption-start"
+                type="datetime-local"
+                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                [ngModel]="interruptionForm().startLocal"
+                (ngModelChange)="updateInterruptionForm({ startLocal: $event })"
+                [attr.aria-invalid]="fieldError(interruptionFormErrors(), 'startLocal') ? 'true' : null"
+              />
+              @if (fieldError(interruptionFormErrors(), "startLocal")) {
+              <p class="mt-1 text-sm text-signal-700">
+                {{ fieldError(interruptionFormErrors(), "startLocal") }}
+              </p>
+              }
+            </div>
+            <div>
+              <label
+                for="interruption-end"
+                class="text-sm font-medium text-ink-800"
+              >
+                End
+              </label>
+              <input
+                id="interruption-end"
+                name="interruption-end"
+                type="datetime-local"
+                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                [ngModel]="interruptionForm().endLocal"
+                (ngModelChange)="updateInterruptionForm({ endLocal: $event })"
+                [attr.aria-invalid]="fieldError(interruptionFormErrors(), 'endLocal') ? 'true' : null"
+              />
+              @if (fieldError(interruptionFormErrors(), "endLocal")) {
+              <p class="mt-1 text-sm text-signal-700">
+                {{ fieldError(interruptionFormErrors(), "endLocal") }}
+              </p>
+              }
+            </div>
+          </div>
+          <div>
+            <label
+              for="interruption-zone"
+              class="text-sm font-medium text-ink-800"
+            >
+              Time zone
+            </label>
+            <input
+              id="interruption-zone"
+              name="interruption-zone"
+              type="text"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="interruptionForm().timeZone"
+              (ngModelChange)="updateInterruptionForm({ timeZone: $event })"
+              [attr.aria-invalid]="fieldError(interruptionFormErrors(), 'timeZone') ? 'true' : null"
+            />
+            @if (fieldError(interruptionFormErrors(), "timeZone")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(interruptionFormErrors(), "timeZone") }}
+            </p>
+            }
+          </div>
+          <div>
+            <label
+              for="interruption-reported"
+              class="text-sm font-medium text-ink-800"
+            >
+              Reported time
+            </label>
+            <input
+              id="interruption-reported"
+              name="interruption-reported"
+              type="datetime-local"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="interruptionForm().reportedLocal"
+              (ngModelChange)="updateInterruptionForm({ reportedLocal: $event })"
+              [attr.aria-invalid]="fieldError(interruptionFormErrors(), 'reportedLocal') ? 'true' : null"
+            />
+            @if (fieldError(interruptionFormErrors(), "reportedLocal")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(interruptionFormErrors(), "reportedLocal") }}
+            </p>
+            }
+          </div>
+          <button
+            type="submit"
+            class="inline-flex min-h-10 w-full items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
+            [disabled]="busyAction() !== null || view.data.day === null || view.data.snapshot === null"
+            [attr.aria-busy]="interruptionState().status === 'pending' ? 'true' : null"
+          >
+            Submit interruption
+          </button>
+          @if (interruptionState().message) {
+          <p
+            class="text-sm leading-6"
+            [class.text-signal-700]="interruptionState().status === 'error'"
+            [class.text-ink-600]="interruptionState().status !== 'error'"
+            role="status"
+          >
+            {{ interruptionState().message }}
+          </p>
+          }
+        </form>
+      </section>
+
+      <section
+        aria-labelledby="recovery-title"
+        class="rounded-lg border border-mist-200 bg-white p-5 shadow-sm"
+      >
+        <h2 id="recovery-title" class="text-base font-semibold text-ink-950">
+          Generate schedule
+        </h2>
+        <p class="mt-3 text-sm leading-6 text-ink-600">
+          Generate a deterministic schedule from saved inputs for this planning
+          day.
+        </p>
+        <button
+          type="button"
+          class="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
+          (click)="generatePlan()"
+          [disabled]="busyAction() !== null || view.data.day === null"
+          [attr.aria-busy]="generatePlanState().status === 'pending' ? 'true' : null"
+        >
+          @if (generatePlanState().status === "pending") { Generating } @else {
+          Generate plan }
+        </button>
+        @if (generatePlanState().message) {
+        <p
+          class="mt-3 text-sm leading-6"
+          [class.text-signal-700]="generatePlanState().status === 'error'"
+          [class.text-ink-600]="generatePlanState().status !== 'error'"
+          role="status"
+        >
+          {{ generatePlanState().message }}
+        </p>
+        }
+      </section>
+    </aside>
+  </div>
+
+  <section
+    aria-labelledby="inputs-title"
+    class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
+  >
+    <div
+      class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"
+    >
+      <div>
+        <h2 id="inputs-title" class="text-lg font-semibold text-ink-950">
+          Planning inputs
+        </h2>
+        <p class="mt-1 text-sm leading-6 text-ink-600">
+          Current fixed events for this day and active flexible tasks from your
+          account.
+        </p>
+      </div>
+    </div>
+
+    <div class="mt-5 grid gap-5 lg:grid-cols-2">
+      <section aria-labelledby="fixed-events-title">
+        <div class="flex items-center justify-between gap-3">
+          <h3
+            id="fixed-events-title"
+            class="text-sm font-semibold uppercase tracking-normal text-ink-600"
+          >
+            Fixed events
+          </h3>
+          @if (fixedEventForm().id) {
+          <button
+            type="button"
+            class="text-sm font-medium text-meadow-700 hover:text-meadow-600 focus-visible:shadow-focus"
+            (click)="resetFixedEventForm()"
+          >
+            New event
+          </button>
+          }
+        </div>
+        <form
+          class="mt-3 space-y-3 rounded-md border border-mist-200 p-4"
+          (submit)="$event.preventDefault(); submitFixedEvent()"
+          aria-label="Fixed event details"
+        >
+          <div>
+            <label
+              for="fixed-event-title"
+              class="text-sm font-medium text-ink-800"
+            >
+              Title
+            </label>
+            <input
+              id="fixed-event-title"
+              name="fixed-event-title"
+              type="text"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="fixedEventForm().title"
+              (ngModelChange)="updateFixedEventForm({ title: $event })"
+              [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'title') ? 'true' : null"
+              [attr.aria-describedby]="fieldError(fixedEventFormErrors(), 'title') ? 'fixed-event-title-error' : null"
+            />
+            @if (fieldError(fixedEventFormErrors(), "title")) {
+            <p
+              id="fixed-event-title-error"
+              class="mt-1 text-sm text-signal-700"
+            >
+              {{ fieldError(fixedEventFormErrors(), "title") }}
+            </p>
+            }
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                for="fixed-event-start"
+                class="text-sm font-medium text-ink-800"
+              >
+                Start
+              </label>
+              <input
+                id="fixed-event-start"
+                name="fixed-event-start"
+                type="datetime-local"
+                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                [ngModel]="fixedEventForm().startLocal"
+                (ngModelChange)="updateFixedEventForm({ startLocal: $event })"
+                [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'startLocal') ? 'true' : null"
+              />
+              @if (fieldError(fixedEventFormErrors(), "startLocal")) {
+              <p class="mt-1 text-sm text-signal-700">
+                {{ fieldError(fixedEventFormErrors(), "startLocal") }}
+              </p>
+              }
+            </div>
+            <div>
+              <label
+                for="fixed-event-end"
+                class="text-sm font-medium text-ink-800"
+              >
+                End
+              </label>
+              <input
+                id="fixed-event-end"
+                name="fixed-event-end"
+                type="datetime-local"
+                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                [ngModel]="fixedEventForm().endLocal"
+                (ngModelChange)="updateFixedEventForm({ endLocal: $event })"
+                [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'endLocal') ? 'true' : null"
+              />
+              @if (fieldError(fixedEventFormErrors(), "endLocal")) {
+              <p class="mt-1 text-sm text-signal-700">
+                {{ fieldError(fixedEventFormErrors(), "endLocal") }}
+              </p>
+              }
+            </div>
+          </div>
+          <div>
+            <label
+              for="fixed-event-time-zone"
+              class="text-sm font-medium text-ink-800"
+            >
+              Time zone
+            </label>
+            <input
+              id="fixed-event-time-zone"
+              name="fixed-event-time-zone"
+              type="text"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="fixedEventForm().timeZone"
+              (ngModelChange)="updateFixedEventForm({ timeZone: $event })"
+              [attr.aria-invalid]="fieldError(fixedEventFormErrors(), 'timeZone') ? 'true' : null"
+            />
+            @if (fieldError(fixedEventFormErrors(), "timeZone")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(fixedEventFormErrors(), "timeZone") }}
+            </p>
+            }
+          </div>
+          @if (fixedEventFormMessage()) {
+          <p class="text-sm text-signal-700" role="alert">
+            {{ fixedEventFormMessage() }}
+          </p>
+          }
+          <button
+            type="submit"
+            class="inline-flex min-h-10 items-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
+            [disabled]="busyAction() !== null"
+          >
+            {{ fixedEventForm().id ? "Save event" : "Add event" }}
+          </button>
+        </form>
+        @if (view.data.fixedEvents.length > 0) {
+        <ul class="mt-3 space-y-3">
+          @for (event of view.data.fixedEvents; track event.id) {
+          <li class="rounded-md border border-mist-200 p-4">
+            <p class="font-medium text-ink-950">{{ event.title }}</p>
+            <p class="mt-1 text-sm text-ink-600">
+              {{ formatTimeRange( event.start_at, event.end_at, event.time_zone
+              ) }}
+            </p>
+            <div class="mt-3 flex gap-2">
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                (click)="editFixedEvent(event)"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-signal-600 px-3 py-1.5 text-sm font-medium text-signal-700 transition hover:bg-mist-50 focus-visible:shadow-focus"
+                (click)="deleteFixedEvent(event)"
+                [disabled]="busyAction() !== null"
+              >
+                Delete
+              </button>
+            </div>
+          </li>
+          }
+        </ul>
+        } @else {
+        <p
+          class="mt-3 rounded-md border border-dashed border-mist-300 p-4 text-sm leading-6 text-ink-600"
+        >
+          No fixed events are saved for this day.
+        </p>
+        }
+      </section>
+
+      <section aria-labelledby="tasks-title">
+        <div class="flex items-center justify-between gap-3">
+          <h3
+            id="tasks-title"
+            class="text-sm font-semibold uppercase tracking-normal text-ink-600"
+          >
+            Flexible tasks
+          </h3>
+          @if (taskForm().id) {
+          <button
+            type="button"
+            class="text-sm font-medium text-meadow-700 hover:text-meadow-600 focus-visible:shadow-focus"
+            (click)="resetTaskForm()"
+          >
+            New task
+          </button>
+          }
+        </div>
+        <form
+          class="mt-3 space-y-3 rounded-md border border-mist-200 p-4"
+          (submit)="$event.preventDefault(); submitTask()"
+          aria-label="Flexible task details"
+        >
+          <div class="rounded-md border border-mist-200 bg-mist-50 p-3">
+            <label for="task-ai-text" class="text-sm font-medium text-ink-800">
+              Describe a task
+            </label>
+            <textarea
+              id="task-ai-text"
+              name="task-ai-text"
+              rows="3"
+              class="mt-1 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="taskAiText()"
+              (ngModelChange)="updateTaskAiText($event)"
+            ></textarea>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
+                (click)="suggestTask()"
+                [disabled]="busyAction() !== null || taskSuggestion().status === 'pending'"
+              >
+                Suggest details
+              </button>
+              @if (taskSuggestion().message) {
+              <span class="text-sm text-ink-600" role="status">
+                {{ taskSuggestion().message }}
+              </span>
+              }
+            </div>
+            @if (taskSuggestion().result; as suggestion) {
+            <div class="mt-2 rounded-md border border-mist-200 bg-white p-3">
+              <p class="text-sm text-ink-700">
+                Confidence {{ suggestion.confidence }}
+              </p>
+              @if (suggestion.status === "suggested") {
+              <button
+                type="button"
+                class="mt-2 inline-flex min-h-9 items-center rounded-md bg-meadow-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+                (click)="applyTaskSuggestion(suggestion)"
+              >
+                Apply to form
+              </button>
+              } @else {
+              <p class="mt-1 text-sm text-ink-600">
+                {{ suggestion.fallback_reason }}
+              </p>
+              }
+            </div>
+            }
+          </div>
+          <div>
+            <label for="task-title" class="text-sm font-medium text-ink-800">
+              Title
+            </label>
+            <input
+              id="task-title"
+              name="task-title"
+              type="text"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="taskForm().title"
+              (ngModelChange)="updateTaskForm({ title: $event })"
+              [attr.aria-invalid]="fieldError(taskFormErrors(), 'title') ? 'true' : null"
+            />
+            @if (fieldError(taskFormErrors(), "title")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(taskFormErrors(), "title") }}
+            </p>
+            }
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                for="task-estimate"
+                class="text-sm font-medium text-ink-800"
+              >
+                Estimate minutes
+              </label>
+              <input
+                id="task-estimate"
+                name="task-estimate"
+                type="number"
+                min="1"
+                step="1"
+                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                [ngModel]="taskForm().estimatedMinutes"
+                (ngModelChange)="updateTaskForm({ estimatedMinutes: $event })"
+                [attr.aria-invalid]="fieldError(taskFormErrors(), 'estimatedMinutes') ? 'true' : null"
+              />
+              @if (fieldError(taskFormErrors(), "estimatedMinutes")) {
+              <p class="mt-1 text-sm text-signal-700">
+                {{ fieldError(taskFormErrors(), "estimatedMinutes") }}
+              </p>
+              }
+            </div>
+            <div>
+              <label
+                for="task-priority"
+                class="text-sm font-medium text-ink-800"
+              >
+                Priority
+              </label>
+              <input
+                id="task-priority"
+                name="task-priority"
+                type="number"
+                min="1"
+                max="5"
+                step="1"
+                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                [ngModel]="taskForm().priority"
+                (ngModelChange)="updateTaskForm({ priority: $event })"
+                [attr.aria-invalid]="fieldError(taskFormErrors(), 'priority') ? 'true' : null"
+              />
+              @if (fieldError(taskFormErrors(), "priority")) {
+              <p class="mt-1 text-sm text-signal-700">
+                {{ fieldError(taskFormErrors(), "priority") }}
+              </p>
+              }
+            </div>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                for="task-due-date"
+                class="text-sm font-medium text-ink-800"
+              >
+                Due date
+              </label>
+              <input
+                id="task-due-date"
+                name="task-due-date"
+                type="date"
+                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                [ngModel]="taskForm().dueDate"
+                (ngModelChange)="updateTaskForm({ dueDate: $event })"
+                [attr.aria-invalid]="fieldError(taskFormErrors(), 'dueDate') ? 'true' : null"
+                [attr.aria-describedby]="fieldError(taskFormErrors(), 'dueDate') ? 'task-due-date-error' : null"
+              />
+              @if (fieldError(taskFormErrors(), "dueDate")) {
+              <p id="task-due-date-error" class="mt-1 text-sm text-signal-700">
+                {{ fieldError(taskFormErrors(), "dueDate") }}
+              </p>
+              }
+            </div>
+            <div>
+              <label
+                for="task-earliest"
+                class="text-sm font-medium text-ink-800"
+              >
+                Earliest start
+              </label>
+              <input
+                id="task-earliest"
+                name="task-earliest"
+                type="datetime-local"
+                class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+                [ngModel]="taskForm().earliestStartLocal"
+                (ngModelChange)="updateTaskForm({ earliestStartLocal: $event })"
+                [attr.aria-invalid]="fieldError(taskFormErrors(), 'earliestStartLocal') ? 'true' : null"
+                [attr.aria-describedby]="fieldError(taskFormErrors(), 'earliestStartLocal') ? 'task-earliest-error' : null"
+              />
+              @if (fieldError(taskFormErrors(), "earliestStartLocal")) {
+              <p id="task-earliest-error" class="mt-1 text-sm text-signal-700">
+                {{ fieldError(taskFormErrors(), "earliestStartLocal") }}
+              </p>
+              }
+            </div>
+          </div>
+          <div>
+            <label
+              for="task-earliest-zone"
+              class="text-sm font-medium text-ink-800"
+            >
+              Earliest start time zone
+            </label>
+            <input
+              id="task-earliest-zone"
+              name="task-earliest-zone"
+              type="text"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="taskForm().earliestStartTimeZone"
+              (ngModelChange)="updateTaskForm({ earliestStartTimeZone: $event })"
+              [attr.aria-invalid]="fieldError(taskFormErrors(), 'earliestStartTimeZone') ? 'true' : null"
+            />
+            @if (fieldError(taskFormErrors(), "earliestStartTimeZone")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(taskFormErrors(), "earliestStartTimeZone") }}
+            </p>
+            }
+          </div>
+          <div class="flex items-center gap-3">
+            <input
+              id="task-splitting"
+              name="task-splitting"
+              type="checkbox"
+              class="h-5 w-5 rounded border-mist-300 text-meadow-700 focus-visible:shadow-focus"
+              [ngModel]="taskForm().splittingAllowed"
+              (ngModelChange)="updateTaskForm({ splittingAllowed: $event })"
+              [attr.aria-invalid]="fieldError(taskFormErrors(), 'splittingAllowed') ? 'true' : null"
+              [attr.aria-describedby]="fieldError(taskFormErrors(), 'splittingAllowed') ? 'task-splitting-error' : null"
+            />
+            <label
+              for="task-splitting"
+              class="text-sm font-medium text-ink-800"
+            >
+              Allow splitting
+            </label>
+          </div>
+          @if (fieldError(taskFormErrors(), "splittingAllowed")) {
+          <p id="task-splitting-error" class="text-sm text-signal-700">
+            {{ fieldError(taskFormErrors(), "splittingAllowed") }}
+          </p>
+          }
+          <div>
+            <label
+              for="task-min-segment"
+              class="text-sm font-medium text-ink-800"
+            >
+              Minimum segment minutes
+            </label>
+            <input
+              id="task-min-segment"
+              name="task-min-segment"
+              type="number"
+              min="15"
+              step="1"
+              class="mt-1 min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+              [ngModel]="taskForm().minSegmentMinutes"
+              (ngModelChange)="updateTaskForm({ minSegmentMinutes: $event })"
+              [attr.aria-invalid]="fieldError(taskFormErrors(), 'minSegmentMinutes') ? 'true' : null"
+            />
+            @if (fieldError(taskFormErrors(), "minSegmentMinutes")) {
+            <p class="mt-1 text-sm text-signal-700">
+              {{ fieldError(taskFormErrors(), "minSegmentMinutes") }}
+            </p>
+            }
+          </div>
+          @if (taskFormMessage()) {
+          <p class="text-sm text-signal-700" role="alert">
+            {{ taskFormMessage() }}
+          </p>
+          }
+          <button
+            type="submit"
+            class="inline-flex min-h-10 items-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
+            [disabled]="busyAction() !== null"
+          >
+            {{ taskForm().id ? "Save task" : "Add task" }}
+          </button>
+        </form>
+        @if (view.data.tasks.length > 0) {
+        <ul class="mt-3 space-y-3">
+          @for (task of view.data.tasks; track task.id) {
+          <li class="rounded-md border border-mist-200 p-4">
+            <div
+              class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"
+            >
+              <p class="font-medium text-ink-950">{{ task.title }}</p>
+              <p class="text-sm text-ink-600">Priority {{ task.priority }}</p>
+            </div>
+            <p class="mt-1 text-sm text-ink-600">
+              {{ task.estimated_minutes }} minutes @if (task.due_date) {
+              <span> &middot; Due {{ task.due_date }}</span>
+              }
+            </p>
+            <p class="mt-1 text-sm text-ink-600">
+              {{ formatDuration(completedMinutesForTask(task,
+              view.data.progress)) }} completed &middot; {{
+              formatDuration(remainingMinutesForTask(task, view.data.progress))
+              }} remaining
+            </p>
+            <p class="mt-1 text-sm text-ink-600">
+              @if (task.earliest_start_at) {
+              <span
+                >Earliest {{ formatDateTime( task.earliest_start_at,
+                view.data.day?.time_zone ) }}</span
+              >
+              } @if (task.splitting_allowed) {
+              <span>Split min {{ task.min_segment_minutes }} minutes</span>
+              } @else {
+              <span>No splitting</span>
+              }
+            </p>
+            <div class="mt-3 flex gap-2">
+              @if (remainingMinutesForTask(task, view.data.progress) > 0) {
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                (click)="markTaskComplete(task)"
+                [disabled]="busyAction() !== null || view.data.day === null"
+              >
+                Mark complete
+              </button>
+              } @else {
+              <span
+                class="inline-flex min-h-9 items-center rounded-md border border-meadow-600 px-3 py-1.5 text-sm font-medium text-meadow-700"
+              >
+                Completed
+              </span>
+              }
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-mist-200 px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                (click)="editTask(task)"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                class="inline-flex min-h-9 items-center rounded-md border border-signal-600 px-3 py-1.5 text-sm font-medium text-signal-700 transition hover:bg-mist-50 focus-visible:shadow-focus"
+                (click)="deleteTask(task)"
+                [disabled]="busyAction() !== null"
+              >
+                Delete
+              </button>
+            </div>
+          </li>
+          }
+        </ul>
+        } @else {
+        <p
+          class="mt-3 rounded-md border border-dashed border-mist-300 p-4 text-sm leading-6 text-ink-600"
+        >
+          No active flexible tasks are saved yet.
+        </p>
+        } @if (view.data.progress.length > 0) {
+        <section
+          class="mt-5 rounded-md border border-mist-200 bg-mist-50 p-4"
+          aria-labelledby="completed-history-title"
+        >
+          <h4
+            id="completed-history-title"
+            class="text-sm font-semibold text-ink-950"
+          >
+            Completed history
+          </h4>
+          <ul class="mt-3 space-y-2">
+            @for (record of view.data.progress; track record.id) {
+            <li class="text-sm leading-6 text-ink-700">
+              <span class="font-medium text-ink-950"
+                >{{ taskTitleForProgress(record, view.data.tasks) }}</span
+              >
+              <span>
+                - {{ formatDuration(record.completed_minutes) }} recorded at {{
+                formatDateTime(record.recorded_at, view.data.day?.time_zone) }}
+              </span>
+            </li>
+            }
+          </ul>
+        </section>
+        }
+      </section>
+    </div>
+  </section>
+  } }
+</section>

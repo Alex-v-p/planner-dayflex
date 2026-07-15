@@ -1,0 +1,70 @@
+<div class="min-h-screen bg-mist-50 text-ink-950">
+  <a
+    class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-white focus:px-4 focus:py-2 focus:shadow-focus"
+    href="#main-content"
+  >
+    Skip to content
+  </a>
+
+  <header class="border-b border-mist-200 bg-white/95">
+    <div
+      class="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between"
+    >
+      <div>
+        <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
+          planner-dayflex
+        </p>
+        <p class="mt-1 max-w-xl text-sm text-ink-600">
+          A steady place for flexible days.
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-3 md:items-end">
+        <nav aria-label="Primary navigation">
+          <ul class="flex flex-wrap gap-2">
+            @for (item of navItems; track item.path) {
+              <li>
+                <a
+                  [routerLink]="item.path"
+                  routerLinkActive="bg-meadow-700 text-white"
+                  [routerLinkActiveOptions]="{ exact: item.path === '/' }"
+                  ariaCurrentWhenActive="page"
+                  [attr.aria-label]="item.ariaLabel"
+                  class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                >
+                  {{ item.label }}
+                </a>
+              </li>
+            }
+          </ul>
+        </nav>
+
+        <div class="flex flex-wrap items-center gap-2">
+          @if (auth.currentUser(); as user) {
+            <span class="text-sm text-ink-600"
+              >Signed in as {{ user.username }}</span
+            >
+            <button
+              type="button"
+              class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+              (click)="signOut()"
+            >
+              Sign out
+            </button>
+          } @else {
+            <a
+              routerLink="/sign-in"
+              class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+            >
+              Sign in
+            </a>
+          }
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+    <router-outlet />
+  </main>
+</div>

@@ -1,0 +1,87 @@
+name: Ticket
+description: Start a new AI-assisted development ticket
+title: "TKT: "
+labels: ["ticket", "ready-for-codex"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should be built or changed?
+      placeholder: "Users should be able to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why is this needed? What should Codex know?
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true before this is done?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What should not be included?
+      placeholder: |
+        - Do not add...
+        - Do not change...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk level
+      options:
+        - Low
+        - Medium
+        - High
+    validations:
+      required: true
+
+  - type: textarea
+    id: test_notes
+    attributes:
+      label: Suggested tests
+      description: What should be tested?
+
+  - type: textarea
+    id: data_model_impact
+    attributes:
+      label: Data-model impact
+      description: List tables, fields, or constraints added, changed, or removed. Write "None" when no persistence change is required.
+      placeholder: |
+        Added:
+        Changed:
+        Removed:
+        Migration/backfill/rollback:
+    validations:
+      required: true
+
+  - type: textarea
+    id: service_container_impact
+    attributes:
+      label: Service and container impact
+      description: State "None" for pure-package or documentation work. Otherwise name the affected service owner and boundary, contracts, configuration/secret handling, Docker/Compose/network exposure, and validation needed.
+      placeholder: |
+        Service boundary:
+        Why a separate process is needed:
+        Docker/Compose/network impact:
+        Configuration and secret source:
+        Required validation and CI coverage:
+    validations:
+      required: true

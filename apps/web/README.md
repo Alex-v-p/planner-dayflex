@@ -1,0 +1,60 @@
+# planner-dayflex web
+
+This is the browser application foundation for `planner-dayflex`.
+
+## Runtime and tooling
+
+- Angular 22 with standalone components and TypeScript.
+- Tailwind CSS 3 for utility styling.
+- ESLint, Prettier, Vitest, and Playwright for local quality checks.
+- Node 22.22.3 or another runtime allowed by the package `engines` field.
+
+## Commands
+
+Run commands from `apps/web/`:
+
+```sh
+npm install
+npm run start
+npm run format
+npm run lint
+npm run test
+npm run build
+npx playwright install chromium
+npm run test:e2e
+```
+
+`npm run start` serves the app at `http://127.0.0.1:4200`.
+`npm run test:e2e` starts that dev server automatically and uses stubbed API
+responses for the canonical browser journey. Run `npx playwright install
+chromium` once before the first local E2E run.
+
+The local Compose image is built from `apps/web/Dockerfile`. It compiles the
+Angular app and serves static files on container port `8080`; only the shared
+edge proxy publishes a host port.
+
+## API configuration
+
+The browser calls only the application API. It does not import scheduler,
+database, AI, model, or service internals.
+
+Runtime API configuration is loaded from `src/assets/app-config.json`.
+Deployments can replace that asset without rebuilding the app. The committed
+local default points at `/api`; `src/assets/app-config.example.json` shows a
+local API URL example.
+
+## Structure
+
+The app follows the repository structure guide:
+
+- `src/app/core/` owns configuration, HTTP setup, routing, and shell layout.
+- `src/app/shared/` owns reusable presentational controls and feedback
+  primitives.
+- `src/app/features/` owns planner, authentication, overview, and free-time
+  feature screens.
+
+## Ticket impact
+
+- Data-model impact: None.
+- Service/container impact: TKT-025 adds a local-only web image used behind the
+  shared reverse proxy. The browser still calls only `/api` through the edge.

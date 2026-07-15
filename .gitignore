@@ -1,0 +1,16 @@
+# Local-only visual references. The catalog and usage guidance remain versioned.
+/docs/design/inspiration/screenshots/
+
+# Python tooling environments and caches are reproducible locally.
+**/.venv/
+**/.pytest_cache/
+**/.ruff_cache/
+**/__pycache__/
+**/*.egg-info/
+
+# Node application dependencies and build output are reproducible.
+**/node_modules/
+**/.angular/cache/
+**/dist/
+**/coverage/
+**/test-results/
