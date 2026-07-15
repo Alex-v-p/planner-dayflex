@@ -1603,6 +1603,86 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.createdTasks).toEqual([]);
   });
 
+  it("ignores stale task suggestions after reopening the task editor", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const staleSuggestionResponse = new Subject<unknown>();
+    const currentSuggestionResponse = new Subject<unknown>();
+    plannerApi.taskSuggestionResponse = staleSuggestionResponse;
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openNewTaskEditor(fixture);
+    setInput(fixture, "#task-ai-text", "Stale task for 20 minutes");
+    buttonByText(fixture, "Suggest details", "Flexible tasks").click();
+    fixture.detectChanges();
+
+    buttonByText(fixture, "Cancel", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    plannerApi.taskSuggestionResponse = currentSuggestionResponse;
+    await openNewTaskEditor(fixture);
+    setInput(fixture, "#task-ai-text", "Current task for 45 minutes");
+    buttonByText(fixture, "Suggest details", "Flexible tasks").click();
+    fixture.detectChanges();
+
+    staleSuggestionResponse.next({
+      status: "suggested",
+      confidence: 0.8,
+      proposed_fields: {
+        title: "Stale task",
+        estimated_minutes: 20,
+        priority: 2,
+        due_date: null,
+        earliest_start_at: null,
+        splitting_allowed: null,
+        min_segment_minutes: null,
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    staleSuggestionResponse.complete();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Looking for editable task details.");
+    expect(text(fixture)).not.toContain("Suggestion ready");
+    expect(inputValue(fixture, "#task-title")).toBe("");
+    expect(
+      buttonByText(fixture, "Suggest details", "Flexible tasks").disabled,
+    ).toBe(true);
+
+    currentSuggestionResponse.next({
+      status: "suggested",
+      confidence: 0.8,
+      proposed_fields: {
+        title: "Current task",
+        estimated_minutes: 45,
+        priority: 4,
+        due_date: null,
+        earliest_start_at: null,
+        splitting_allowed: null,
+        min_segment_minutes: null,
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    currentSuggestionResponse.complete();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    buttonByText(fixture, "Apply to form", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#task-title")).toBe("Current task");
+    expect(inputValue(fixture, "#task-estimate")).toBe("45");
+    expect(inputValue(fixture, "#task-priority")).toBe("4");
+  });
+
   it("shows task fallback without changing editable fields", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     plannerApi.taskSuggestionResponse = of({

@@ -287,6 +287,7 @@ export class PlannerWorkspacePage implements OnInit {
   private taskEditorReturnFocus: HTMLElement | null = null;
   private fixedEventEditorReturnFocus: HTMLElement | null = null;
   private pendingMutationFocus: PendingMutationFocus | null = null;
+  private taskSuggestionRequestVersion = 0;
 
   ngOnInit(): void {
     const routeDates = this.route.queryParamMap.pipe(
@@ -533,6 +534,7 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected suggestTask(): void {
+    const requestVersion = ++this.taskSuggestionRequestVersion;
     const text = this.taskAiText().trim();
     if (text === "") {
       this.taskSuggestion.set({
@@ -562,6 +564,9 @@ export class PlannerWorkspacePage implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
+          if (requestVersion !== this.taskSuggestionRequestVersion) {
+            return;
+          }
           this.taskSuggestion.set({
             status: result.status === "suggested" ? "ready" : "fallback",
             message: suggestionMessage(result),
@@ -569,6 +574,9 @@ export class PlannerWorkspacePage implements OnInit {
           });
         },
         error: () => {
+          if (requestVersion !== this.taskSuggestionRequestVersion) {
+            return;
+          }
           this.taskSuggestion.set({
             status: "fallback",
             message: fallbackMessage("service_unavailable"),
@@ -1634,6 +1642,7 @@ export class PlannerWorkspacePage implements OnInit {
   private closeTaskEditor(
     options: { readonly restoreFocus: boolean } = { restoreFocus: true },
   ): void {
+    this.taskSuggestionRequestVersion += 1;
     this.taskEditorOpen.set(false);
     if (options.restoreFocus) {
       this.restoreEditorFocus("task");
@@ -1695,6 +1704,7 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   private resetTaskSuggestion(): void {
+    this.taskSuggestionRequestVersion += 1;
     this.taskAiText.set("");
     this.taskSuggestion.set({
       status: "idle",
