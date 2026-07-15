@@ -701,6 +701,7 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
     expect(text(fixture)).toContain("Day planner");
     expect(text(fixture)).toContain("Day timeline");
+    expect(text(fixture)).toContain("Day bounds 08:00-18:00");
     expect(text(fixture)).toContain("Write report");
     expect(text(fixture)).toContain("Team meeting");
     expect(text(fixture)).toContain("Buffer");
@@ -717,6 +718,20 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("Free time");
     expect(text(fixture)).toContain("2 hr");
     expect(text(fixture)).toContain("Generate schedule");
+    expect(dayHeaderText(fixture)).toContain("Generate plan");
+    expect(dayHeaderSummaryText(fixture)).toContain("Snapshot");
+    expect(dayHeaderSummaryText(fixture)).toContain("v2");
+    expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
+    expect(dayHeaderSummaryText(fixture)).toContain("1 hr 30 min");
+    expect(dayHeaderSummaryText(fixture)).toContain("Free time");
+    expect(dayHeaderSummaryText(fixture)).toContain("2 hr");
+    expect(dayHeaderSummaryText(fixture)).toContain("Deferred work");
+    expect(dayHeaderSummaryText(fixture)).toContain("0");
+    expect(dayHeaderSummaryText(fixture)).toContain("Completed work");
+    expect(dayHeaderSummaryText(fixture)).toContain("0 min");
+    expect(
+      query(fixture, "[aria-labelledby='timeline-title'] button"),
+    ).toBeNull();
     expect(text(fixture)).toContain(
       "Write report was placed in the earliest valid window.",
     );
@@ -724,6 +739,9 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain(
       "A remaining useful window was kept as free time.",
     );
+    expect(timeRulerText(fixture)).toContain("08:00");
+    expect(timeRulerText(fixture)).toContain("09:00");
+    expect(timeRulerText(fixture)).toContain("18:00");
     expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
       "fixed_event",
       "task",
@@ -732,6 +750,35 @@ describe("rendered planner workspace", () => {
       "designated_free_time",
     ]);
     expect(announcement(fixture)).toContain("Planner workspace loaded");
+  });
+
+  it("shows read-only details and scheduler reasons for the focused schedule block", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    expect(selectedBlockDetailText(fixture)).toContain("Team meeting");
+    expect(selectedBlockDetailText(fixture)).toContain("Fixed Event");
+    expect(selectedBlockDetailText(fixture)).toContain(
+      "Fixed events reserve this time.",
+    );
+    expect(
+      scheduleBlockByKind(fixture, "fixed_event").getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    scheduleBlockByKind(fixture, "task").dispatchEvent(
+      new FocusEvent("focus", { bubbles: true }),
+    );
+    fixture.detectChanges();
+
+    expect(selectedBlockDetailText(fixture)).toContain("Write report");
+    expect(selectedBlockDetailText(fixture)).toContain("Task");
+    expect(selectedBlockDetailText(fixture)).toContain("1 hr 30 min");
+    expect(selectedBlockDetailText(fixture)).toContain(
+      "Write report was placed in the earliest valid window.",
+    );
+    expect(
+      scheduleBlockByKind(fixture, "task").getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("renders a helpful empty state for a selected date without saved day data", async () => {
@@ -980,6 +1027,24 @@ describe("rendered planner workspace", () => {
       "Revised schedule snapshot v3 is now shown.",
     );
     expect(text(fixture)).toContain("v3");
+    expect(
+      query(fixture, "[data-testid='daily-timeline']")?.textContent,
+    ).toContain("Moved");
+    expect(
+      scheduleBlockById(fixture, "study-before-interruption").getAttribute(
+        "data-recovery",
+      ),
+    ).toBeNull();
+    expect(
+      scheduleBlockById(fixture, "study-after-interruption").getAttribute(
+        "data-recovery",
+      ),
+    ).toBe("Moved");
+    expect(
+      scheduleBlockById(fixture, "study-after-interruption").getAttribute(
+        "aria-label",
+      ),
+    ).toContain("Moved");
     expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
       "task",
       "interruption",
@@ -1282,8 +1347,13 @@ describe("rendered planner workspace", () => {
     );
     const dateControlGroup = query(fixture, "#planner-date")?.parentElement;
 
-    expect(query(fixture, "header")?.className).toContain("lg:grid-cols");
-    expect(query(fixture, "form")?.className).toContain("rounded-md");
+    expect(
+      query(fixture, "[data-testid='day-workspace-header']")?.className,
+    ).toContain("rounded-lg");
+    expect(query(fixture, "form")?.className).toContain("space-y-3");
+    expect(
+      query(fixture, "[data-testid='day-header-summary']")?.className,
+    ).toContain("lg:grid-cols-5");
     expect(timeline?.parentElement?.className).toContain("lg:grid-cols");
     expect(fixedEvents?.parentElement?.className).toContain("lg:grid-cols-2");
     expect(query(fixture, "#planner-date")?.className).toContain("w-full");
@@ -2504,6 +2574,60 @@ function query<T>(
   selector: string,
 ): Element | null {
   return fixture.nativeElement.querySelector(selector);
+}
+
+function dayHeaderText<T>(fixture: ComponentFixture<T>): string {
+  return (
+    query(fixture, "[data-testid='day-workspace-header']")?.textContent ?? ""
+  );
+}
+
+function dayHeaderSummaryText<T>(fixture: ComponentFixture<T>): string {
+  return (
+    query(fixture, "[data-testid='day-header-summary']")?.textContent ?? ""
+  );
+}
+
+function timeRulerText<T>(fixture: ComponentFixture<T>): string {
+  return query(fixture, "[data-testid='time-ruler']")?.textContent ?? "";
+}
+
+function selectedBlockDetailText<T>(fixture: ComponentFixture<T>): string {
+  return (
+    query(fixture, "[data-testid='selected-block-detail']")?.textContent ?? ""
+  );
+}
+
+function scheduleBlockByKind<T>(
+  fixture: ComponentFixture<T>,
+  kind: string,
+): HTMLElement {
+  const block = query(
+    fixture,
+    `[data-testid='daily-timeline'] article[data-kind='${kind}']`,
+  );
+
+  if (block === null) {
+    throw new Error(`Could not find schedule block with kind ${kind}`);
+  }
+
+  return block as HTMLElement;
+}
+
+function scheduleBlockById<T>(
+  fixture: ComponentFixture<T>,
+  itemId: string,
+): HTMLElement {
+  const block = query(
+    fixture,
+    `[data-testid='daily-timeline'] article[data-item-id='${itemId}']`,
+  );
+
+  if (block === null) {
+    throw new Error(`Could not find schedule block with id ${itemId}`);
+  }
+
+  return block as HTMLElement;
 }
 
 function linkByText<T>(

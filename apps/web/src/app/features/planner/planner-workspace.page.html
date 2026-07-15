@@ -8,70 +8,125 @@
     {{ announcement() }}
   </div>
 
-  <header class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_28rem] lg:items-end">
-    <div>
-      <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
-        Day planner
-      </p>
-      <h1
-        class="mt-2 text-2xl font-semibold tracking-normal text-ink-950 sm:text-3xl"
-      >
-        {{ formatDateLabel(state().selectedDate) }}
-      </h1>
-      <p class="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
-        Build and recover one day at a time from saved fixed events, flexible
-        work, interruptions, buffers, and designated free time.
-      </p>
-    </div>
+  <header
+    class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-5"
+    data-testid="day-workspace-header"
+  >
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_30rem] lg:items-start">
+      <div>
+        <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
+          Day planner
+        </p>
+        <h1
+          class="mt-2 text-2xl font-semibold tracking-normal text-ink-950 sm:text-3xl"
+        >
+          {{ formatDateLabel(state().selectedDate) }}
+        </h1>
+        <p class="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
+          Build and recover one day at a time from saved fixed events, flexible
+          work, interruptions, buffers, and designated free time.
+        </p>
+      </div>
 
-    <form
-      class="rounded-md border border-mist-200 bg-white p-3 shadow-sm"
-      (submit)="$event.preventDefault(); openSelectedDate()"
-      aria-label="Select planning day"
-    >
-      <div
-        class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+      <form
+        class="space-y-3"
+        (submit)="$event.preventDefault(); openSelectedDate()"
+        aria-label="Select planning day"
       >
-        <pdf-segmented-control
-          [options]="plannerViewOptions"
-          selected="day"
-          ariaLabel="Planner view"
-          (selectedChange)="switchPlannerView($event)"
-        />
-        <div class="flex items-center gap-2">
-          <pdf-icon-button
-            label="Previous day"
-            glyph="&lt;"
-            (pressed)="moveDate(-1)"
+        <div
+          class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <pdf-segmented-control
+            [options]="plannerViewOptions"
+            selected="day"
+            ariaLabel="Planner view"
+            (selectedChange)="switchPlannerView($event)"
+          />
+          <div class="flex items-center gap-2">
+            <pdf-icon-button
+              label="Previous day"
+              glyph="&lt;"
+              (pressed)="moveDate(-1)"
+            />
+            <button
+              type="button"
+              class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 bg-white px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+              (click)="openToday()"
+            >
+              Today
+            </button>
+            <pdf-icon-button
+              label="Next day"
+              glyph=">"
+              (pressed)="moveDate(1)"
+            />
+          </div>
+        </div>
+        <div class="flex flex-col gap-2 sm:flex-row">
+          <label for="planner-date" class="sr-only">Planning day</label>
+          <input
+            id="planner-date"
+            name="planner-date"
+            type="date"
+            class="min-h-10 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+            [ngModel]="selectedDate()"
+            (ngModelChange)="selectedDate.set($event)"
           />
           <button
-            type="button"
-            class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 bg-white px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-            (click)="openToday()"
+            type="submit"
+            class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 bg-white px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
           >
-            Today
+            Open date
           </button>
-          <pdf-icon-button label="Next day" glyph=">" (pressed)="moveDate(1)" />
+          <button
+            type="button"
+            class="inline-flex min-h-10 items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
+            (click)="generatePlan()"
+            [disabled]="!canGeneratePlan()"
+            [attr.aria-busy]="generatePlanState().status === 'pending' ? 'true' : null"
+          >
+            @if (generatePlanState().status === "pending") { Generating } @else
+            { Generate plan }
+          </button>
         </div>
-      </div>
-      <div class="mt-3 flex flex-col gap-2 sm:flex-row">
-        <label for="planner-date" class="sr-only">Planning day</label>
-        <input
-          id="planner-date"
-          name="planner-date"
-          type="date"
-          class="min-h-10 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
-          [ngModel]="selectedDate()"
-          (ngModelChange)="selectedDate.set($event)"
-        />
-        <button
-          type="submit"
-          class="inline-flex min-h-10 items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
-        >
-          Open date
-        </button>
-      </div>
-    </form>
+      </form>
+    </div>
+
+    @if (state(); as headerView) { @if (headerView.status === "ready") {
+    <div
+      class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5"
+      data-testid="day-header-summary"
+      aria-label="Day schedule summary"
+    >
+      <pdf-summary-value
+        label="Snapshot"
+        [value]="headerView.data.snapshot ? 'v' + headerView.data.snapshot.version : headerView.data.day ? 'Inputs' : 'None'"
+      />
+      <pdf-summary-value
+        label="Scheduled work"
+        [value]="formatDuration(scheduleSummary(headerView.data.snapshot).scheduledWorkMinutes)"
+      />
+      <pdf-summary-value
+        label="Free time"
+        [value]="formatDuration(scheduleSummary(headerView.data.snapshot).freeTimeMinutes)"
+      />
+      <pdf-summary-value
+        label="Deferred work"
+        [value]="'' + scheduleSummary(headerView.data.snapshot).deferredWorkCount"
+      />
+      <pdf-summary-value
+        label="Completed work"
+        [value]="formatDuration(totalCompletedMinutes(headerView.data.progress))"
+      />
+    </div>
+    } @else {
+    <p
+      class="mt-4 rounded-md border border-mist-200 bg-mist-50 px-3 py-2 text-sm text-ink-600"
+      data-testid="day-header-summary"
+    >
+      {{ formatDateLabel(headerView.selectedDate) }} remains selected.
+    </p>
+    } }
   </header>
 
   @if (state(); as view) { @if (view.status === "loading") {
@@ -136,6 +191,13 @@
             Fixed events, work, buffers, unavailable time, and useful free time
             from the persisted schedule snapshot.
           </p>
+          @if (view.data.snapshot; as snapshot) {
+          <p
+            class="mt-1 text-xs font-semibold uppercase tracking-normal text-ink-600"
+          >
+            Day bounds {{ dayBoundsLabel(snapshot, view.data.day?.time_zone) }}
+          </p>
+          }
         </div>
         <pdf-status-chip
           [status]="view.data.snapshot ? 'planned' : view.data.day ? 'incomplete' : 'empty'"
@@ -145,59 +207,104 @@
 
       @if (view.data.snapshot; as snapshot) {
       <div
-        class="relative mt-5 min-h-[26rem] rounded-md border border-mist-200 bg-mist-50 p-3 sm:p-4"
+        class="mt-5 grid min-h-[26rem] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-md border border-mist-200 bg-mist-50"
         data-testid="daily-timeline"
         [style.height.rem]="timelineHeight(snapshot, view.data.day?.time_zone) / 16"
       >
-        @for (block of timelineBlocks( snapshot, view.data.tasks,
-        view.data.fixedEvents, view.data.day?.time_zone ); track block.item.id)
-        {
-        <article
-          [class]="itemClass(block.item.kind, block.isCompact)"
-          [style.top.%]="block.topPercent"
-          [style.height.%]="block.heightPercent"
-          [style.left.%]="block.leftPercent"
-          [style.width.%]="block.widthPercent"
-          [attr.data-kind]="block.item.kind"
-          [attr.data-compact]="block.isCompact ? 'true' : null"
-          [attr.data-top-minutes]="block.topMinutes"
-          [attr.data-height-minutes]="block.heightMinutes"
-          [attr.data-lane-index]="block.laneIndex"
-          [attr.data-lane-count]="block.laneCount"
-          [attr.data-left-percent]="block.leftPercent"
-          [attr.data-width-percent]="block.widthPercent"
-          [attr.aria-label]="block.label + ', ' + block.kindLabel + ', ' + formatDuration(block.minutes) + ', ' + formatScheduleTimeRange(block.item.start_at, block.item.end_at, view.data.day?.time_zone)"
+        <div
+          class="relative border-r border-mist-200 bg-white text-[0.6875rem] font-medium text-ink-600"
+          data-testid="time-ruler"
+          aria-label="Visible time ruler"
         >
-          @if (block.isCompact) {
-          <div
-            class="flex h-full min-h-0 items-center gap-1 px-1 text-[0.625rem] font-semibold uppercase leading-none text-ink-700"
-            aria-hidden="true"
+          @for (tick of timeRulerTicks(snapshot, view.data.day?.time_zone);
+          track tick.minutesFromStart) {
+          <span
+            [class]="tick.labelClass"
+            [style.top.%]="tick.labelTopPercent"
+            [attr.data-ruler-minute]="tick.minutesFromStart"
           >
-            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-700"></span>
-            <span class="min-w-0 truncate">{{ block.marker }}</span>
-          </div>
-          } @else {
-          <div
-            class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"
-          >
-            <p class="font-medium text-ink-950">
-              <pdf-block-type-marker
-                [status]="block.item.kind"
-                [label]="block.marker"
-              />
-              <span class="ml-2">{{ block.label }}</span>
-            </p>
-            <p class="text-sm font-medium text-ink-600">
-              {{ formatScheduleTimeRange( block.item.start_at,
-              block.item.end_at, view.data.day?.time_zone ) }}
-            </p>
-          </div>
-          <p class="mt-1 text-sm text-ink-600">
-            {{ block.kindLabel }} &middot; {{ formatDuration(block.minutes) }}
-          </p>
+            {{ tick.label }}
+          </span>
           }
-        </article>
-        }
+        </div>
+        <div class="relative min-w-0 p-3 sm:p-4">
+          @for (tick of timeRulerTicks(snapshot, view.data.day?.time_zone);
+          track tick.minutesFromStart) {
+          <span
+            class="pointer-events-none absolute left-0 right-0 border-t border-mist-200"
+            [style.top.%]="tick.topPercent"
+            aria-hidden="true"
+          ></span>
+          } @for (block of timelineBlocks( snapshot, view.data.tasks,
+          view.data.fixedEvents, view.data.day?.time_zone ); track
+          block.item.id) {
+          <article
+            [class]="itemClass(block.item.kind, block.isCompact)"
+            [style.top.%]="block.topPercent"
+            [style.height.%]="block.heightPercent"
+            [style.left.%]="block.leftPercent"
+            [style.width.%]="block.widthPercent"
+            [attr.data-kind]="block.item.kind"
+            [attr.data-item-id]="block.item.id"
+            [attr.data-recovery]="block.recoveryLabel"
+            [attr.data-compact]="block.isCompact ? 'true' : null"
+            [attr.data-top-minutes]="block.topMinutes"
+            [attr.data-height-minutes]="block.heightMinutes"
+            [attr.data-lane-index]="block.laneIndex"
+            [attr.data-lane-count]="block.laneCount"
+            [attr.data-left-percent]="block.leftPercent"
+            [attr.data-width-percent]="block.widthPercent"
+            [attr.data-selected]="isSelectedScheduleItem(block.item.id) ? 'true' : null"
+            [attr.tabindex]="0"
+            [class.ring-2]="isSelectedScheduleItem(block.item.id)"
+            [class.ring-ink-700]="isSelectedScheduleItem(block.item.id)"
+            role="button"
+            [attr.aria-label]="scheduleBlockAriaLabel(block, view.data.day?.time_zone)"
+            [attr.aria-pressed]="isSelectedScheduleItem(block.item.id)"
+            (click)="selectScheduleItem(block.item.id)"
+            (focus)="selectScheduleItem(block.item.id)"
+            (keydown.enter)="selectScheduleItem(block.item.id)"
+            (keydown.space)="$event.preventDefault(); selectScheduleItem(block.item.id)"
+          >
+            @if (block.isCompact) {
+            <div
+              class="flex h-full min-h-0 items-center gap-1 px-1 text-[0.625rem] font-semibold uppercase leading-none text-ink-700"
+              aria-hidden="true"
+            >
+              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-700"></span>
+              <span class="min-w-0 truncate">{{ block.marker }}</span>
+              @if (block.recoveryLabel) {
+              <span class="shrink-0">{{ block.recoveryLabel }}</span>
+              }
+            </div>
+            } @else {
+            <div
+              class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"
+            >
+              <p class="font-medium text-ink-950">
+                <pdf-block-type-marker
+                  [status]="block.item.kind"
+                  [label]="block.marker"
+                />
+                <span class="ml-2">{{ block.label }}</span>
+              </p>
+              <p class="text-sm font-medium text-ink-600">
+                {{ formatScheduleTimeRange( block.item.start_at,
+                block.item.end_at, view.data.day?.time_zone ) }}
+              </p>
+            </div>
+            <p class="mt-1 text-sm text-ink-600">
+              {{ block.kindLabel }} &middot; {{ formatDuration(block.minutes) }}
+              @if (block.recoveryLabel) {
+              <span class="ml-2 inline-flex align-middle">
+                <pdf-status-chip status="moved" [label]="block.recoveryLabel" />
+              </span>
+              }
+            </p>
+            }
+          </article>
+          }
+        </div>
       </div>
 
       <div
@@ -393,6 +500,71 @@
           />
         </div>
       </section>
+
+      @if (view.data.snapshot; as selectedSnapshot) { @if
+      (selectedSnapshot.items.length > 0) { @let selectedBlock =
+      selectedTimelineBlock( selectedSnapshot, view.data.tasks,
+      view.data.fixedEvents, view.data.day?.time_zone );
+      <section
+        aria-labelledby="selected-block-title"
+        class="rounded-lg border border-mist-200 bg-white p-5 shadow-sm"
+        data-testid="selected-block-detail"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p
+              class="text-xs font-semibold uppercase tracking-normal text-ink-600"
+            >
+              Selected block
+            </p>
+            <h2
+              id="selected-block-title"
+              class="mt-1 text-base font-semibold text-ink-950"
+            >
+              {{ selectedBlock.label }}
+            </h2>
+          </div>
+          <pdf-block-type-marker
+            [status]="selectedBlock.item.kind"
+            [label]="selectedBlock.marker"
+          />
+          @if (selectedBlock.recoveryLabel) {
+          <pdf-status-chip
+            status="moved"
+            [label]="selectedBlock.recoveryLabel"
+          />
+          }
+        </div>
+        <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <dt class="font-medium text-ink-600">Type</dt>
+            <dd class="mt-1 text-ink-950">{{ selectedBlock.kindLabel }}</dd>
+          </div>
+          <div>
+            <dt class="font-medium text-ink-600">Duration</dt>
+            <dd class="mt-1 text-ink-950">
+              {{ formatDuration(selectedBlock.minutes) }}
+            </dd>
+          </div>
+          <div class="col-span-2">
+            <dt class="font-medium text-ink-600">Time</dt>
+            <dd class="mt-1 text-ink-950">
+              {{ formatScheduleTimeRange( selectedBlock.item.start_at,
+              selectedBlock.item.end_at, view.data.day?.time_zone ) }}
+            </dd>
+          </div>
+        </dl>
+        <div class="mt-4 rounded-md border border-mist-200 bg-mist-50 p-3">
+          <h3 class="text-sm font-semibold text-ink-950">Scheduler reason</h3>
+          <ul class="mt-2 space-y-1 text-sm leading-6 text-ink-700">
+            @for (reason of selectedBlockReasons( selectedBlock,
+            selectedSnapshot, view.data.tasks ); track reason) {
+            <li>{{ reason }}</li>
+            }
+          </ul>
+        </div>
+      </section>
+      } }
 
       <section
         aria-labelledby="progress-title"
@@ -714,7 +886,7 @@
           type="button"
           class="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
           (click)="generatePlan()"
-          [disabled]="busyAction() !== null || view.data.day === null"
+          [disabled]="!canGeneratePlan()"
           [attr.aria-busy]="generatePlanState().status === 'pending' ? 'true' : null"
         >
           @if (generatePlanState().status === "pending") { Generating } @else {

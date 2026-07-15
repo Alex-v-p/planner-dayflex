@@ -152,6 +152,7 @@ interface TimelineBlock {
   readonly label: string;
   readonly kindLabel: string;
   readonly marker: string;
+  readonly recoveryLabel: string | null;
   readonly isCompact: boolean;
   readonly minutes: number;
   readonly topPercent: number;
@@ -162,6 +163,14 @@ interface TimelineBlock {
   readonly laneCount: number;
   readonly leftPercent: number;
   readonly widthPercent: number;
+}
+
+interface TimelineTick {
+  readonly label: string;
+  readonly topPercent: number;
+  readonly labelTopPercent: number | null;
+  readonly labelClass: string;
+  readonly minutesFromStart: number;
 }
 
 interface ScheduleSummary {
@@ -246,6 +255,7 @@ export class PlannerWorkspacePage implements OnInit {
     message: "",
   });
   protected readonly busyAction = signal<string | null>(null);
+  protected readonly selectedScheduleItemId = signal<string | null>(null);
   protected readonly announcement = computed(() => {
     const state = this.state();
 
@@ -282,6 +292,7 @@ export class PlannerWorkspacePage implements OnInit {
           this.progressState.set({ status: "idle", message: "" });
           this.interruptionState.set({ status: "idle", message: "" });
           this.explanationStates.set({});
+          this.selectedScheduleItemId.set(null);
         }),
         switchMap((selectedDate) =>
           this.plannerApi.loadWorkspaceDate(selectedDate).pipe(
@@ -309,6 +320,9 @@ export class PlannerWorkspacePage implements OnInit {
         }
         if (state.status === "ready") {
           const timeZone = state.data.day?.time_zone ?? guessTimeZone();
+          this.selectedScheduleItemId.set(
+            state.data.snapshot?.items[0]?.id ?? null,
+          );
           if (isBlankProgressForm(this.progressForm())) {
             this.progressForm.set(emptyProgressForm(timeZone));
           }
@@ -705,6 +719,7 @@ export class PlannerWorkspacePage implements OnInit {
             return current;
           });
           if (snapshotApplied) {
+            this.selectedScheduleItemId.set(snapshot.items[0]?.id ?? null);
             this.generatePlanState.set({
               status: "success",
               message: `Generated schedule snapshot v${snapshot.version}.`,
@@ -860,6 +875,7 @@ export class PlannerWorkspacePage implements OnInit {
             return current;
           });
           if (applied) {
+            this.selectedScheduleItemId.set(snapshot.items[0]?.id ?? null);
             this.interruptionForm.set(emptyInterruptionForm(day.time_zone));
             this.interruptionState.set({
               status: "success",
@@ -1007,6 +1023,15 @@ export class PlannerWorkspacePage implements OnInit {
     return this.busyAction() === action;
   }
 
+  protected canGeneratePlan(): boolean {
+    const state = this.state();
+    return (
+      this.busyAction() === null &&
+      state.status === "ready" &&
+      state.data.day !== null
+    );
+  }
+
   protected formatDateLabel(value: string): string {
     return formatDateLabel(value);
   }
@@ -1055,8 +1080,8 @@ export class PlannerWorkspacePage implements OnInit {
 
   protected itemClass(kind: string, isCompact: boolean): string {
     const shared = isCompact
-      ? "absolute overflow-hidden rounded-sm border border-mist-200 bg-white shadow-sm"
-      : "absolute overflow-hidden rounded-md border border-mist-200 bg-white p-3 shadow-sm";
+      ? "absolute overflow-hidden rounded-sm border border-mist-200 bg-white shadow-sm transition focus-visible:z-20 focus-visible:shadow-focus"
+      : "absolute overflow-hidden rounded-md border border-mist-200 bg-white p-3 shadow-sm transition focus-visible:z-20 focus-visible:shadow-focus";
 
     switch (kind) {
       case "task":
@@ -1080,6 +1105,159 @@ export class PlannerWorkspacePage implements OnInit {
     return snapshot?.items.length ?? 0;
   }
 
+  protected selectScheduleItem(itemId: string): void {
+    this.selectedScheduleItemId.set(itemId);
+  }
+
+  protected selectedTimelineBlock(
+    snapshot: ScheduleSnapshot,
+    tasks: readonly Task[],
+    fixedEvents: readonly FixedEvent[],
+    planningDayTimeZone: string | undefined,
+  ): TimelineBlock {
+    const blocks = this.timelineBlocks(
+      snapshot,
+      tasks,
+      fixedEvents,
+      planningDayTimeZone,
+    );
+    const selectedId = this.selectedScheduleItemId();
+
+    return (
+      blocks.find((block) => block.item.id === selectedId) ??
+      blocks[0] ?? {
+        item: {
+          id: "empty",
+          kind: "empty",
+          task_id: null,
+          fixed_event_id: null,
+          interruption_id: null,
+          start_at: "",
+          end_at: "",
+        },
+        label: "No selected block",
+        kindLabel: "No block",
+        marker: "Block",
+        recoveryLabel: null,
+        isCompact: false,
+        minutes: 0,
+        topPercent: 0,
+        heightPercent: 0,
+        topMinutes: 0,
+        heightMinutes: 0,
+        laneIndex: 0,
+        laneCount: 1,
+        leftPercent: 0,
+        widthPercent: 100,
+      }
+    );
+  }
+
+  protected selectedBlockReasons(
+    block: TimelineBlock,
+    snapshot: ScheduleSnapshot,
+    tasks: readonly Task[],
+  ): readonly string[] {
+    const reasons = snapshot.decisions
+      .filter(
+        (decision) =>
+          decision.task_id !== null && decision.task_id === block.item.task_id,
+      )
+      .map((decision) => this.decisionText(decision, tasks));
+
+    if (reasons.length > 0) {
+      return reasons;
+    }
+
+    const kindReason = snapshot.decisions.find(
+      (decision) =>
+        decision.task_id === null &&
+        decision.reason_code === reasonCodeForScheduleKind(block.item.kind),
+    );
+
+    if (kindReason) {
+      return [this.decisionText(kindReason, tasks)];
+    }
+
+    return [fallbackScheduleReason(block.item.kind)];
+  }
+
+  protected isSelectedScheduleItem(itemId: string): boolean {
+    return this.selectedScheduleItemId() === itemId;
+  }
+
+  protected scheduleBlockAriaLabel(
+    block: TimelineBlock,
+    planningDayTimeZone: string | undefined,
+  ): string {
+    const parts = [
+      block.label,
+      block.kindLabel,
+      this.formatDuration(block.minutes),
+      this.formatScheduleTimeRange(
+        block.item.start_at,
+        block.item.end_at,
+        planningDayTimeZone,
+      ),
+    ];
+
+    if (block.recoveryLabel) {
+      parts.push(block.recoveryLabel);
+    }
+
+    return parts.join(", ");
+  }
+
+  protected timeRulerTicks(
+    snapshot: ScheduleSnapshot,
+    planningDayTimeZone: string | undefined,
+  ): readonly TimelineTick[] {
+    const timeZone = planningDayTimeZone ?? "UTC";
+    const bounds = timelineBounds(snapshot, timeZone);
+    const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
+    const firstHour = Math.ceil(bounds.startMinutes / 60) * 60;
+    const ticks: TimelineTick[] = [];
+
+    ticks.push({
+      label: formatMinutesAsTime(bounds.startMinutes),
+      topPercent: 0,
+      labelTopPercent: null,
+      labelClass: "absolute right-2 top-1",
+      minutesFromStart: 0,
+    });
+
+    for (let minutes = firstHour; minutes < bounds.endMinutes; minutes += 60) {
+      if (minutes === bounds.startMinutes) {
+        continue;
+      }
+      ticks.push({
+        label: formatMinutesAsTime(minutes),
+        topPercent: ((minutes - bounds.startMinutes) / totalMinutes) * 100,
+        labelTopPercent: ((minutes - bounds.startMinutes) / totalMinutes) * 100,
+        labelClass: "absolute right-2 -translate-y-1/2",
+        minutesFromStart: minutes - bounds.startMinutes,
+      });
+    }
+
+    ticks.push({
+      label: formatMinutesAsTime(bounds.endMinutes),
+      topPercent: 100,
+      labelTopPercent: null,
+      labelClass: "absolute bottom-1 right-2",
+      minutesFromStart: totalMinutes,
+    });
+
+    return ticks;
+  }
+
+  protected dayBoundsLabel(
+    snapshot: ScheduleSnapshot,
+    planningDayTimeZone: string | undefined,
+  ): string {
+    const bounds = timelineBounds(snapshot, planningDayTimeZone ?? "UTC");
+    return `${formatMinutesAsTime(bounds.startMinutes)}-${formatMinutesAsTime(bounds.endMinutes)}`;
+  }
+
   protected timelineBlocks(
     snapshot: ScheduleSnapshot,
     tasks: readonly Task[],
@@ -1091,6 +1269,17 @@ export class PlannerWorkspacePage implements OnInit {
     const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
 
     const laneLayout = timelineLaneLayout(snapshot.items, timeZone);
+    const movedTaskIds = new Set(
+      snapshot.decisions
+        .filter(
+          (decision) => decision.reason_code === "moved_after_interruption",
+        )
+        .map((decision) => decision.task_id)
+        .filter((taskId): taskId is string => taskId !== null),
+    );
+    const interruptionEndMinutes = snapshot.items
+      .filter((item) => item.kind === "interruption")
+      .map((item) => minutesFromIsoInZone(item.end_at, timeZone));
 
     return snapshot.items.map((item) => {
       const startMinutes = minutesFromIsoInZone(item.start_at, timeZone);
@@ -1105,6 +1294,15 @@ export class PlannerWorkspacePage implements OnInit {
         label: this.itemLabel(item, tasks, fixedEvents),
         kindLabel: this.kindLabel(item.kind),
         marker: itemMarker(item.kind),
+        recoveryLabel:
+          item.kind === "task" &&
+          item.task_id !== null &&
+          movedTaskIds.has(item.task_id) &&
+          interruptionEndMinutes.some(
+            (endMinutes) => startMinutes >= endMinutes,
+          )
+            ? "Moved"
+            : null,
         isCompact: heightMinutes <= COMPACT_TIMELINE_BLOCK_MINUTES,
         minutes: heightMinutes,
         topPercent: (topMinutes / totalMinutes) * 100,
@@ -1124,7 +1322,7 @@ export class PlannerWorkspacePage implements OnInit {
     planningDayTimeZone: string | undefined,
   ): number {
     const bounds = timelineBounds(snapshot, planningDayTimeZone ?? "UTC");
-    return Math.max(26, (bounds.endMinutes - bounds.startMinutes) * 1.2);
+    return Math.max(26, (bounds.endMinutes - bounds.startMinutes) * 1.1);
   }
 
   protected scheduleSummary(
@@ -2020,6 +2218,44 @@ function itemMarker(kind: string): string {
     default:
       return "Block";
   }
+}
+
+function reasonCodeForScheduleKind(kind: string): string {
+  switch (kind) {
+    case "designated_free_time":
+      return "designated_free_time";
+    case "interruption":
+      return "blocked_by_interruption";
+    case "fixed_event":
+      return "blocked_by_fixed_event";
+    default:
+      return "";
+  }
+}
+
+function fallbackScheduleReason(kind: string): string {
+  switch (kind) {
+    case "task":
+      return "Scheduled from the persisted snapshot.";
+    case "fixed_event":
+      return "Fixed events reserve this time.";
+    case "interruption":
+      return "Reported unavailable time reserves this time.";
+    case "buffer":
+      return "Buffer time was preserved between scheduled blocks.";
+    case "designated_free_time":
+      return "A remaining useful window was kept as free time.";
+    default:
+      return "This block comes from the persisted schedule snapshot.";
+  }
+}
+
+function formatMinutesAsTime(minutes: number): string {
+  const normalizedMinutes = Math.max(0, minutes);
+  const hours = Math.floor(normalizedMinutes / 60) % 24;
+  const remainder = normalizedMinutes % 60;
+
+  return `${String(hours).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
 function timelineBounds(
