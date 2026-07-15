@@ -40,5 +40,7 @@ For every P0/P1 finding, also state the recommended repair owner:
 Treat a changed service boundary without an explicit contract, direct access to
 an internal dependency, or a Docker/Compose change without proportionate
 configuration, image-build, and health/connection coverage as P1 unless the
-ticket explicitly documents why the check cannot run.
+ticket explicitly documents why the check cannot run. For interface design
+tickets, leave design-quality review to design_reviewer unless the issue is a
+clear correctness, accessibility, test, or maintainability defect.
 """

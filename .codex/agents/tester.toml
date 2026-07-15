@@ -16,6 +16,8 @@ Your job:
   the ticket run on pull requests
 - report what remains untested
 - identify the exact P0/P1 behavior gap and whether implementation or tests own the next repair
+- for interface design tickets, include the relevant checks from
+  `docs/design/visual-qa-workflow.md`
 - for Docker/Compose changes, verify rendered configuration, changed-image
   builds, declared health checks, essential internal connections, and browser
   isolation from internal-only dependencies as applicable

@@ -1,0 +1,14 @@
+<span
+  class="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-normal"
+  [attr.aria-label]="displayLabel + ': ' + treatment.description"
+>
+  <span
+    class="inline-flex h-5 min-w-5 items-center justify-center rounded-sm border px-1 text-[0.625rem] leading-none {{
+      treatment.markerClass
+    }}"
+    aria-hidden="true"
+  >
+    {{ treatment.cue }}
+  </span>
+  <span>{{ displayLabel }}</span>
+</span>

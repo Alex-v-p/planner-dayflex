@@ -196,6 +196,59 @@ const overlappingLockedSnapshot: ScheduleSnapshot = {
   ],
 };
 
+const shortStatusSnapshot: ScheduleSnapshot = {
+  ...snapshot,
+  configuration: { day_start: "09:00:00", day_end: "10:00:00" },
+  items: [
+    {
+      id: "short-fixed-item",
+      kind: "fixed_event",
+      task_id: null,
+      fixed_event_id: "event-1",
+      interruption_id: null,
+      start_at: "2026-07-04T09:00:00+02:00",
+      end_at: "2026-07-04T09:10:00+02:00",
+    },
+    {
+      id: "short-task-item",
+      kind: "task",
+      task_id: "task-1",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T09:10:00+02:00",
+      end_at: "2026-07-04T09:20:00+02:00",
+    },
+    {
+      id: "short-buffer-item",
+      kind: "buffer",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T09:20:00+02:00",
+      end_at: "2026-07-04T09:30:00+02:00",
+    },
+    {
+      id: "short-interruption-item",
+      kind: "interruption",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: "interruption-1",
+      start_at: "2026-07-04T09:30:00+02:00",
+      end_at: "2026-07-04T09:40:00+02:00",
+    },
+    {
+      id: "short-free-item",
+      kind: "designated_free_time",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-07-04T09:40:00+02:00",
+      end_at: "2026-07-04T09:50:00+02:00",
+    },
+  ],
+  decisions: [],
+};
+
 const noFitSnapshot: ScheduleSnapshot = {
   ...canonicalSnapshot,
   id: "snapshot-no-fit",
@@ -646,7 +699,7 @@ describe("rendered planner workspace", () => {
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
-    expect(text(fixture)).toContain("Signed in as daily_user");
+    expect(text(fixture)).toContain("Day planner");
     expect(text(fixture)).toContain("Day timeline");
     expect(text(fixture)).toContain("Write report");
     expect(text(fixture)).toContain("Team meeting");
@@ -1230,7 +1283,7 @@ describe("rendered planner workspace", () => {
     const dateControlGroup = query(fixture, "#planner-date")?.parentElement;
 
     expect(query(fixture, "header")?.className).toContain("lg:grid-cols");
-    expect(query(fixture, "form")?.className).toContain("rounded-lg");
+    expect(query(fixture, "form")?.className).toContain("rounded-md");
     expect(timeline?.parentElement?.className).toContain("lg:grid-cols");
     expect(fixedEvents?.parentElement?.className).toContain("lg:grid-cols-2");
     expect(query(fixture, "#planner-date")?.className).toContain("w-full");
@@ -1263,6 +1316,51 @@ describe("rendered planner workspace", () => {
     expect(blocks[1]).toMatchObject({ kind: "task", top: 120, height: 90 });
   });
 
+  it("keeps short timeline block status details visible without changing real durations", async () => {
+    plannerApi.result = workspaceData({ snapshot: shortStatusSnapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const blocks = timelineBlocks(fixture);
+    const detailList = query(fixture, "[data-testid='timeline-detail-list']");
+    const compactElements = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll(
+        "[data-testid='daily-timeline'] article",
+      ),
+    );
+    const compactLabels = compactElements
+      .map((element) => element.getAttribute("aria-label") ?? "")
+      .join(" ");
+
+    expect(blocks.map((block) => block.kind)).toEqual([
+      "fixed_event",
+      "task",
+      "buffer",
+      "interruption",
+      "designated_free_time",
+    ]);
+    expect(blocks.every((block) => block.height === 10)).toBe(true);
+    expect(blocks.every((block) => block.compact)).toBe(true);
+    expect(
+      compactElements.every(
+        (element) =>
+          element.className.includes("overflow-hidden") &&
+          !element.className.includes("min-h-14") &&
+          !element.className.includes("overflow-visible"),
+      ),
+    ).toBe(true);
+    expect(compactLabels).toContain("Team meeting");
+    expect(compactLabels).toContain("Write report");
+    expect(compactLabels).toContain("10 min");
+    expect(detailList?.textContent).toContain("Team meeting");
+    expect(detailList?.textContent).toContain("Write report");
+    expect(detailList?.textContent).toContain("Buffer");
+    expect(detailList?.textContent).toContain("Unavailable");
+    expect(detailList?.textContent).toContain("Designated Free Time");
+    expect(detailList?.textContent).toContain("Fixed");
+    expect(detailList?.textContent).toContain("Work");
+    expect(detailList?.textContent).toContain("Free");
+    expect(detailList?.textContent).toContain("10 min");
+  });
+
   it("renders overlapping locked snapshot blocks in separate timeline lanes", async () => {
     plannerApi.result = workspaceData({ snapshot: overlappingLockedSnapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
@@ -1273,6 +1371,7 @@ describe("rendered planner workspace", () => {
         kind: "fixed_event",
         top: 60,
         height: 60,
+        compact: false,
         laneIndex: 0,
         laneCount: 2,
         left: 0,
@@ -1282,6 +1381,7 @@ describe("rendered planner workspace", () => {
         kind: "interruption",
         top: 90,
         height: 60,
+        compact: false,
         laneIndex: 1,
         laneCount: 2,
         left: 50,
@@ -1291,6 +1391,7 @@ describe("rendered planner workspace", () => {
         kind: "task",
         top: 150,
         height: 60,
+        compact: false,
         laneIndex: 0,
         laneCount: 1,
         left: 0,
@@ -2515,6 +2616,7 @@ function timelineBlocks<T>(fixture: ComponentFixture<T>): Array<{
   readonly kind: string;
   readonly top: number;
   readonly height: number;
+  readonly compact: boolean;
   readonly laneIndex: number;
   readonly laneCount: number;
   readonly left: number;
@@ -2528,6 +2630,7 @@ function timelineBlocks<T>(fixture: ComponentFixture<T>): Array<{
     kind: element.getAttribute("data-kind") ?? "",
     top: Number(element.getAttribute("data-top-minutes") ?? "0"),
     height: Number(element.getAttribute("data-height-minutes") ?? "0"),
+    compact: element.getAttribute("data-compact") === "true",
     laneIndex: Number(element.getAttribute("data-lane-index") ?? "0"),
     laneCount: Number(element.getAttribute("data-lane-count") ?? "1"),
     left: Number(element.getAttribute("data-left-percent") ?? "0"),

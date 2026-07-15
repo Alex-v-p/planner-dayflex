@@ -6,65 +6,184 @@
     Skip to content
   </a>
 
-  <header class="border-b border-mist-200 bg-white/95">
-    <div
-      class="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between"
-    >
-      <div>
-        <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
-          planner-dayflex
-        </p>
-        <p class="mt-1 max-w-xl text-sm text-ink-600">
-          A steady place for flexible days.
-        </p>
-      </div>
-
-      <div class="flex flex-col gap-3 md:items-end">
-        <nav aria-label="Primary navigation">
-          <ul class="flex flex-wrap gap-2">
-            @for (item of navItems; track item.path) {
-              <li>
-                <a
-                  [routerLink]="item.path"
-                  routerLinkActive="bg-meadow-700 text-white"
-                  [routerLinkActiveOptions]="{ exact: item.path === '/' }"
-                  ariaCurrentWhenActive="page"
-                  [attr.aria-label]="item.ariaLabel"
-                  class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-                >
-                  {{ item.label }}
-                </a>
-              </li>
-            }
-          </ul>
-        </nav>
-
-        <div class="flex flex-wrap items-center gap-2">
-          @if (auth.currentUser(); as user) {
-            <span class="text-sm text-ink-600"
-              >Signed in as {{ user.username }}</span
-            >
-            <button
-              type="button"
-              class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-              (click)="signOut()"
-            >
-              Sign out
-            </button>
-          } @else {
-            <a
-              routerLink="/sign-in"
-              class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-            >
-              Sign in
-            </a>
-          }
-        </div>
-      </div>
+  <aside
+    class="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-mist-200 bg-ink-950 text-white md:flex md:flex-col"
+    aria-label="Calendar app navigation"
+  >
+    <div class="border-b border-white/10 px-5 py-5">
+      <p class="text-base font-semibold tracking-normal">Dayflex</p>
+      <p
+        class="mt-1 text-xs font-medium uppercase tracking-normal text-mist-200"
+      >
+        Calendar planner
+      </p>
     </div>
+
+    <nav
+      class="flex-1 overflow-y-auto px-3 py-4"
+      aria-label="Primary navigation"
+    >
+      <p
+        class="px-2 text-xs font-semibold uppercase tracking-normal text-mist-200"
+      >
+        Plan
+      </p>
+      <ul class="mt-2 space-y-1">
+        @for (item of plannerNavItems; track item.path) {
+          <li>
+            <a
+              [routerLink]="item.path"
+              routerLinkActive="!bg-white !text-ink-950"
+              [routerLinkActiveOptions]="{ exact: item.path === '/planner' }"
+              ariaCurrentWhenActive="page"
+              [attr.aria-label]="item.ariaLabel"
+              class="flex min-h-10 items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-mist-100 transition hover:bg-white/10 focus-visible:shadow-focus"
+            >
+              <span>{{ item.label }}</span>
+              <span class="text-xs text-current" aria-hidden="true">&gt;</span>
+            </a>
+          </li>
+        }
+      </ul>
+
+      <p
+        class="mt-6 px-2 text-xs font-semibold uppercase tracking-normal text-mist-200"
+      >
+        App
+      </p>
+      <ul class="mt-2 space-y-1">
+        @for (item of systemNavItems; track item.path) {
+          <li>
+            <a
+              [routerLink]="item.path"
+              routerLinkActive="!bg-white !text-ink-950"
+              [routerLinkActiveOptions]="{ exact: item.path === '/' }"
+              ariaCurrentWhenActive="page"
+              [attr.aria-label]="item.ariaLabel"
+              class="flex min-h-10 items-center rounded-md px-3 py-2 text-sm font-medium text-mist-100 transition hover:bg-white/10 focus-visible:shadow-focus"
+            >
+              {{ item.label }}
+            </a>
+          </li>
+        }
+      </ul>
+    </nav>
+
+    <div class="border-t border-white/10 p-4">
+      @if (auth.currentUser(); as user) {
+        <p
+          class="text-xs font-semibold uppercase tracking-normal text-mist-200"
+        >
+          Account
+        </p>
+        <p class="mt-1 truncate text-sm font-medium text-white">
+          {{ user.username }}
+        </p>
+        <button
+          type="button"
+          class="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-md border border-white/15 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/10 focus-visible:shadow-focus"
+          (click)="signOut()"
+        >
+          Sign out
+        </button>
+      } @else {
+        <a
+          routerLink="/sign-in"
+          class="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-white/15 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/10 focus-visible:shadow-focus"
+        >
+          Sign in
+        </a>
+      }
+    </div>
+  </aside>
+
+  <header
+    class="sticky top-0 z-20 border-b border-mist-200 bg-white/95 backdrop-blur md:hidden"
+  >
+    <div class="flex items-center justify-between gap-3 px-4 py-3">
+      <div>
+        <p class="text-base font-semibold text-ink-950">Dayflex</p>
+        <p class="text-xs font-medium uppercase tracking-normal text-ink-600">
+          Calendar planner
+        </p>
+      </div>
+      @if (auth.currentUser(); as user) {
+        <button
+          type="button"
+          class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+          (click)="signOut()"
+          [attr.aria-label]="'Sign out ' + user.username"
+        >
+          Sign out
+        </button>
+      } @else {
+        <a
+          routerLink="/sign-in"
+          class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+        >
+          Sign in
+        </a>
+      }
+    </div>
+
+    <nav
+      class="overflow-x-auto border-t border-mist-200 px-4 py-2"
+      aria-label="Mobile planner navigation"
+    >
+      <ul class="flex min-w-max gap-2">
+        @for (item of plannerNavItems; track item.path) {
+          <li>
+            <a
+              [routerLink]="item.path"
+              routerLinkActive="!bg-ink-950 !text-white"
+              [routerLinkActiveOptions]="{ exact: item.path === '/planner' }"
+              ariaCurrentWhenActive="page"
+              [attr.aria-label]="item.ariaLabel"
+              class="inline-flex min-h-10 items-center rounded-md border border-mist-200 bg-white px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 focus-visible:shadow-focus"
+            >
+              {{ item.shortLabel }}
+            </a>
+          </li>
+        }
+      </ul>
+    </nav>
   </header>
 
-  <main id="main-content" class="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
-    <router-outlet />
-  </main>
+  <div class="md:pl-64">
+    <main
+      id="main-content"
+      class="mx-auto w-full max-w-7xl px-4 py-6 pb-12 sm:px-6 lg:px-8"
+    >
+      <div
+        class="mb-5 hidden items-center justify-between gap-4 border-b border-mist-200 pb-4 md:flex"
+      >
+        <div>
+          <p
+            class="text-sm font-semibold uppercase tracking-normal text-ink-600"
+          >
+            Planner workspace
+          </p>
+          <p class="mt-1 text-sm text-ink-600">
+            Day, week, month, and free-time routes share the same calendar
+            frame.
+          </p>
+        </div>
+
+        @if (auth.currentUser(); as user) {
+          <div class="text-right">
+            <p
+              class="text-xs font-semibold uppercase tracking-normal text-ink-600"
+            >
+              Signed in
+            </p>
+            <p class="mt-1 text-sm font-medium text-ink-950">
+              Signed in as {{ user.username }}
+            </p>
+          </div>
+        }
+      </div>
+
+      <router-outlet />
+    </main>
+  </div>
 </div>

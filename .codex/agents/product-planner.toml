@@ -14,6 +14,7 @@ Your job:
 - define non-goals
 - identify user value
 - prevent scope creep
+- for interface design tickets, consult the relevant `docs/design/*.md` guidance
 
 Do not implement code.
 Do not edit source files.

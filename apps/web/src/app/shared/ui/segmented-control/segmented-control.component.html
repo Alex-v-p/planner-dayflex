@@ -1,0 +1,22 @@
+<div
+  class="inline-flex rounded-md border border-mist-200 bg-mist-100 p-1"
+  role="group"
+  [attr.aria-label]="ariaLabel"
+>
+  @for (option of options; track option.value) {
+    <button
+      type="button"
+      class="inline-flex min-h-9 items-center justify-center rounded px-3 py-1.5 text-sm font-medium transition focus-visible:shadow-focus"
+      [class.bg-white]="option.value === selected"
+      [class.text-ink-950]="option.value === selected"
+      [class.shadow-sm]="option.value === selected"
+      [class.text-ink-600]="option.value !== selected"
+      [class.hover:text-ink-950]="option.value !== selected"
+      [attr.aria-pressed]="option.value === selected"
+      [attr.aria-label]="option.ariaLabel ?? option.label"
+      (click)="choose(option.value)"
+    >
+      {{ option.label }}
+    </button>
+  }
+</div>

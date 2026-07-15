@@ -59,6 +59,12 @@ For visual interface tickets, inspect `docs/design/inspiration/` when it
 contains relevant references. Treat screenshots as inspiration and never as a
 license to copy another product's interface verbatim.
 
+For interface design tickets, apply `docs/design/ui-ux-rules.md`,
+`docs/design/component-boundaries.md`, and the relevant workflow docs in
+`docs/design/`. Keep reusable style, component ownership, shell/body
+separation, accessibility, responsive behavior, and visual QA proportionate to
+the ticket scope.
+
 Architecture documents describe an intentionally unimplemented proposed
 direction. Do not create its service folders, dependencies, or infrastructure
 until a scoped ticket confirms the needed first increment.
@@ -120,6 +126,19 @@ small documentation/configuration change are not exceptions.
   `packages/scheduler-core`, stay directly testable without a container until a
   scoped ticket establishes a real runtime boundary.
 
+## Interface design expectations
+
+- Use the post-MVP design tickets TKT-027 through TKT-032, or a later explicit
+  interface ticket, for visual redesign work.
+- Prefer shared primitives and theme tokens over page-specific styling.
+- Keep persistent shell concerns separate from feature route bodies.
+- Keep scheduler facts and API orchestration out of generic presentation
+  components.
+- Make important schedule and recovery states distinguishable without relying
+  on color alone.
+- Cover the responsive, accessibility, and state variants touched by the
+  ticket.
+
 ## Human-only actions
 
 Agents must not:
@@ -146,6 +165,8 @@ For each ticket:
 3. Identify affected files. If the data model is affected, explicitly list the
    tables, fields, or constraints being added, changed, or removed; state the
    migration, backfill, and rollback implications.
+   For interface design tickets, also identify affected shell, route body,
+   shared UI, and feature components.
 4. Create or confirm a `tkt-ISSUE_NUMBER-short-title` working branch from
    `develop`.
 5. Delegate the complete initial delivery to `implementer`, including source,
@@ -182,6 +203,8 @@ A ticket is done only when:
 - PR description includes testing notes
 - risk level is documented
 - data-model impact is explicitly documented, or marked `None`
+- Interface design tickets document responsive and accessibility checks, component
+  ownership, and any visual QA that cannot run in CI
 - release PRs document the proposed version increment and changelog impact
 
 ## Branch, commit, and remediation policy
@@ -224,6 +247,14 @@ Treat these as P1 or higher:
   dependency or lacks an explicit contract
 - a changed Compose/container topology without configuration validation, image
   build coverage, or proportionate health/connection checks
+- Interface layout that hides primary planner actions, creates incoherent overlap,
+  clips text or controls at supported widths, or leaves a primary calendar
+  surface blank
+- color-only communication of schedule or recovery status
+- keyboard traps, missing accessible names, invisible focus, or broken focus
+  return in UI workflows
+- shell components that contain feature business logic, duplicate route body
+  responsibilities, or bypass documented component boundaries
 - unrelated rewrites
 - broken migrations
 - missing tests for important behavior

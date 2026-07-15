@@ -8,58 +8,71 @@
     {{ announcement() }}
   </div>
 
-  <header class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-end">
+  <header class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_28rem] lg:items-end">
     <div>
       <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
         Planner summaries
       </p>
-      <h1 class="mt-2 text-3xl font-semibold tracking-normal text-ink-950">
+      <h1
+        class="mt-2 text-2xl font-semibold tracking-normal text-ink-950 sm:text-3xl"
+      >
         {{ title() }}
       </h1>
-      <p class="mt-3 max-w-2xl text-base leading-7 text-ink-600">
+      <p class="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
         Saved daily plans only. These summaries do not move work between days or
         run cross-day scheduling.
       </p>
     </div>
 
     <form
-      class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm"
+      class="rounded-md border border-mist-200 bg-white p-3 shadow-sm"
       (submit)="$event.preventDefault(); openAnchorDate()"
       aria-label="Select overview date"
     >
-      <label for="overview-date" class="text-sm font-medium text-ink-800">
-        Overview date
-      </label>
-      <div class="mt-3 flex flex-col gap-3 sm:flex-row">
+      <div
+        class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <pdf-segmented-control
+          [options]="plannerViewOptions"
+          [selected]="mode()"
+          ariaLabel="Planner view"
+          (selectedChange)="switchPlannerView($event)"
+        />
+        <div class="flex items-center gap-2">
+          <pdf-icon-button
+            [label]="mode() === 'week' ? 'Previous week' : 'Previous month'"
+            glyph="&lt;"
+            (pressed)="moveRange(-1)"
+          />
+          <button
+            type="button"
+            class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 bg-white px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+            (click)="openToday()"
+          >
+            Today
+          </button>
+          <pdf-icon-button
+            [label]="mode() === 'week' ? 'Next week' : 'Next month'"
+            glyph=">"
+            (pressed)="moveRange(1)"
+          />
+        </div>
+      </div>
+      <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+        <label for="overview-date" class="sr-only">Overview date</label>
         <input
           id="overview-date"
           name="overview-date"
           type="date"
-          class="min-h-11 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
+          class="min-h-10 w-full rounded-md border border-mist-300 px-3 py-2 text-base text-ink-950 focus-visible:shadow-focus"
           [ngModel]="anchorDate()"
           (ngModelChange)="anchorDate.set($event)"
         />
         <button
           type="submit"
-          class="inline-flex min-h-11 items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+          class="inline-flex min-h-10 items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
         >
-          Open
-        </button>
-      </div>
-      <div class="mt-3 grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-          (click)="moveRange(-1)"
-        >
-          Previous
-        </button>
-        <button
-          type="button"
-          class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-          (click)="moveRange(1)"
-        >
-          Next
+          Open date
         </button>
       </div>
     </form>
@@ -130,22 +143,10 @@
           Each date links back to the day workspace.
         </p>
       </div>
-      <div class="flex gap-2">
-        <a
-          routerLink="/planner/week"
-          [queryParams]="{ date: view.anchorDate }"
-          class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-        >
-          Week
-        </a>
-        <a
-          routerLink="/planner/month"
-          [queryParams]="{ date: view.anchorDate }"
-          class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-        >
-          Month
-        </a>
-      </div>
+      <pdf-status-chip
+        [status]="mode() === 'week' ? 'planned' : 'incomplete'"
+        [label]="mode() === 'week' ? 'Week range' : 'Month grid'"
+      />
     </div>
 
     <div [class]="gridClass()" data-testid="overview-grid">
@@ -178,44 +179,31 @@
                 {{ dayNumber(cell.day.local_date) }}
               </p>
             </div>
-            <span
-              class="rounded-md border px-2 py-1 text-xs font-semibold"
-              [class.border-meadow-600]="cell.day.status === 'planned'"
-              [class.text-meadow-700]="cell.day.status === 'planned'"
-              [class.border-mist-300]="cell.day.status !== 'planned'"
-              [class.text-ink-600]="cell.day.status !== 'planned'"
-            >
-              {{ statusLabel(cell.day) }}
-            </span>
+            <pdf-status-chip
+              [status]="cell.day.status"
+              [label]="statusLabel(cell.day)"
+            />
           </div>
 
           @if (hasAnySignal(cell.day)) {
-          <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <dt class="text-ink-600">Planned</dt>
-              <dd class="mt-1 font-semibold text-ink-950">
-                {{ formatDuration(cell.day.planned_minutes) }}
-              </dd>
-            </div>
-            <div>
-              <dt class="text-ink-600">Fixed</dt>
-              <dd class="mt-1 font-semibold text-ink-950">
-                {{ cell.day.fixed_event_count }}
-              </dd>
-            </div>
-            <div>
-              <dt class="text-ink-600">Interruptions</dt>
-              <dd class="mt-1 font-semibold text-ink-950">
-                {{ formatDuration(cell.day.interruption_minutes) }}
-              </dd>
-            </div>
-            <div>
-              <dt class="text-ink-600">Deferred</dt>
-              <dd class="mt-1 font-semibold text-ink-950">
-                {{ cell.day.unscheduled_deferred_count }}
-              </dd>
-            </div>
-          </dl>
+          <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <pdf-summary-value
+              label="Planned"
+              [value]="formatDuration(cell.day.planned_minutes)"
+            />
+            <pdf-summary-value
+              label="Fixed"
+              [value]="'' + cell.day.fixed_event_count"
+            />
+            <pdf-summary-value
+              label="Interruptions"
+              [value]="formatDuration(cell.day.interruption_minutes)"
+            />
+            <pdf-summary-value
+              label="Deferred"
+              [value]="'' + cell.day.unscheduled_deferred_count"
+            />
+          </div>
           <p class="mt-4 text-sm font-medium text-ink-700">
             Useful free time:
             <span class="text-ink-950">

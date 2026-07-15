@@ -1,0 +1,10 @@
+<button
+  [type]="type"
+  [disabled]="disabled"
+  [attr.aria-label]="label"
+  [title]="label"
+  (click)="emitPressed()"
+  class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-mist-200 bg-white px-3 py-2 text-sm font-semibold text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100 disabled:text-ink-600"
+>
+  <span aria-hidden="true">{{ glyph }}</span>
+</button>

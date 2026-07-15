@@ -12,6 +12,13 @@ import { FormsModule } from "@angular/forms";
 import { ActivatedRoute, Router, RouterLink } from "@angular/router";
 import { catchError, map, of, switchMap, tap } from "rxjs";
 
+import { IconButtonComponent } from "../../shared/ui/icon-button/icon-button.component";
+import {
+  SegmentedControlComponent,
+  SegmentedControlOption,
+} from "../../shared/ui/segmented-control/segmented-control.component";
+import { StatusChipComponent } from "../../shared/ui/status-chip/status-chip.component";
+import { SummaryValueComponent } from "../../shared/ui/summary-value/summary-value.component";
 import {
   FreeTimeDay,
   FreeTimeRange,
@@ -41,13 +48,28 @@ interface FreeTimeFilters {
   readonly minimumMinutes: number;
 }
 
+const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
+  { label: "Day", value: "day", ariaLabel: "Show day planner" },
+  { label: "Week", value: "week", ariaLabel: "Show week overview" },
+  { label: "Month", value: "month", ariaLabel: "Show month overview" },
+  { label: "Free time", value: "free", ariaLabel: "Show free-time finder" },
+];
+
 @Component({
   selector: "pdf-free-times-page",
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [
+    FormsModule,
+    IconButtonComponent,
+    RouterLink,
+    SegmentedControlComponent,
+    StatusChipComponent,
+    SummaryValueComponent,
+  ],
   templateUrl: "./free-times.page.html",
 })
 export class FreeTimesPage implements OnInit {
+  protected readonly plannerViewOptions = PLANNER_VIEW_OPTIONS;
   protected readonly filters = signal<FreeTimeFilters>(defaultFilters());
   protected readonly state = signal<FreeTimesState>({
     status: "loading",
@@ -124,6 +146,58 @@ export class FreeTimesPage implements OnInit {
         minimum_minutes: filters.minimumMinutes,
       },
     });
+  }
+
+  protected moveRange(days: number): void {
+    const current = this.filters();
+    const nextStart = addDays(current.startDate, days);
+    const nextEnd = addDays(current.endDate, days);
+    this.filters.set({ ...current, startDate: nextStart, endDate: nextEnd });
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        start_date: nextStart,
+        end_date: nextEnd,
+        minimum_minutes: current.minimumMinutes,
+      },
+    });
+  }
+
+  protected openToday(): void {
+    const current = this.filters();
+    const nextStart = todayLocalDate();
+    const nextEnd = addDays(nextStart, 6);
+    this.filters.set({ ...current, startDate: nextStart, endDate: nextEnd });
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        start_date: nextStart,
+        end_date: nextEnd,
+        minimum_minutes: current.minimumMinutes,
+      },
+    });
+  }
+
+  protected switchPlannerView(view: string): void {
+    const date = this.filters().startDate;
+    const route =
+      view === "week"
+        ? "/planner/week"
+        : view === "month"
+          ? "/planner/month"
+          : view === "free"
+            ? "/free-times"
+            : "/planner";
+    const queryParams =
+      view === "free"
+        ? {
+            start_date: this.filters().startDate,
+            end_date: this.filters().endDate,
+            minimum_minutes: this.filters().minimumMinutes,
+          }
+        : { date };
+
+    void this.router.navigate([route], { queryParams });
   }
 
   protected updateFilter<K extends keyof FreeTimeFilters>(
