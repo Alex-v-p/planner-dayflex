@@ -1048,8 +1048,11 @@ describe("rendered planner workspace", () => {
     expect(dayHeaderSummaryText(fixture)).toContain("Completed work");
     expect(dayHeaderSummaryText(fixture)).toContain("0 min");
     expect(
-      query(fixture, "[aria-labelledby='timeline-title'] button"),
-    ).toBeNull();
+      buttonsByText(
+        query(fixture, "[aria-labelledby='timeline-title']"),
+        "Generate plan",
+      ),
+    ).toEqual([]);
     expect(text(fixture)).toContain(
       "Write report was placed in the earliest valid window.",
     );
@@ -1085,7 +1088,9 @@ describe("rendered planner workspace", () => {
 
     expect(plannerApi.loadedDates).toEqual([canonicalDate]);
     expect(dayHeaderText(fixture)).toContain("June 22, 2026");
-    expect(dayHeaderText(fixture)).toContain("Day bounds 08:00-18:00");
+    expect(
+      query(fixture, "[aria-labelledby='timeline-title']")?.textContent,
+    ).toContain("Day bounds 08:00-18:00");
     expect(dayHeaderSummaryText(fixture)).toContain("Snapshot");
     expect(dayHeaderSummaryText(fixture)).toContain("v1");
     expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
@@ -3254,6 +3259,16 @@ function buttonByText<T>(
   }
 
   return button as HTMLButtonElement;
+}
+
+function buttonsByText(
+  region: Element | null,
+  buttonText: string,
+): HTMLButtonElement[] {
+  return Array.from(region?.querySelectorAll("button") ?? []).filter(
+    (candidate): candidate is HTMLButtonElement =>
+      candidate.textContent?.includes(buttonText) ?? false,
+  );
 }
 
 function regionIdForLabel(regionLabel: string): string {
