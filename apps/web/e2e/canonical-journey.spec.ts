@@ -178,7 +178,10 @@ test("canonical recovery journey works with a stubbed API", async ({
   await page.getByRole("button", { name: "Add event" }).click();
   await expect(page.getByText("Team meeting")).toBeVisible();
 
-  await page.getByRole("button", { name: "Generate plan" }).click();
+  await page
+    .getByTestId("day-workspace-header")
+    .getByRole("button", { name: "Generate plan" })
+    .click();
   await expect(page.getByText("Generated schedule snapshot v1.")).toBeVisible();
   await expect(page.getByTestId("daily-timeline")).toContainText("Free");
 
