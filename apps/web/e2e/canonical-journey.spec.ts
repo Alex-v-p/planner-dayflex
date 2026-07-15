@@ -160,22 +160,36 @@ test("canonical recovery journey works with a stubbed API", async ({
     page.getByText("No saved planning day for this date."),
   ).toBeVisible();
 
+  await page
+    .locator("[aria-labelledby='tasks-title']")
+    .getByRole("button", { name: "Add task" })
+    .click();
   await page.locator("#task-title").fill(task.title);
   await page.locator("#task-estimate").fill(String(task.estimated_minutes));
   await page.locator("#task-priority").fill(String(task.priority));
   await page.locator("#task-due-date").fill(task.due_date);
-  await page.getByRole("button", { name: "Add task" }).click();
+  await page
+    .locator("form[aria-label='Flexible task details']")
+    .getByRole("button", { name: "Add task" })
+    .click();
   await expect(
     page.locator("[aria-labelledby='tasks-title']").getByText("Write report", {
       exact: true,
     }),
   ).toBeVisible();
 
+  await page
+    .locator("[aria-labelledby='fixed-events-title']")
+    .getByRole("button", { name: "Add event" })
+    .click();
   await page.locator("#fixed-event-title").fill(fixedEvent.title);
   await page.locator("#fixed-event-start").fill("2026-07-04T09:00");
   await page.locator("#fixed-event-end").fill("2026-07-04T10:00");
   await page.locator("#fixed-event-time-zone").fill("Europe/Brussels");
-  await page.getByRole("button", { name: "Add event" }).click();
+  await page
+    .locator("form[aria-label='Fixed event details']")
+    .getByRole("button", { name: "Add event" })
+    .click();
   await expect(page.getByText("Team meeting")).toBeVisible();
 
   await page

@@ -1324,12 +1324,48 @@ describe("rendered planner workspace", () => {
     expect(announcement(fixture)).toContain("Planner workspace loaded");
   });
 
+  it("opens contextual editors, cancels without saving, and returns focus", async () => {
+    plannerApi.result = workspaceData({ snapshot: null });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const addTaskButton = buttonByText(fixture, "Add task", "Flexible tasks");
+
+    addTaskButton.focus();
+    addTaskButton.click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(query(fixture, "[role='dialog']")).not.toBeNull();
+    expect(text(fixture)).toContain("Add flexible task");
+    setInput(fixture, "#task-title", "Unsaved task");
+    buttonByText(fixture, "Cancel", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(query(fixture, "#task-title")).toBeNull();
+    expect(plannerApi.createdTasks).toEqual([]);
+    expect(document.activeElement).toBe(addTaskButton);
+
+    await openNewFixedEventEditor(fixture);
+    expect(query(fixture, "[aria-modal='true']")).not.toBeNull();
+    expect(text(fixture)).toContain("Add fixed event");
+    buttonByText(fixture, "Close", "Fixed events").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(query(fixture, "#fixed-event-title")).toBeNull();
+    expect(plannerApi.savedFixedEvents).toEqual([]);
+  });
+
   it("shows a task suggestion and applies it only into editable fields", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const suggestionResponse = new Subject<unknown>();
     plannerApi.taskSuggestionResponse = suggestionResponse;
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    await openNewTaskEditor(fixture);
     setInput(fixture, "#task-ai-text", "Write final report for 45 minutes");
     buttonByText(fixture, "Suggest details", "Flexible tasks").click();
     fixture.detectChanges();
@@ -1394,6 +1430,7 @@ describe("rendered planner workspace", () => {
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    await openNewTaskEditor(fixture);
     setInput(fixture, "#task-ai-text", "something");
     buttonByText(fixture, "Suggest details", "Flexible tasks").click();
     fixture.detectChanges();
@@ -2438,6 +2475,7 @@ describe("rendered planner workspace", () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    await openNewTaskEditor(fixture);
     setInput(fixture, "#task-title", "Draft outline");
     setInput(fixture, "#task-estimate", "30");
     setInput(fixture, "#task-priority", "3");
@@ -2453,6 +2491,7 @@ describe("rendered planner workspace", () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    await openNewTaskEditor(fixture);
     setInput(fixture, "#task-title", "Draft outline");
     setInput(fixture, "#task-estimate", "30");
     setInput(fixture, "#task-priority", "6");
@@ -2467,6 +2506,7 @@ describe("rendered planner workspace", () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    await openNewTaskEditor(fixture);
     setInput(fixture, "#task-title", "Draft outline");
     setInput(fixture, "#task-estimate", "30");
     setInput(fixture, "#task-priority", "3");
@@ -2504,6 +2544,7 @@ describe("rendered planner workspace", () => {
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    await openNewTaskEditor(fixture);
     setInput(fixture, "#task-title", "Server rejected task");
     setInput(fixture, "#task-estimate", "30");
     setInput(fixture, "#task-priority", "3");
@@ -2535,6 +2576,7 @@ describe("rendered planner workspace", () => {
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    await openNewFixedEventEditor(fixture);
     expect(inputValue(fixture, "#fixed-event-time-zone")).toBe(
       "America/New_York",
     );
@@ -2544,6 +2586,7 @@ describe("rendered planner workspace", () => {
     plannerApi.result = workspaceData({ fixedEvents: [], snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    await openNewFixedEventEditor(fixture);
     setInput(fixture, "#fixed-event-title", "Trimmed event");
     setInput(fixture, "#fixed-event-start", "2026-07-04T09:00");
     setInput(fixture, "#fixed-event-end", "2026-07-04T10:00");
@@ -2570,6 +2613,7 @@ describe("rendered planner workspace", () => {
     plannerApi.result = workspaceData({ fixedEvents: [], snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    await openNewFixedEventEditor(fixture);
     setInput(fixture, "#fixed-event-title", "Backwards event");
     setInput(fixture, "#fixed-event-start", "2026-07-04T10:00");
     setInput(fixture, "#fixed-event-end", "2026-07-04T09:00");
@@ -2586,6 +2630,8 @@ describe("rendered planner workspace", () => {
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
     buttonByText(fixture, "Edit", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
     fixture.detectChanges();
     setInput(fixture, "#task-title", "Write final report");
     setInput(fixture, "#task-estimate", "75");
@@ -2619,6 +2665,8 @@ describe("rendered planner workspace", () => {
 
     buttonByText(fixture, "Edit", "Fixed events").click();
     fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
     setInput(fixture, "#fixed-event-title", "Planning review");
     setInput(fixture, "#fixed-event-start", "2026-07-04T11:00");
     setInput(fixture, "#fixed-event-end", "2026-07-04T12:00");
@@ -2650,7 +2698,9 @@ describe("rendered planner workspace", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Delete", "Flexible tasks").click();
+    buttonByText(fixture, "Edit", "Flexible tasks").click();
+    fixture.detectChanges();
+    buttonByText(fixture, "Delete task", "Flexible tasks").click();
     fixture.detectChanges();
     await nextMicrotask();
 
@@ -2667,7 +2717,9 @@ describe("rendered planner workspace", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Delete", "Fixed events").click();
+    buttonByText(fixture, "Edit", "Fixed events").click();
+    fixture.detectChanges();
+    buttonByText(fixture, "Delete event", "Fixed events").click();
 
     expect(plannerApi.deletedFixedEvents).toEqual([]);
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
@@ -3259,6 +3311,24 @@ function buttonByText<T>(
   }
 
   return button as HTMLButtonElement;
+}
+
+async function openNewTaskEditor(
+  fixture: ComponentFixture<PlannerWorkspacePage>,
+): Promise<void> {
+  buttonByText(fixture, "Add task", "Flexible tasks").click();
+  fixture.detectChanges();
+  await nextMicrotask();
+  fixture.detectChanges();
+}
+
+async function openNewFixedEventEditor(
+  fixture: ComponentFixture<PlannerWorkspacePage>,
+): Promise<void> {
+  buttonByText(fixture, "Add event", "Fixed events").click();
+  fixture.detectChanges();
+  await nextMicrotask();
+  fixture.detectChanges();
 }
 
 function buttonsByText(
