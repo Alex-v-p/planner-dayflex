@@ -2784,6 +2784,9 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("Use a date without a time.");
     expect(inputAriaInvalid(fixture, "#task-title")).toBe("true");
     expect(inputAriaInvalid(fixture, "#task-due-date")).toBe("true");
+    expect(inputAriaDescribedBy(fixture, "#task-title")).toBe(
+      "task-title-error",
+    );
     expect(inputValue(fixture, "#task-title")).toBe("Server rejected task");
     expect(inputValue(fixture, "#task-estimate")).toBe("30");
     expect(inputValue(fixture, "#task-priority")).toBe("3");

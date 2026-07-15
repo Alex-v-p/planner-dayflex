@@ -1246,9 +1246,10 @@
                   [ngModel]="taskForm().title"
                   (ngModelChange)="updateTaskForm({ title: $event })"
                   [attr.aria-invalid]="fieldError(taskFormErrors(), 'title') ? 'true' : null"
+                  [attr.aria-describedby]="fieldError(taskFormErrors(), 'title') ? 'task-title-error' : null"
                 />
                 @if (fieldError(taskFormErrors(), "title")) {
-                <p class="mt-1 text-sm text-signal-700">
+                <p id="task-title-error" class="mt-1 text-sm text-signal-700">
                   {{ fieldError(taskFormErrors(), "title") }}
                 </p>
                 }
