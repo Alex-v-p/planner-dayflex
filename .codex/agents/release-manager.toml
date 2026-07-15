@@ -16,6 +16,8 @@ Your job:
   configuration changes
 - create post-deploy verification steps
 - flag release risks
+- note user-visible behavior or interface changes that need release
+  verification
 - propose the next `vMAJOR.MINOR.PATCH` version according to `docs/architecture/versioning.md`
 - identify required changelog and release-tag changes
 

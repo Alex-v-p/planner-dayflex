@@ -70,6 +70,52 @@ review outcome. Checkboxes belong only to genuine actions someone still needs
 to complete, never to facts such as a risk classification, workflow role, or
 branch target.
 
+## Agent starter prompt
+
+Use this prompt when starting an agent on a ticket. Replace the ticket number,
+title, and path before sending it.
+
+```txt
+Complete TKT-XXX: Ticket title
+
+Use the GitHub Issue or `docs/tickets/TKT-XXX-ticket-title.md` as the complete
+scope of work. Follow `AGENTS.md` and all relevant product, architecture,
+repository-structure, data-model, testing, versioning, delivery-workflow, and
+ticket-specific documentation.
+
+If the ticket changes the web interface, also apply the relevant docs in
+`docs/design/`, inspect any cited inspiration catalog entries, and use
+design_reviewer to review the design outcome before or alongside the general
+reviewer.
+
+Work from a ticket branch based on `develop`. If the ticket is unclear or
+blocked by a missing decision, use product_planner or architect to propose a
+clarification and stop before coding.
+
+Otherwise: plan first, implement the smallest complete change, add or update
+tests, keep CI aligned with practical new checks, and run relevant checks.
+
+Commit work intermittently instead of waiting until the end. Use small,
+coherent commits with clear semantic commit messages, such as `feat: persist
+planning preferences`, `test: cover saved planning inputs`, or `fix: handle
+missing preference defaults`. Each commit should represent a meaningful step in
+the ticket and avoid mixing unrelated changes.
+
+Use tester and reviewer after implementation. For interface design tickets, use
+design_reviewer as well. Route P0/P1 findings back to the appropriate agent
+until resolved, then re-run relevant checks and review again.
+
+Open or update a draft PR targeting `develop`. Do not merge, push directly to
+`develop` or `main`, broaden scope, weaken tests or CI, or change auth,
+authorization, data-model, service-boundary, or container patterns without
+explicitly documenting the impact. When using GitHub, use GitHub HTTPS, not
+`gh`.
+
+In the final response include: ticket handled, branch, commits, changes,
+data-model impact, service/container impact, checks, CI changes, reviewer and
+design-reviewer findings where relevant, remaining risks, and PR link.
+```
+
 ## Service and container delivery
 
 When a ticket introduces or changes a separately runnable service, its review

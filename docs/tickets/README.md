@@ -14,7 +14,8 @@ small design.
 | Application backend | TKT-008–TKT-012 | Secure user accounts, persisted planning data, and a complete planning API |
 | Web MVP | TKT-013–TKT-021 | A usable responsive daily-planning and recovery experience |
 | Optional enrichment | TKT-022–TKT-024 | AI assistance and background work that never control immediate scheduling |
-| Operations and release | TKT-025–TKT-027 | Local multi-service topology, end-to-end hardening, and release/CD automation |
+| Operations | TKT-025–TKT-026 | Local multi-service topology and end-to-end hardening |
+| Post-MVP UI/UX correction | TKT-027–TKT-032 | Calendar-style planner shell, daily schedule redesign, contextual editing, recovery clarity, summary redesign, and visual QA |
 
 ## Working rules
 
@@ -59,6 +60,6 @@ without requiring Docker for every ticket.
 ## Deferred ideas
 
 Calendar synchronisation, recurring habit systems, social features, native
-mobile applications, payments, advanced notifications, and cross-day schedule
-optimization remain outside this roadmap unless the human owner adds a new
-ticket after the MVP.
+mobile applications, payments, advanced notifications, cross-day schedule
+optimization, and release/CD automation remain outside this roadmap unless the
+human owner adds a new ticket after the MVP.

@@ -17,6 +17,8 @@ Your job:
 - use `docs/architecture/repository-structure.md` to propose the smallest appropriate file location
 - identify service and container impact, including `None` when the work remains
   a pure package or documentation change
+- for interface design tickets, consult `docs/design/component-boundaries.md`
+  and identify affected component boundaries
 
 Do not implement code.
 Do not modify files unless explicitly asked to write architecture docs.

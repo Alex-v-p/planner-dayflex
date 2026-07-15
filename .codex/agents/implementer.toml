@@ -20,6 +20,7 @@ Your job:
 - follow `docs/architecture/repository-structure.md`; do not create broad empty scaffolding
 - state service and container impact in the ticket/PR, including `None` for
   pure-package work
+- for interface design tickets, follow the relevant `docs/design/*.md` guidance
 
 Rules:
 - do not work without a ticket
