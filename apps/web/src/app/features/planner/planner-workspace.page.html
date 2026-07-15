@@ -236,8 +236,8 @@
             aria-hidden="true"
           ></span>
           } @for (block of timelineBlocks( snapshot, view.data.tasks,
-          view.data.fixedEvents, view.data.day?.time_zone ); track
-          block.item.id) {
+          view.data.fixedEvents, view.data.progress, view.data.day?.time_zone );
+          track block.item.id) {
           <article
             [class]="itemClass(block.item.kind, block.isCompact)"
             [style.top.%]="block.topPercent"
@@ -247,6 +247,7 @@
             [attr.data-kind]="block.item.kind"
             [attr.data-item-id]="block.item.id"
             [attr.data-recovery]="block.recoveryLabel"
+            [attr.data-completion]="block.completionLabel"
             [attr.data-compact]="block.isCompact ? 'true' : null"
             [attr.data-top-minutes]="block.topMinutes"
             [attr.data-height-minutes]="block.heightMinutes"
@@ -275,6 +276,8 @@
               <span class="min-w-0 truncate">{{ block.marker }}</span>
               @if (block.recoveryLabel) {
               <span class="shrink-0">{{ block.recoveryLabel }}</span>
+              } @if (block.completionLabel) {
+              <span class="shrink-0">{{ block.completionLabel }}</span>
               }
             </div>
             } @else {
@@ -299,6 +302,13 @@
               <span class="ml-2 inline-flex align-middle">
                 <pdf-status-chip status="moved" [label]="block.recoveryLabel" />
               </span>
+              } @if (block.completionLabel) {
+              <span class="ml-2 inline-flex align-middle">
+                <pdf-status-chip
+                  status="completed"
+                  [label]="block.completionLabel"
+                />
+              </span>
               }
             </p>
             }
@@ -313,8 +323,8 @@
         aria-label="Timeline block details"
       >
         @for (block of timelineBlocks( snapshot, view.data.tasks,
-        view.data.fixedEvents, view.data.day?.time_zone ); track block.item.id)
-        {
+        view.data.fixedEvents, view.data.progress, view.data.day?.time_zone );
+        track block.item.id) {
         <div class="rounded-md border border-mist-200 bg-white px-3 py-2">
           <p class="text-sm font-medium text-ink-950">
             <pdf-block-type-marker
@@ -504,7 +514,7 @@
       @if (view.data.snapshot; as selectedSnapshot) { @if
       (selectedSnapshot.items.length > 0) { @let selectedBlock =
       selectedTimelineBlock( selectedSnapshot, view.data.tasks,
-      view.data.fixedEvents, view.data.day?.time_zone );
+      view.data.fixedEvents, view.data.progress, view.data.day?.time_zone );
       <section
         aria-labelledby="selected-block-title"
         class="rounded-lg border border-mist-200 bg-white p-5 shadow-sm"
@@ -532,6 +542,11 @@
           <pdf-status-chip
             status="moved"
             [label]="selectedBlock.recoveryLabel"
+          />
+          } @if (selectedBlock.completionLabel) {
+          <pdf-status-chip
+            status="completed"
+            [label]="selectedBlock.completionLabel"
           />
           }
         </div>

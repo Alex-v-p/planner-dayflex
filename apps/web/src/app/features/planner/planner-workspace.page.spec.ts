@@ -337,6 +337,324 @@ const revisedStudySnapshot: ScheduleSnapshot = {
   ],
 };
 
+const canonicalDate = "2026-06-22";
+
+const canonicalFixedEvents: readonly FixedEvent[] = [
+  {
+    ...fixedEvent,
+    id: "canonical-team-meeting",
+    title: "Team meeting",
+    start_at: "2026-06-22T09:00:00+02:00",
+    end_at: "2026-06-22T10:00:00+02:00",
+  },
+  {
+    ...fixedEvent,
+    id: "canonical-lunch",
+    title: "Lunch appointment",
+    start_at: "2026-06-22T12:00:00+02:00",
+    end_at: "2026-06-22T13:00:00+02:00",
+  },
+  {
+    ...fixedEvent,
+    id: "canonical-collection",
+    title: "Collection appointment",
+    start_at: "2026-06-22T15:30:00+02:00",
+    end_at: "2026-06-22T16:00:00+02:00",
+  },
+];
+
+const canonicalTasks: readonly Task[] = [
+  {
+    ...task,
+    id: "canonical-inbox",
+    title: "Reply to inbox",
+    estimated_minutes: 45,
+    priority: 4,
+  },
+  {
+    ...task,
+    id: "canonical-report",
+    title: "Write report",
+    estimated_minutes: 90,
+    priority: 5,
+  },
+  {
+    ...task,
+    id: "canonical-study",
+    title: "Study notes",
+    estimated_minutes: 90,
+    priority: 3,
+    splitting_allowed: true,
+    min_segment_minutes: 15,
+  },
+  {
+    ...task,
+    id: "canonical-groceries",
+    title: "Buy groceries",
+    estimated_minutes: 30,
+    priority: 2,
+    due_date: canonicalDate,
+  },
+];
+
+const canonicalInitialSnapshot: ScheduleSnapshot = {
+  ...snapshot,
+  id: "canonical-initial-snapshot",
+  version: 1,
+  created_at: "2026-06-22T06:05:00Z",
+  items: [
+    {
+      id: "canonical-inbox-item",
+      kind: "task",
+      task_id: "canonical-inbox",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T08:00:00+02:00",
+      end_at: "2026-06-22T08:45:00+02:00",
+    },
+    {
+      id: "canonical-buffer-1",
+      kind: "buffer",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T08:45:00+02:00",
+      end_at: "2026-06-22T08:55:00+02:00",
+    },
+    {
+      id: "canonical-team-meeting-item",
+      kind: "fixed_event",
+      task_id: null,
+      fixed_event_id: "canonical-team-meeting",
+      interruption_id: null,
+      start_at: "2026-06-22T09:00:00+02:00",
+      end_at: "2026-06-22T10:00:00+02:00",
+    },
+    {
+      id: "canonical-report-item",
+      kind: "task",
+      task_id: "canonical-report",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T10:00:00+02:00",
+      end_at: "2026-06-22T11:30:00+02:00",
+    },
+    {
+      id: "canonical-buffer-2",
+      kind: "buffer",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T11:30:00+02:00",
+      end_at: "2026-06-22T11:40:00+02:00",
+    },
+    {
+      id: "canonical-lunch-item",
+      kind: "fixed_event",
+      task_id: null,
+      fixed_event_id: "canonical-lunch",
+      interruption_id: null,
+      start_at: "2026-06-22T12:00:00+02:00",
+      end_at: "2026-06-22T13:00:00+02:00",
+    },
+    {
+      id: "canonical-study-item",
+      kind: "task",
+      task_id: "canonical-study",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T13:00:00+02:00",
+      end_at: "2026-06-22T14:30:00+02:00",
+    },
+    {
+      id: "canonical-buffer-3",
+      kind: "buffer",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T14:30:00+02:00",
+      end_at: "2026-06-22T14:40:00+02:00",
+    },
+    {
+      id: "canonical-groceries-item",
+      kind: "task",
+      task_id: "canonical-groceries",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T14:40:00+02:00",
+      end_at: "2026-06-22T15:10:00+02:00",
+    },
+    {
+      id: "canonical-buffer-4",
+      kind: "buffer",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T15:10:00+02:00",
+      end_at: "2026-06-22T15:20:00+02:00",
+    },
+    {
+      id: "canonical-collection-item",
+      kind: "fixed_event",
+      task_id: null,
+      fixed_event_id: "canonical-collection",
+      interruption_id: null,
+      start_at: "2026-06-22T15:30:00+02:00",
+      end_at: "2026-06-22T16:00:00+02:00",
+    },
+    {
+      id: "canonical-free-item",
+      kind: "designated_free_time",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T16:00:00+02:00",
+      end_at: "2026-06-22T18:00:00+02:00",
+    },
+  ],
+  decisions: [
+    {
+      id: "canonical-inbox-decision",
+      task_id: "canonical-inbox",
+      reason_code: "placed_in_earliest_valid_window",
+      details: {},
+    },
+    {
+      id: "canonical-report-decision",
+      task_id: "canonical-report",
+      reason_code: "placed_in_earliest_valid_window",
+      details: {},
+    },
+    {
+      id: "canonical-study-decision",
+      task_id: "canonical-study",
+      reason_code: "placed_in_earliest_valid_window",
+      details: {},
+    },
+    {
+      id: "canonical-groceries-decision",
+      task_id: "canonical-groceries",
+      reason_code: "placed_in_earliest_valid_window",
+      details: {},
+    },
+    {
+      id: "canonical-free-decision",
+      task_id: null,
+      reason_code: "designated_free_time",
+      details: {},
+    },
+  ],
+};
+
+const canonicalRevisedSnapshot: ScheduleSnapshot = {
+  ...canonicalInitialSnapshot,
+  id: "canonical-revised-snapshot",
+  version: 2,
+  items: [
+    {
+      id: "canonical-study-completed-item",
+      kind: "task",
+      task_id: "canonical-study",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T13:00:00+02:00",
+      end_at: "2026-06-22T14:00:00+02:00",
+    },
+    {
+      id: "canonical-interruption-item",
+      kind: "interruption",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: "canonical-interruption",
+      start_at: "2026-06-22T14:00:00+02:00",
+      end_at: "2026-06-22T15:15:00+02:00",
+    },
+    {
+      id: "canonical-revised-collection-item",
+      kind: "fixed_event",
+      task_id: null,
+      fixed_event_id: "canonical-collection",
+      interruption_id: null,
+      start_at: "2026-06-22T15:30:00+02:00",
+      end_at: "2026-06-22T16:00:00+02:00",
+    },
+    {
+      id: "canonical-study-moved-item",
+      kind: "task",
+      task_id: "canonical-study",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T16:00:00+02:00",
+      end_at: "2026-06-22T16:30:00+02:00",
+    },
+    {
+      id: "canonical-revised-buffer-1",
+      kind: "buffer",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T16:30:00+02:00",
+      end_at: "2026-06-22T16:40:00+02:00",
+    },
+    {
+      id: "canonical-groceries-moved-item",
+      kind: "task",
+      task_id: "canonical-groceries",
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T16:40:00+02:00",
+      end_at: "2026-06-22T17:10:00+02:00",
+    },
+    {
+      id: "canonical-revised-buffer-2",
+      kind: "buffer",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T17:10:00+02:00",
+      end_at: "2026-06-22T17:20:00+02:00",
+    },
+    {
+      id: "canonical-revised-free-item",
+      kind: "designated_free_time",
+      task_id: null,
+      fixed_event_id: null,
+      interruption_id: null,
+      start_at: "2026-06-22T17:20:00+02:00",
+      end_at: "2026-06-22T18:00:00+02:00",
+    },
+  ],
+  decisions: [
+    {
+      id: "canonical-study-moved-decision",
+      task_id: "canonical-study",
+      reason_code: "moved_after_interruption",
+      details: {},
+    },
+    {
+      id: "canonical-groceries-moved-decision",
+      task_id: "canonical-groceries",
+      reason_code: "moved_after_interruption",
+      details: {},
+    },
+    {
+      id: "canonical-revised-free-decision",
+      task_id: null,
+      reason_code: "designated_free_time",
+      details: {},
+    },
+  ],
+};
+
+const canonicalStudyProgress: TaskProgress = {
+  ...progressRecord,
+  id: "canonical-study-progress",
+  task_id: "canonical-study",
+  completed_minutes: 60,
+  recorded_at: "2026-06-22T14:00:00+02:00",
+  created_at: "2026-06-22T12:00:00Z",
+};
+
 describe("planner workspace API contract", () => {
   it("loads the selected day through authenticated user-scoped planning endpoints", async () => {
     const api = new FakeApiClient();
@@ -752,6 +1070,191 @@ describe("rendered planner workspace", () => {
     expect(announcement(fixture)).toContain("Planner workspace loaded");
   });
 
+  it("renders the documented canonical initial day with accurate times and summary values", async () => {
+    routeParams = new BehaviorSubject(
+      convertToParamMap({ date: canonicalDate }),
+    );
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      fixedEvents: canonicalFixedEvents,
+      tasks: canonicalTasks,
+      snapshot: canonicalInitialSnapshot,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const blocks = timelineBlocks(fixture);
+
+    expect(plannerApi.loadedDates).toEqual([canonicalDate]);
+    expect(dayHeaderText(fixture)).toContain("June 22, 2026");
+    expect(dayHeaderText(fixture)).toContain("Day bounds 08:00-18:00");
+    expect(dayHeaderSummaryText(fixture)).toContain("Snapshot");
+    expect(dayHeaderSummaryText(fixture)).toContain("v1");
+    expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
+    expect(dayHeaderSummaryText(fixture)).toContain("4 hr 15 min");
+    expect(dayHeaderSummaryText(fixture)).toContain("Free time");
+    expect(dayHeaderSummaryText(fixture)).toContain("2 hr");
+    expect(dayHeaderSummaryText(fixture)).toContain("Deferred work");
+    expect(dayHeaderSummaryText(fixture)).toContain("0");
+    expect(timeRulerText(fixture)).toContain("08:00");
+    expect(timeRulerText(fixture)).toContain("18:00");
+    expect(
+      blocks.map((block) => [block.kind, block.top, block.height]),
+    ).toEqual([
+      ["task", 0, 45],
+      ["buffer", 45, 10],
+      ["fixed_event", 60, 60],
+      ["task", 120, 90],
+      ["buffer", 210, 10],
+      ["fixed_event", 240, 60],
+      ["task", 300, 90],
+      ["buffer", 390, 10],
+      ["task", 400, 30],
+      ["buffer", 430, 10],
+      ["fixed_event", 450, 30],
+      ["designated_free_time", 480, 120],
+    ]);
+    expect(blocks.every((block) => block.laneCount === 1)).toBe(true);
+    expect(text(fixture)).toContain("Designated Free Time");
+    expect(text(fixture)).toContain(
+      "A remaining useful window was kept as free time.",
+    );
+
+    scheduleBlockById(fixture, "canonical-free-item").dispatchEvent(
+      new FocusEvent("focus", { bubbles: true }),
+    );
+    fixture.detectChanges();
+
+    expect(selectedBlockDetailText(fixture)).toContain("Designated Free Time");
+    expect(selectedBlockDetailText(fixture)).toContain("2 hr");
+    expect(selectedBlockDetailText(fixture)).toContain(
+      expectedTimeRange(
+        "2026-06-22T16:00:00+02:00",
+        "2026-06-22T18:00:00+02:00",
+        "Europe/Brussels",
+      ),
+    );
+    expect(selectedBlockDetailText(fixture)).toContain(
+      "A remaining useful window was kept as free time.",
+    );
+  });
+
+  it("renders the documented canonical revised day with moved, completed, and free-time states", async () => {
+    routeParams = new BehaviorSubject(
+      convertToParamMap({ date: canonicalDate }),
+    );
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      fixedEvents: canonicalFixedEvents,
+      tasks: canonicalTasks.map((candidate) =>
+        candidate.id === "canonical-study"
+          ? {
+              ...candidate,
+              completed_minutes: 60,
+              remaining_minutes: 30,
+            }
+          : candidate,
+      ),
+      progress: [canonicalStudyProgress],
+      snapshot: canonicalRevisedSnapshot,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const blocks = timelineBlocks(fixture);
+
+    expect(dayHeaderText(fixture)).toContain("June 22, 2026");
+    expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
+    expect(dayHeaderSummaryText(fixture)).toContain("2 hr");
+    expect(dayHeaderSummaryText(fixture)).toContain("Free time");
+    expect(dayHeaderSummaryText(fixture)).toContain("40 min");
+    expect(dayHeaderSummaryText(fixture)).toContain("Completed work");
+    expect(dayHeaderSummaryText(fixture)).toContain("1 hr");
+    expect(
+      blocks.map((block) => [block.kind, block.top, block.height]),
+    ).toEqual([
+      ["task", 300, 60],
+      ["interruption", 360, 75],
+      ["fixed_event", 450, 30],
+      ["task", 480, 30],
+      ["buffer", 510, 10],
+      ["task", 520, 30],
+      ["buffer", 550, 10],
+      ["designated_free_time", 560, 40],
+    ]);
+    expect(text(fixture)).toContain("Moved work");
+    expect(text(fixture)).toContain(
+      "Study notes was moved after reported unavailable time.",
+    );
+    expect(text(fixture)).toContain(
+      "Buy groceries was moved after reported unavailable time.",
+    );
+    expect(text(fixture)).toContain("Completed history");
+    expect(text(fixture)).toContain("Study notes - 1 hr recorded at");
+    expect(
+      scheduleBlockById(fixture, "canonical-study-completed-item").getAttribute(
+        "data-recovery",
+      ),
+    ).toBeNull();
+    expect(
+      scheduleBlockById(fixture, "canonical-study-completed-item").getAttribute(
+        "data-completion",
+      ),
+    ).toBe("Done");
+    expect(
+      scheduleBlockById(fixture, "canonical-study-completed-item").getAttribute(
+        "aria-label",
+      ),
+    ).toContain("Done");
+    expect(
+      scheduleBlockById(fixture, "canonical-study-moved-item").getAttribute(
+        "data-recovery",
+      ),
+    ).toBeNull();
+    expect(
+      scheduleBlockById(fixture, "canonical-study-moved-item").getAttribute(
+        "data-completion",
+      ),
+    ).toBeNull();
+    expect(
+      scheduleBlockById(fixture, "canonical-groceries-moved-item").getAttribute(
+        "data-recovery",
+      ),
+    ).toBeNull();
+
+    scheduleBlockById(fixture, "canonical-study-completed-item").dispatchEvent(
+      new FocusEvent("focus", { bubbles: true }),
+    );
+    fixture.detectChanges();
+
+    expect(selectedBlockDetailText(fixture)).toContain("Study notes");
+    expect(selectedBlockDetailText(fixture)).toContain("Done");
+    expect(selectedBlockDetailText(fixture)).toContain(
+      "Scheduled from the persisted snapshot.",
+    );
+    expect(selectedBlockDetailText(fixture)).not.toContain(
+      "Study notes was moved after reported unavailable time.",
+    );
+
+    scheduleBlockById(fixture, "canonical-groceries-moved-item").dispatchEvent(
+      new FocusEvent("focus", { bubbles: true }),
+    );
+    fixture.detectChanges();
+
+    expect(selectedBlockDetailText(fixture)).toContain("Buy groceries");
+    expect(selectedBlockDetailText(fixture)).toContain("Task");
+    expect(selectedBlockDetailText(fixture)).toContain("30 min");
+    expect(selectedBlockDetailText(fixture)).toContain(
+      expectedTimeRange(
+        "2026-06-22T16:40:00+02:00",
+        "2026-06-22T17:10:00+02:00",
+        "Europe/Brussels",
+      ),
+    );
+    expect(selectedBlockDetailText(fixture)).toContain(
+      "Scheduled from the persisted snapshot.",
+    );
+    expect(selectedBlockDetailText(fixture)).not.toContain(
+      "Buy groceries was moved after reported unavailable time.",
+    );
+  });
+
   it("shows read-only details and scheduler reasons for the focused schedule block", async () => {
     plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
@@ -774,6 +1277,9 @@ describe("rendered planner workspace", () => {
     expect(selectedBlockDetailText(fixture)).toContain("Task");
     expect(selectedBlockDetailText(fixture)).toContain("1 hr 30 min");
     expect(selectedBlockDetailText(fixture)).toContain(
+      "Scheduled from the persisted snapshot.",
+    );
+    expect(selectedBlockDetailText(fixture)).not.toContain(
       "Write report was placed in the earliest valid window.",
     );
     expect(
@@ -790,6 +1296,9 @@ describe("rendered planner workspace", () => {
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    expect(dayHeaderText(fixture)).toContain("July 4, 2026");
+    expect(dayHeaderText(fixture)).toContain("Today");
+    expect(inputValue(fixture, "#planner-date")).toBe(selectedDate);
     expect(text(fixture)).toContain("No saved planning day for this date.");
     expect(text(fixture)).toContain("No fixed events are saved for this day.");
     expect(text(fixture)).toContain("No active flexible tasks are saved yet.");
@@ -799,6 +1308,9 @@ describe("rendered planner workspace", () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    expect(dayHeaderText(fixture)).toContain("July 4, 2026");
+    expect(dayHeaderText(fixture)).toContain("Today");
+    expect(inputValue(fixture, "#planner-date")).toBe(selectedDate);
     expect(text(fixture)).toContain("No schedule snapshot yet.");
     expect(text(fixture)).toContain(
       "Saved inputs are still shown below so the day remains easy to review.",
@@ -1029,22 +1541,43 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("v3");
     expect(
       query(fixture, "[data-testid='daily-timeline']")?.textContent,
-    ).toContain("Moved");
+    ).toContain("Done");
     expect(
       scheduleBlockById(fixture, "study-before-interruption").getAttribute(
         "data-recovery",
       ),
     ).toBeNull();
     expect(
+      scheduleBlockById(fixture, "study-before-interruption").getAttribute(
+        "data-completion",
+      ),
+    ).toBe("Done");
+    expect(
       scheduleBlockById(fixture, "study-after-interruption").getAttribute(
         "data-recovery",
       ),
-    ).toBe("Moved");
+    ).toBeNull();
     expect(
       scheduleBlockById(fixture, "study-after-interruption").getAttribute(
+        "data-completion",
+      ),
+    ).toBeNull();
+    expect(
+      scheduleBlockById(fixture, "study-before-interruption").getAttribute(
         "aria-label",
       ),
-    ).toContain("Moved");
+    ).toContain("Done");
+    scheduleBlockById(fixture, "study-before-interruption").dispatchEvent(
+      new FocusEvent("focus", { bubbles: true }),
+    );
+    fixture.detectChanges();
+    expect(selectedBlockDetailText(fixture)).toContain("Done");
+    expect(selectedBlockDetailText(fixture)).toContain(
+      "Scheduled from the persisted snapshot.",
+    );
+    expect(selectedBlockDetailText(fixture)).not.toContain(
+      "Study notes was moved after reported unavailable time.",
+    );
     expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
       "task",
       "interruption",
@@ -1324,6 +1857,9 @@ describe("rendered planner workspace", () => {
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
     const liveAnnouncement = announcement(fixture).trim();
 
+    expect(dayHeaderText(fixture)).toContain("July 4, 2026");
+    expect(dayHeaderText(fixture)).toContain("Today");
+    expect(inputValue(fixture, "#planner-date")).toBe(selectedDate);
     expect(text(fixture)).toContain("Loading");
     expect(text(fixture)).toContain("Keeping your selected day in view");
     expect(liveAnnouncement).toContain("Loading planner workspace for");
@@ -1795,6 +2331,9 @@ describe("rendered planner workspace", () => {
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    expect(dayHeaderText(fixture)).toContain("July 4, 2026");
+    expect(dayHeaderText(fixture)).toContain("Today");
+    expect(inputValue(fixture, "#planner-date")).toBe(selectedDate);
     expect(text(fixture)).toContain("Planner data did not load");
     expect(text(fixture)).toContain("Your selected date is still here");
     expect(announcement(fixture)).toContain(
@@ -1809,6 +2348,9 @@ describe("rendered planner workspace", () => {
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
+    expect(dayHeaderText(fixture)).toContain("July 4, 2026");
+    expect(dayHeaderText(fixture)).toContain("Today");
+    expect(inputValue(fixture, "#planner-date")).toBe(selectedDate);
     expect(text(fixture)).toContain("We cannot open");
     expect(text(fixture)).toContain(
       "Your session cannot open this planning day",

@@ -153,6 +153,7 @@ interface TimelineBlock {
   readonly kindLabel: string;
   readonly marker: string;
   readonly recoveryLabel: string | null;
+  readonly completionLabel: string | null;
   readonly isCompact: boolean;
   readonly minutes: number;
   readonly topPercent: number;
@@ -1113,12 +1114,14 @@ export class PlannerWorkspacePage implements OnInit {
     snapshot: ScheduleSnapshot,
     tasks: readonly Task[],
     fixedEvents: readonly FixedEvent[],
+    progress: readonly TaskProgress[],
     planningDayTimeZone: string | undefined,
   ): TimelineBlock {
     const blocks = this.timelineBlocks(
       snapshot,
       tasks,
       fixedEvents,
+      progress,
       planningDayTimeZone,
     );
     const selectedId = this.selectedScheduleItemId();
@@ -1139,6 +1142,7 @@ export class PlannerWorkspacePage implements OnInit {
         kindLabel: "No block",
         marker: "Block",
         recoveryLabel: null,
+        completionLabel: null,
         isCompact: false,
         minutes: 0,
         topPercent: 0,
@@ -1158,15 +1162,8 @@ export class PlannerWorkspacePage implements OnInit {
     snapshot: ScheduleSnapshot,
     tasks: readonly Task[],
   ): readonly string[] {
-    const reasons = snapshot.decisions
-      .filter(
-        (decision) =>
-          decision.task_id !== null && decision.task_id === block.item.task_id,
-      )
-      .map((decision) => this.decisionText(decision, tasks));
-
-    if (reasons.length > 0) {
-      return reasons;
+    if (block.item.kind === "task") {
+      return [fallbackScheduleReason(block.item.kind)];
     }
 
     const kindReason = snapshot.decisions.find(
@@ -1203,6 +1200,9 @@ export class PlannerWorkspacePage implements OnInit {
 
     if (block.recoveryLabel) {
       parts.push(block.recoveryLabel);
+    }
+    if (block.completionLabel) {
+      parts.push(block.completionLabel);
     }
 
     return parts.join(", ");
@@ -1262,6 +1262,7 @@ export class PlannerWorkspacePage implements OnInit {
     snapshot: ScheduleSnapshot,
     tasks: readonly Task[],
     fixedEvents: readonly FixedEvent[],
+    progress: readonly TaskProgress[],
     planningDayTimeZone: string | undefined,
   ): readonly TimelineBlock[] {
     const timeZone = planningDayTimeZone ?? "UTC";
@@ -1269,17 +1270,11 @@ export class PlannerWorkspacePage implements OnInit {
     const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
 
     const laneLayout = timelineLaneLayout(snapshot.items, timeZone);
-    const movedTaskIds = new Set(
-      snapshot.decisions
-        .filter(
-          (decision) => decision.reason_code === "moved_after_interruption",
-        )
-        .map((decision) => decision.task_id)
-        .filter((taskId): taskId is string => taskId !== null),
+    const completedItemIds = completedScheduleItemIds(
+      snapshot,
+      progress,
+      timeZone,
     );
-    const interruptionEndMinutes = snapshot.items
-      .filter((item) => item.kind === "interruption")
-      .map((item) => minutesFromIsoInZone(item.end_at, timeZone));
 
     return snapshot.items.map((item) => {
       const startMinutes = minutesFromIsoInZone(item.start_at, timeZone);
@@ -1294,15 +1289,8 @@ export class PlannerWorkspacePage implements OnInit {
         label: this.itemLabel(item, tasks, fixedEvents),
         kindLabel: this.kindLabel(item.kind),
         marker: itemMarker(item.kind),
-        recoveryLabel:
-          item.kind === "task" &&
-          item.task_id !== null &&
-          movedTaskIds.has(item.task_id) &&
-          interruptionEndMinutes.some(
-            (endMinutes) => startMinutes >= endMinutes,
-          )
-            ? "Moved"
-            : null,
+        recoveryLabel: null,
+        completionLabel: completedItemIds.has(item.id) ? "Done" : null,
         isCompact: heightMinutes <= COMPACT_TIMELINE_BLOCK_MINUTES,
         minutes: heightMinutes,
         topPercent: (topMinutes / totalMinutes) * 100,
@@ -2256,6 +2244,58 @@ function formatMinutesAsTime(minutes: number): string {
   const remainder = normalizedMinutes % 60;
 
   return `${String(hours).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function completedScheduleItemIds(
+  snapshot: ScheduleSnapshot,
+  progress: readonly TaskProgress[],
+  timeZone: string,
+): ReadonlySet<string> {
+  const completedByTask = new Map<string, number>();
+  for (const record of progress) {
+    completedByTask.set(
+      record.task_id,
+      (completedByTask.get(record.task_id) ?? 0) + record.completed_minutes,
+    );
+  }
+
+  const completedItemIds = new Set<string>();
+  const taskItems = snapshot.items
+    .filter((item) => item.kind === "task" && item.task_id !== null)
+    .map((item, index) => ({
+      item,
+      index,
+      startMinutes: minutesFromIsoInZone(item.start_at, timeZone),
+      endMinutes: minutesFromIsoInZone(item.end_at, timeZone),
+    }))
+    .sort(
+      (a, b) =>
+        a.startMinutes - b.startMinutes ||
+        a.endMinutes - b.endMinutes ||
+        a.index - b.index,
+    );
+
+  for (const entry of taskItems) {
+    const taskId = entry.item.task_id;
+    if (taskId === null) {
+      continue;
+    }
+    const remainingCompletedMinutes = completedByTask.get(taskId) ?? 0;
+    const itemMinutes = Math.max(
+      1,
+      (Date.parse(entry.item.end_at) - Date.parse(entry.item.start_at)) /
+        60_000,
+    );
+
+    if (remainingCompletedMinutes >= itemMinutes) {
+      completedItemIds.add(entry.item.id);
+      completedByTask.set(taskId, remainingCompletedMinutes - itemMinutes);
+    } else {
+      completedByTask.set(taskId, 0);
+    }
+  }
+
+  return completedItemIds;
 }
 
 function timelineBounds(
