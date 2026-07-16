@@ -132,13 +132,11 @@ export class PlannerOverviewPage implements OnInit {
             ? this.plannerApi.loadWeekOverview(startOfWeek(anchorDate))
             : this.plannerApi.loadMonthOverview(startOfMonth(anchorDate));
         return request.pipe(
-          map(
-            (summary): OverviewState => ({
-              status: "ready",
-              anchorDate,
-              summary,
-            }),
-          ),
+          map((summary): OverviewState => ({
+            status: "ready",
+            anchorDate,
+            summary,
+          })),
           catchError((error: unknown) =>
             of(overviewErrorState(anchorDate, error)),
           ),
@@ -309,8 +307,8 @@ export class PlannerOverviewPage implements OnInit {
 
   protected gridClass(): string {
     return this.mode() === "month"
-      ? "grid gap-2 sm:grid-cols-2 lg:grid-cols-7"
-      : "grid gap-2 md:grid-cols-7";
+      ? "grid gap-2 sm:grid-cols-2 xl:grid-cols-7"
+      : "grid gap-2 sm:grid-cols-2 xl:grid-cols-7";
   }
 
   protected isSelectedDay(day: PlanningDaySummary): boolean {

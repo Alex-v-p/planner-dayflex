@@ -11,6 +11,8 @@ canonical initial and revised day fixtures at 360px, 768px, and 1280px widths.
 - Daily workspace, revised recovery day: non-blank timeline, interruption,
   moved-work and free-time labels, text overflow, document overflow, focus
   visibility, and schedule block overlap.
+- Contextual task and fixed-event editors: visible dialogs, text overflow,
+  document overflow, and focus visibility at each supported width.
 - Week and month overviews: non-blank overview grids, summary status labels,
   selected-date focus visibility, text overflow, and document overflow.
 - Free-time finder: useful-window, no-generated-plan, and no-useful-free-time
@@ -27,6 +29,8 @@ Use these checks when reviewing the PR or a local build:
 - Review `/planner?date=2026-06-22`,
   `/planner/week?date=2026-06-22`, `/planner/month?date=2026-06-22`, and
   `/free-times?start_date=2026-06-22&end_date=2026-06-28&minimum_minutes=30`.
+- On the daily workspace, open the flexible task editor and fixed-event editor
+  before checking editor readability, focus visibility, and text fit.
 - Check widths around 360px, 768px, and 1280px.
 - Tab through schedule blocks, overview day links, and free-time result links;
   confirm focus stays visible and no keyboard trap appears.

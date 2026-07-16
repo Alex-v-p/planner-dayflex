@@ -8,6 +8,9 @@ import {
 @Component({
   selector: "pdf-block-type-marker",
   standalone: true,
+  host: {
+    class: "inline-flex max-w-full align-top",
+  },
   templateUrl: "./block-type-marker.component.html",
 })
 export class BlockTypeMarkerComponent {

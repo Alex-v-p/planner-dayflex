@@ -149,6 +149,41 @@ test.describe("responsive visual QA @visual", () => {
         .first(),
     );
   });
+
+  for (const viewport of visualViewports) {
+    test(`@visual contextual editors stay readable at ${viewport.name}`, async ({
+      page,
+    }, testInfo) => {
+      test.skip(
+        testInfo.project.name !== "chromium",
+        "The responsive visual matrix sets explicit browser viewports in the chromium project.",
+      );
+
+      await page.setViewportSize(viewport);
+      await installCanonicalPlannerApi(page, "initial");
+      await page.goto("/planner?date=2026-06-22");
+
+      await page.getByRole("button", { name: "Add task" }).first().click();
+      const taskEditor = page.locator("#task-editor-dialog");
+      await expect(taskEditor).toBeVisible();
+      await expect(taskEditor).toContainText("Add flexible task");
+      await assertPrimarySurfaceIsNotBlank(page, "#task-editor-dialog");
+      await assertNoDocumentHorizontalOverflow(page);
+      await assertNoTextOverflow(page, "#task-editor-dialog");
+      await assertFocusVisible(page, page.locator("#task-title"));
+      await page.getByRole("button", { name: "Close task editor" }).click();
+      await expect(taskEditor).toBeHidden();
+
+      await page.getByRole("button", { name: "Add event" }).first().click();
+      const fixedEventEditor = page.locator("#fixed-event-editor-dialog");
+      await expect(fixedEventEditor).toBeVisible();
+      await expect(fixedEventEditor).toContainText("Add fixed event");
+      await assertPrimarySurfaceIsNotBlank(page, "#fixed-event-editor-dialog");
+      await assertNoDocumentHorizontalOverflow(page);
+      await assertNoTextOverflow(page, "#fixed-event-editor-dialog");
+      await assertFocusVisible(page, page.locator("#fixed-event-title"));
+    });
+  }
 });
 
 async function assertPrimarySurfaceIsNotBlank(
@@ -172,8 +207,12 @@ async function assertNoDocumentHorizontalOverflow(page: Page): Promise<void> {
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.viewportWidth + 2);
 }
 
-async function assertNoTextOverflow(page: Page): Promise<void> {
-  const overflowing = await page
+async function assertNoTextOverflow(
+  page: Page,
+  rootSelector?: string,
+): Promise<void> {
+  const root = rootSelector === undefined ? page : page.locator(rootSelector);
+  const overflowing = await root
     .locator(
       [
         "button",
@@ -193,9 +232,16 @@ async function assertNoTextOverflow(page: Page): Promise<void> {
           const htmlElement = element as HTMLElement;
           const style = window.getComputedStyle(htmlElement);
           const rect = htmlElement.getBoundingClientRect();
+          const isVisuallyHiddenForAssistiveText =
+            style.position === "absolute" &&
+            style.overflow === "hidden" &&
+            (style.clip !== "auto" || style.clipPath !== "none") &&
+            rect.width <= 2 &&
+            rect.height <= 2;
           return (
             style.visibility !== "hidden" &&
             style.display !== "none" &&
+            !isVisuallyHiddenForAssistiveText &&
             rect.width > 0 &&
             rect.height > 0 &&
             htmlElement.innerText.trim().length > 0 &&
