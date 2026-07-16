@@ -10,6 +10,7 @@ export type PlannerStatusTreatment =
   | "deferred"
   | "planned"
   | "incomplete"
+  | "no_useful_free_time"
   | "empty";
 
 export interface StatusTreatmentDefinition {
@@ -99,6 +100,13 @@ export const PLANNER_STATUS_TREATMENTS: Readonly<
     description: "Saved inputs without a generated schedule",
     chipClass: "border-signal-600 bg-amber-50 text-signal-700",
     markerClass: "border-signal-600 bg-amber-50 text-signal-700",
+  },
+  no_useful_free_time: {
+    label: "No free time",
+    cue: "0",
+    description: "Current snapshot without a useful free-time window",
+    chipClass: "border-mist-300 bg-mist-100 text-ink-800",
+    markerClass: "border-mist-300 bg-mist-100 text-ink-800",
   },
   empty: {
     label: "Empty",

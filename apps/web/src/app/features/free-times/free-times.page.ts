@@ -18,7 +18,6 @@ import {
   SegmentedControlOption,
 } from "../../shared/ui/segmented-control/segmented-control.component";
 import { StatusChipComponent } from "../../shared/ui/status-chip/status-chip.component";
-import { SummaryValueComponent } from "../../shared/ui/summary-value/summary-value.component";
 import {
   FreeTimeDay,
   FreeTimeRange,
@@ -64,7 +63,6 @@ const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
     RouterLink,
     SegmentedControlComponent,
     StatusChipComponent,
-    SummaryValueComponent,
   ],
   templateUrl: "./free-times.page.html",
 })
@@ -211,26 +209,25 @@ export class FreeTimesPage implements OnInit {
     return result.days.flatMap((day) => day.windows);
   }
 
-  protected readyResult(state: FreeTimesState): FreeTimeRange | null {
-    return state.status === "ready" ? state.result : null;
+  protected freeWindowCountLabel(count: number): string {
+    return `${count} useful ${count === 1 ? "window" : "windows"}`;
   }
 
-  protected daysWithStatus(
-    result: FreeTimeRange,
-    status: FreeTimeDay["status"],
-  ): readonly FreeTimeDay[] {
-    return result.days.filter((day) => day.status === status);
+  protected resultDays(result: FreeTimeRange): readonly FreeTimeDay[] {
+    return result.days;
+  }
+
+  protected readyResult(state: FreeTimesState): FreeTimeRange | null {
+    return state.status === "ready" ? state.result : null;
   }
 
   protected formatDateLabel(value: string): string {
     return formatDateLabel(value);
   }
 
-  protected formatDateTime(value: string, timeZone: string): string {
+  protected formatTime(value: string, timeZone: string): string {
     return new Intl.DateTimeFormat(undefined, {
       timeZone,
-      month: "short",
-      day: "numeric",
       hour: "numeric",
       minute: "2-digit",
     }).format(new Date(value));
@@ -241,6 +238,14 @@ export class FreeTimesPage implements OnInit {
       return "No current snapshot";
     }
     return `Snapshot v${value.snapshot_version}`;
+  }
+
+  protected formatSource(value: FreeTimeWindow | FreeTimeDay): string {
+    const snapshotLabel = this.formatSnapshot(value);
+    const createdAt = this.formatSnapshotCreatedAt(value.snapshot_created_at);
+    return createdAt === ""
+      ? snapshotLabel
+      : `${snapshotLabel}, saved ${createdAt}`;
   }
 
   protected formatSnapshotCreatedAt(value: string | null): string {
@@ -260,6 +265,55 @@ export class FreeTimesPage implements OnInit {
   protected dayLink(day: FreeTimeDay | FreeTimeWindow): readonly [string] {
     void day;
     return ["/planner"];
+  }
+
+  protected dayStatusLabel(day: FreeTimeDay): string {
+    if (this.isEmptyDay(day)) {
+      return "No saved day";
+    }
+
+    switch (day.status) {
+      case "has_free_time":
+        return this.freeWindowCountLabel(day.windows.length);
+      case "no_generated_plan":
+        return "No generated plan";
+      case "no_useful_free_time":
+        return "No useful free time";
+    }
+  }
+
+  protected dayStatusTreatment(day: FreeTimeDay): string {
+    if (this.isEmptyDay(day)) {
+      return "empty";
+    }
+
+    switch (day.status) {
+      case "has_free_time":
+        return "planned";
+      case "no_generated_plan":
+        return "incomplete";
+      case "no_useful_free_time":
+        return "no_useful_free_time";
+    }
+  }
+
+  protected dayStatusNote(day: FreeTimeDay): string {
+    if (this.isEmptyDay(day)) {
+      return "No saved planning day exists for this date yet.";
+    }
+
+    switch (day.status) {
+      case "has_free_time":
+        return "Useful windows from the current saved snapshot.";
+      case "no_generated_plan":
+        return "Saved inputs may exist, but no current schedule snapshot is available.";
+      case "no_useful_free_time":
+        return "A current snapshot exists, but no designated free-time window meets the selected minimum.";
+    }
+  }
+
+  protected isEmptyDay(day: FreeTimeDay): boolean {
+    return day.status === "no_generated_plan" && day.planning_day_id === null;
   }
 }
 

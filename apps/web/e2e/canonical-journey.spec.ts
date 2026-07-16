@@ -244,10 +244,10 @@ test("canonical recovery journey works with a stubbed API", async ({
     page.getByRole("heading", { name: "Free-time finder" }),
   ).toBeVisible();
   await expect(page.getByTestId("free-time-count")).toContainText(
-    "1 useful windows",
+    "1 useful window",
   );
   await expect(
-    page.getByTestId("free-time-results").getByText("Duration"),
+    page.getByTestId("free-time-results").getByText("Source: Snapshot v2"),
   ).toBeVisible();
   await expect(page.getByText("2 hr")).toBeVisible();
   await expect(page.getByText("Snapshot v2")).toBeVisible();

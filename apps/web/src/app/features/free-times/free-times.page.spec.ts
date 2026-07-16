@@ -12,7 +12,7 @@ import { FreeTimesPage } from "./free-times.page";
 
 const freeTimeRange: FreeTimeRange = {
   start_date: "2026-07-01",
-  end_date: "2026-07-03",
+  end_date: "2026-07-04",
   minimum_minutes: 30,
   days: [
     {
@@ -58,6 +58,16 @@ const freeTimeRange: FreeTimeRange = {
       snapshot_created_at: null,
       windows: [],
     },
+    {
+      local_date: "2026-07-04",
+      planning_day_id: null,
+      time_zone: null,
+      status: "no_generated_plan",
+      snapshot_id: null,
+      snapshot_version: null,
+      snapshot_created_at: null,
+      windows: [],
+    },
   ],
 };
 
@@ -91,7 +101,7 @@ describe("rendered free-time finder", () => {
     const routeParams = new BehaviorSubject(
       convertToParamMap({
         start_date: "2026-07-01",
-        end_date: "2026-07-03",
+        end_date: "2026-07-04",
         minimum_minutes: "30",
       }),
     );
@@ -103,20 +113,47 @@ describe("rendered free-time finder", () => {
     expect(freeTimesApi.requests).toEqual([
       {
         startDate: "2026-07-01",
-        endDate: "2026-07-03",
+        endDate: "2026-07-04",
         minimumMinutes: 30,
       },
     ]);
     expect(text(fixture)).toContain("Free-time finder");
+    expect(text(fixture)).toContain(
+      "Results are grouped by saved daily snapshots",
+    );
+    expect(text(fixture)).toContain("1 useful window");
+    expect(text(fixture)).not.toContain("1 useful windows");
     expect(text(fixture)).toContain("45 min");
     expect(text(fixture)).toContain("Snapshot v2");
-    expect(text(fixture)).toContain("Day day-1");
-    expect(text(fixture)).toContain("Snapshot snapshot-1");
-    expect(text(fixture)).toContain("Item item-1");
+    expect(text(fixture)).toContain("Source:");
+    expect(text(fixture)).not.toContain("Day day-1");
+    expect(text(fixture)).not.toContain("Snapshot snapshot-1");
+    expect(text(fixture)).not.toContain("Item item-1");
     expect(text(fixture)).toContain("No generated plan");
+    expect(text(fixture)).toContain(
+      "No generated plan is available for comparison on this date.",
+    );
     expect(text(fixture)).toContain("Jul 3, 2026");
+    expect(text(fixture)).toContain("No saved day");
+    expect(text(fixture)).toContain(
+      "No saved planning day exists for this date yet.",
+    );
+    expect(text(fixture)).toContain(
+      "No saved day is available for comparison on this date.",
+    );
+    expect(text(fixture)).toContain("Jul 4, 2026");
+    expect(
+      elementByAriaLabel(fixture, "No saved day: No saved planning day"),
+    ).not.toBeNull();
     expect(text(fixture)).toContain("No useful free time");
+    expect(text(fixture)).toContain("No useful free-time window meets");
     expect(text(fixture)).toContain("Jul 2, 2026");
+    expect(
+      elementByAriaLabel(
+        fixture,
+        "No useful free time: Current snapshot without a useful free-time window",
+      ),
+    ).not.toBeNull();
     expect(
       linkByAriaLabel(
         fixture,
@@ -126,6 +163,83 @@ describe("rendered free-time finder", () => {
     expect(announcement(fixture)).toContain(
       "Free-time finder loaded 1 windows.",
     );
+  });
+
+  it("groups useful windows by date without using internal ids as primary content", async () => {
+    const routeParams = new BehaviorSubject(
+      convertToParamMap({
+        start_date: "2026-07-01",
+        end_date: "2026-07-02",
+        minimum_minutes: "30",
+      }),
+    );
+    const freeTimesApi = new FakeFreeTimesApi({
+      ...freeTimeRange,
+      start_date: "2026-07-01",
+      end_date: "2026-07-02",
+      days: [
+        {
+          ...freeTimeRange.days[0],
+          windows: [
+            freeTimeRange.days[0].windows[0],
+            {
+              ...freeTimeRange.days[0].windows[0],
+              schedule_item_id: "item-2",
+              start_at: "2026-07-01T15:00:00+02:00",
+              end_at: "2026-07-01T16:00:00+02:00",
+              duration_minutes: 60,
+            },
+          ],
+        },
+        {
+          ...freeTimeRange.days[0],
+          local_date: "2026-07-02",
+          planning_day_id: "day-2",
+          snapshot_id: "snapshot-2",
+          snapshot_version: 4,
+          windows: [
+            {
+              ...freeTimeRange.days[0].windows[0],
+              local_date: "2026-07-02",
+              planning_day_id: "day-2",
+              snapshot_id: "snapshot-2",
+              snapshot_version: 4,
+              schedule_item_id: "item-3",
+              start_at: "2026-07-02T09:00:00+02:00",
+              end_at: "2026-07-02T09:30:00+02:00",
+              duration_minutes: 30,
+            },
+          ],
+        },
+      ],
+    });
+
+    const fixture = await renderFreeTimes(
+      routeParams,
+      freeTimesApi,
+      new FakeRouter(),
+    );
+    const firstDay = resultDayByDate(fixture, "2026-07-01");
+    const secondDay = resultDayByDate(fixture, "2026-07-02");
+
+    expect(text(fixture)).toContain("3 useful windows");
+    expect(firstDay?.textContent).toContain("Jul 1, 2026");
+    expect(firstDay?.textContent).toContain("45 min");
+    expect(firstDay?.textContent).toContain("1 hr");
+    expect(firstDay?.textContent).toContain("Snapshot v2");
+    expect(firstDay?.textContent).not.toContain("item-1");
+    expect(firstDay?.textContent).not.toContain("item-2");
+    expect(secondDay?.textContent).toContain("Jul 2, 2026");
+    expect(secondDay?.textContent).toContain("30 min");
+    expect(secondDay?.textContent).toContain("Snapshot v4");
+    expect(secondDay?.textContent).not.toContain("day-2");
+    expect(secondDay?.textContent).not.toContain("snapshot-2");
+    expect(
+      linkByAriaLabel(
+        fixture,
+        "Open planner workspace for Jul 2, 2026",
+      )?.getAttribute("href"),
+    ).toBe("/planner?date=2026-07-02");
   });
 
   it("renders a useful empty result without mixing up missing plans", async () => {
@@ -344,6 +458,22 @@ function linkByAriaLabel<T>(
   label: string,
 ): HTMLAnchorElement | null {
   return fixture.nativeElement.querySelector(`a[aria-label="${label}"]`);
+}
+
+function elementByAriaLabel<T>(
+  fixture: ComponentFixture<T>,
+  label: string,
+): HTMLElement | null {
+  return fixture.nativeElement.querySelector(`[aria-label="${label}"]`);
+}
+
+function resultDayByDate<T>(
+  fixture: ComponentFixture<T>,
+  date: string,
+): HTMLElement | null {
+  return (fixture.nativeElement as HTMLElement).querySelector(
+    `article[data-date='${date}']`,
+  );
 }
 
 function linkByText<T>(

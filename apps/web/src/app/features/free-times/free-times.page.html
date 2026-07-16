@@ -178,59 +178,18 @@
           formatDateLabel(result.end_date) }}
         </h2>
         <p class="mt-1 text-sm leading-6 text-ink-600">
-          Minimum window: {{ formatDuration(result.minimum_minutes) }}. Each
-          result links back to its daily plan.
+          Minimum window: {{ formatDuration(result.minimum_minutes) }}. Results
+          are grouped by saved daily snapshots.
         </p>
       </div>
       <pdf-status-chip
         data-testid="free-time-count"
         status="designated_free_time"
-        [label]="windows(result).length + ' useful windows'"
+        [label]="freeWindowCountLabel(windows(result).length)"
       />
     </div>
 
-    @if (windows(result).length > 0) {
-    <ol class="mt-5 divide-y divide-mist-200" data-testid="free-time-results">
-      @for (window of windows(result); track window.schedule_item_id) {
-      <li class="py-4">
-        <article class="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
-          <div>
-            <p class="text-sm font-semibold text-ink-950">
-              {{ formatDateLabel(window.local_date) }}
-            </p>
-            <p class="mt-1 text-base font-medium text-ink-950">
-              {{ formatDateTime(window.start_at, window.time_zone) }} to {{
-              formatDateTime(window.end_at, window.time_zone) }}
-            </p>
-            <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
-              <pdf-summary-value
-                label="Duration"
-                [value]="formatDuration(window.duration_minutes)"
-              />
-              <pdf-summary-value
-                label="Snapshot"
-                [value]="formatSnapshot(window)"
-                [note]="formatSnapshotCreatedAt(window.snapshot_created_at)"
-              />
-            </div>
-            <p class="mt-1 text-xs text-ink-600">
-              Day {{ window.planning_day_id }} - Snapshot {{ window.snapshot_id
-              }} - Item {{ window.schedule_item_id }}
-            </p>
-          </div>
-          <a
-            [routerLink]="dayLink(window)"
-            [queryParams]="{ date: window.local_date }"
-            class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-            [attr.aria-label]="'Open planner workspace for ' + formatDateLabel(window.local_date)"
-          >
-            Open day
-          </a>
-        </article>
-      </li>
-      }
-    </ol>
-    } @else {
+    @if (windows(result).length === 0) {
     <div
       class="mt-5 rounded-md border border-dashed border-mist-300 p-4 text-sm leading-6 text-ink-600"
       data-testid="free-time-empty"
@@ -238,54 +197,87 @@
       No designated free-time windows meet this minimum in the selected range.
     </div>
     }
-  </section>
 
-  @if (daysWithStatus(result, "no_generated_plan").length > 0) {
-  <section
-    class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
-  >
-    <h2 class="text-base font-semibold text-ink-950">No generated plan</h2>
-    <p class="mt-1 text-sm leading-6 text-ink-600">
-      These dates do not have a current schedule snapshot.
-    </p>
-    <ul class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-      @for (day of daysWithStatus(result, "no_generated_plan"); track
-      day.local_date) {
+    <ol class="mt-5 grid gap-3" data-testid="free-time-results">
+      @for (day of resultDays(result); track day.local_date) {
       <li>
-        <a
-          [routerLink]="dayLink(day)"
-          [queryParams]="{ date: day.local_date }"
-          class="block rounded-md border border-mist-200 px-3 py-2 text-sm text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+        <article
+          class="rounded-md border border-mist-200 p-4"
+          [attr.data-date]="day.local_date"
         >
-          {{ formatDateLabel(day.local_date) }}
-        </a>
+          <div
+            class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
+          >
+            <div>
+              <p class="text-base font-semibold text-ink-950">
+                {{ formatDateLabel(day.local_date) }}
+              </p>
+              <p class="mt-1 text-sm leading-6 text-ink-600">
+                {{ dayStatusNote(day) }}
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 md:justify-end">
+              <pdf-status-chip
+                [status]="dayStatusTreatment(day)"
+                [label]="dayStatusLabel(day)"
+              />
+              <a
+                [routerLink]="dayLink(day)"
+                [queryParams]="{ date: day.local_date }"
+                class="inline-flex min-h-10 items-center justify-center rounded-md border border-mist-200 px-3 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+                [attr.aria-label]="'Open planner workspace for ' + formatDateLabel(day.local_date)"
+              >
+                Open day
+              </a>
+            </div>
+          </div>
+
+          @if (day.status === "has_free_time") {
+          <ol class="mt-4 grid gap-3 md:grid-cols-2">
+            @for (window of day.windows; track window.schedule_item_id) {
+            <li class="rounded-md border border-mist-200 bg-mist-50 p-3">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-sm font-semibold text-ink-950">
+                    {{ formatTime(window.start_at, window.time_zone) }} to {{
+                    formatTime(window.end_at, window.time_zone) }}
+                  </p>
+                  <p class="mt-1 text-xs leading-5 text-ink-600">
+                    Source: {{ formatSource(window) }}
+                  </p>
+                </div>
+                <pdf-status-chip
+                  status="designated_free_time"
+                  [label]="formatDuration(window.duration_minutes)"
+                />
+              </div>
+            </li>
+            }
+          </ol>
+          } @else if (day.status === "no_useful_free_time") {
+          <p
+            class="mt-4 rounded-md border border-dashed border-mist-300 p-3 text-sm leading-6 text-ink-600"
+          >
+            Source: {{ formatSource(day) }}. No useful free-time window meets
+            this search.
+          </p>
+          } @else if (isEmptyDay(day)) {
+          <p
+            class="mt-4 rounded-md border border-dashed border-mist-300 p-3 text-sm leading-6 text-ink-600"
+          >
+            No saved day is available for comparison on this date.
+          </p>
+          } @else {
+          <p
+            class="mt-4 rounded-md border border-dashed border-mist-300 p-3 text-sm leading-6 text-ink-600"
+          >
+            No generated plan is available for comparison on this date.
+          </p>
+          }
+        </article>
       </li>
       }
-    </ul>
+    </ol>
   </section>
-  } @if (daysWithStatus(result, "no_useful_free_time").length > 0) {
-  <section
-    class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
-  >
-    <h2 class="text-base font-semibold text-ink-950">No useful free time</h2>
-    <p class="mt-1 text-sm leading-6 text-ink-600">
-      These dates have a current snapshot, but no designated free-time window
-      meets the selected minimum.
-    </p>
-    <ul class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-      @for (day of daysWithStatus(result, "no_useful_free_time"); track
-      day.local_date) {
-      <li>
-        <a
-          [routerLink]="dayLink(day)"
-          [queryParams]="{ date: day.local_date }"
-          class="block rounded-md border border-mist-200 px-3 py-2 text-sm text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
-        >
-          {{ formatDateLabel(day.local_date) }} - {{ formatSnapshot(day) }}
-        </a>
-      </li>
-      }
-    </ul>
-  </section>
-  } } } }
+  } } }
 </section>
