@@ -298,6 +298,7 @@ export class PlannerOverviewPage implements OnInit {
 
   protected hasAnySignal(day: PlanningDaySummary): boolean {
     return (
+      day.status !== "empty" ||
       day.planned_minutes > 0 ||
       day.fixed_event_count > 0 ||
       day.interruption_minutes > 0 ||

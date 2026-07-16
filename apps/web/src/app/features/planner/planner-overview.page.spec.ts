@@ -34,7 +34,12 @@ const weekSummary: PlanningRangeSummary = {
       status: "incomplete",
       fixed_event_count: 1,
     },
-    emptyDay("2026-07-03"),
+    {
+      ...emptyDay("2026-07-03"),
+      planning_day_id: "day-3",
+      time_zone: "Europe/Brussels",
+      status: "incomplete",
+    },
     emptyDay("2026-07-04"),
     emptyDay("2026-07-05"),
   ],
@@ -121,10 +126,23 @@ describe("rendered planner overviews", () => {
     expect(text(fixture)).toContain("1");
     expect(text(fixture)).toContain("Useful free time:");
     expect(text(fixture)).toContain("Present");
-    expect(text(fixture)).toContain("Saved inputs only");
+    expect(
+      linkByAriaLabel(
+        fixture,
+        "Open planner workspace for Jul 2, 2026, Saved inputs only",
+      )?.getAttribute("href"),
+    ).toBe("/planner?date=2026-07-02");
     expect(text(fixture)).toContain(
       "No saved inputs or current snapshot indicators.",
     );
+    expect(overviewDayCell(fixture, "2026-07-03")?.textContent).toContain(
+      "Inputs saved",
+    );
+    expect(overviewDayCell(fixture, "2026-07-03")?.textContent).not.toContain(
+      "No saved inputs or current snapshot indicators.",
+    );
+    expect(overviewSummary(fixture).className).toContain("order-first");
+    expect(overviewSummary(fixture).className).toContain("xl:order-none");
     expect(
       linkByAriaLabel(
         fixture,
@@ -148,6 +166,120 @@ describe("rendered planner overviews", () => {
     expect(plannerApi.monthStarts).toEqual(["2026-07-01"]);
     expect(text(fixture)).toContain("Month overview");
     expect(text(fixture)).toContain("Jul 1, 2026 to Jul 31, 2026");
+  });
+
+  it("renders month day indicators and the selected-day summary from daily snapshots", async () => {
+    routeData.next({ overviewMode: "month" });
+    queryParamMap.next(convertToParamMap({ date: "2026-07-15" }));
+    plannerApi.responseMonthSummary = {
+      ...monthSummary,
+      days: monthSummary.days.map((day) => {
+        if (day.local_date === "2026-07-15") {
+          return {
+            ...day,
+            planning_day_id: "day-15",
+            time_zone: "Europe/Brussels",
+            status: "planned",
+            snapshot_id: "snapshot-15",
+            snapshot_version: 3,
+            planned_minutes: 135,
+            fixed_event_count: 2,
+            interruption_minutes: 30,
+            unscheduled_deferred_count: 4,
+            has_useful_free_time: true,
+          };
+        }
+        if (day.local_date === "2026-07-16") {
+          return {
+            ...day,
+            planning_day_id: "day-16",
+            time_zone: "Europe/Brussels",
+            status: "incomplete",
+            fixed_event_count: 1,
+          };
+        }
+        return day;
+      }),
+    };
+
+    const fixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+    const selectedCell = overviewDayCell(fixture, "2026-07-15");
+    const incompleteCell = overviewDayCell(fixture, "2026-07-16");
+
+    expect(selectedCell?.textContent).toContain("Plan v3");
+    expect(selectedCell?.textContent).toContain("2 hr 15 min");
+    expect(selectedCell?.textContent).toContain("30 min");
+    expect(selectedCell?.textContent).toContain("4 deferred");
+    expect(selectedCell?.textContent).toContain("Useful free time");
+    expect(selectedCell?.getAttribute("aria-current")).toBe("date");
+    expect(incompleteCell?.textContent).toContain("Inputs");
+    expect(incompleteCell?.textContent).toContain("Inputs saved");
+    expect(text(fixture)).toContain(
+      "Current generated snapshot summarizes this day only.",
+    );
+    expect(text(fixture)).toContain("Generated snapshots");
+    expect(text(fixture)).toContain("1 day with useful free time");
+    expect(
+      linkByAriaLabel(
+        fixture,
+        "Open planner workspace for Jul 15, 2026, Generated snapshot v3",
+      )?.getAttribute("href"),
+    ).toBe("/planner?date=2026-07-15");
+  });
+
+  it("keeps selected-day empty and no-generated summaries distinct", async () => {
+    plannerApi.responseWeekSummary = {
+      ...weekSummary,
+      days: weekSummary.days.map((day) =>
+        day.local_date === "2026-07-02"
+          ? {
+              ...day,
+              planning_day_id: "day-2",
+              time_zone: "Europe/Brussels",
+              status: "incomplete",
+              fixed_event_count: 1,
+            }
+          : day,
+      ),
+    };
+    queryParamMap.next(convertToParamMap({ date: "2026-07-02" }));
+
+    const incompleteFixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+
+    expect(text(incompleteFixture)).toContain(
+      "Saved inputs exist, but no generated schedule snapshot is current.",
+    );
+    expect(text(incompleteFixture)).not.toContain(
+      "No saved inputs or current schedule snapshot for this date.",
+    );
+
+    TestBed.resetTestingModule();
+    queryParamMap = new BehaviorSubject(
+      convertToParamMap({ date: "2026-07-04" }),
+    );
+    const emptyFixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+
+    expect(text(emptyFixture)).toContain(
+      "No saved inputs or current schedule snapshot for this date.",
+    );
+    expect(text(emptyFixture)).not.toContain(
+      "Saved inputs exist, but no generated schedule snapshot is current.",
+    );
   });
 
   it("keeps date-only month labels stable in negative-offset runtimes", async () => {
@@ -271,6 +403,8 @@ class FakeApiClient {
 
 class FakePlannerApi {
   error: unknown = null;
+  responseWeekSummary: PlanningRangeSummary = weekSummary;
+  responseMonthSummary: PlanningRangeSummary = monthSummary;
   readonly weekStarts: string[] = [];
   readonly monthStarts: string[] = [];
 
@@ -279,7 +413,7 @@ class FakePlannerApi {
     if (this.error !== null) {
       return throwError(() => this.error);
     }
-    return of(weekSummary);
+    return of(this.responseWeekSummary);
   }
 
   loadMonthOverview(monthDate: string): Observable<PlanningRangeSummary> {
@@ -287,7 +421,7 @@ class FakePlannerApi {
     if (this.error !== null) {
       return throwError(() => this.error);
     }
-    return of(monthSummary);
+    return of(this.responseMonthSummary);
   }
 }
 
@@ -428,6 +562,25 @@ function firstDayHeading<T>(fixture: ComponentFixture<T>): string {
       "[data-testid='overview-day-cell'] p",
     )?.textContent ?? ""
   ).trim();
+}
+
+function overviewDayCell<T>(
+  fixture: ComponentFixture<T>,
+  date: string,
+): HTMLElement | null {
+  return (fixture.nativeElement as HTMLElement).querySelector(
+    `[data-testid='overview-day-cell'][data-date='${date}']`,
+  );
+}
+
+function overviewSummary<T>(fixture: ComponentFixture<T>): HTMLElement {
+  const element = (fixture.nativeElement as HTMLElement).querySelector(
+    "[data-testid='overview-summary']",
+  );
+  if (element === null) {
+    throw new Error("Could not find overview summary");
+  }
+  return element as HTMLElement;
 }
 
 function mockNegativeOffsetRuntimeDateFormatting(): () => void {

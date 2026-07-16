@@ -251,7 +251,11 @@
       </div>
     </section>
 
-    <aside class="space-y-4" aria-label="Overview summary">
+    <aside
+      class="order-first space-y-4 xl:order-none"
+      aria-label="Overview summary"
+      data-testid="overview-summary"
+    >
       @if (selectedDay(view.summary); as selected) {
       <section class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm">
         <p class="text-sm font-semibold text-ink-950">Selected day</p>

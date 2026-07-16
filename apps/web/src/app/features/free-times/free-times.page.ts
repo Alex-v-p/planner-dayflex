@@ -270,6 +270,10 @@ export class FreeTimesPage implements OnInit {
   }
 
   protected dayStatusLabel(day: FreeTimeDay): string {
+    if (this.isEmptyDay(day)) {
+      return "No saved day";
+    }
+
     switch (day.status) {
       case "has_free_time":
         return this.freeWindowCountLabel(day.windows.length);
@@ -281,6 +285,10 @@ export class FreeTimesPage implements OnInit {
   }
 
   protected dayStatusTreatment(day: FreeTimeDay): string {
+    if (this.isEmptyDay(day)) {
+      return "empty";
+    }
+
     switch (day.status) {
       case "has_free_time":
         return "planned";
@@ -292,6 +300,10 @@ export class FreeTimesPage implements OnInit {
   }
 
   protected dayStatusNote(day: FreeTimeDay): string {
+    if (this.isEmptyDay(day)) {
+      return "No saved planning day exists for this date yet.";
+    }
+
     switch (day.status) {
       case "has_free_time":
         return "Useful windows from the current saved snapshot.";
@@ -300,6 +312,10 @@ export class FreeTimesPage implements OnInit {
       case "no_useful_free_time":
         return "A current snapshot exists, but no designated free-time window meets the selected minimum.";
     }
+  }
+
+  protected isEmptyDay(day: FreeTimeDay): boolean {
+    return day.status === "no_generated_plan" && day.planning_day_id === null;
   }
 }
 

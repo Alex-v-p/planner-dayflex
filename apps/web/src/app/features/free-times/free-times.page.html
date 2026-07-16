@@ -261,6 +261,12 @@
             Source: {{ formatSource(day) }}. No useful free-time window meets
             this search.
           </p>
+          } @else if (isEmptyDay(day)) {
+          <p
+            class="mt-4 rounded-md border border-dashed border-mist-300 p-3 text-sm leading-6 text-ink-600"
+          >
+            No saved day is available for comparison on this date.
+          </p>
           } @else {
           <p
             class="mt-4 rounded-md border border-dashed border-mist-300 p-3 text-sm leading-6 text-ink-600"
