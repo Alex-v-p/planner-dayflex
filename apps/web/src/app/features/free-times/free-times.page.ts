@@ -18,7 +18,6 @@ import {
   SegmentedControlOption,
 } from "../../shared/ui/segmented-control/segmented-control.component";
 import { StatusChipComponent } from "../../shared/ui/status-chip/status-chip.component";
-import { SummaryValueComponent } from "../../shared/ui/summary-value/summary-value.component";
 import {
   FreeTimeDay,
   FreeTimeRange,
@@ -64,7 +63,6 @@ const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
     RouterLink,
     SegmentedControlComponent,
     StatusChipComponent,
-    SummaryValueComponent,
   ],
   templateUrl: "./free-times.page.html",
 })
