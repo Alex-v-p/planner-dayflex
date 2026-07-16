@@ -71,6 +71,7 @@ test.describe("responsive visual QA @visual", () => {
         await assertSurfaceItemsDoNotOverlap(page, route.surface);
 
         if (route.surface === "[data-testid='daily-timeline']") {
+          await assertTimelineExposesCanonicalShortItems(page, route.state);
           await assertTimelineBlocksDoNotOverlap(page);
         }
       });
@@ -356,6 +357,35 @@ async function assertTimelineBlocksDoNotOverlap(page: Page): Promise<void> {
     });
 
   expect(overlaps).toEqual([]);
+}
+
+async function assertTimelineExposesCanonicalShortItems(
+  page: Page,
+  state: CanonicalPlannerState,
+): Promise<void> {
+  const expectedItems =
+    state === "initial"
+      ? [
+          { id: "initial-inbox", label: "Reply to inbox" },
+          { id: "initial-groceries", label: "Buy groceries" },
+          { id: "initial-collection", label: "Collection appointment" },
+        ]
+      : [
+          { id: "revised-collection", label: "Collection appointment" },
+          { id: "revised-study-remaining", label: "Study notes" },
+          { id: "revised-groceries", label: "Buy groceries" },
+        ];
+
+  for (const expectedItem of expectedItems) {
+    const block = page.locator(
+      `[data-testid='daily-timeline'] article[data-item-id='${expectedItem.id}']`,
+    );
+    await expect(block).toBeVisible();
+    await expect(block).toContainText(expectedItem.label);
+    await expect(block).toContainText(
+      /\d{1,2}:\d{2}(?:\s?[AP]M)?-\d{1,2}:\d{2}(?:\s?[AP]M)?/,
+    );
+  }
 }
 
 async function assertStatusCueHasAccessibleText(

@@ -271,15 +271,26 @@
           >
             @if (block.isCompact) {
             <div
-              class="flex h-full min-h-0 items-center gap-1 px-1 text-[0.625rem] font-semibold uppercase leading-none text-ink-700"
+              class="flex h-full min-h-0 items-center gap-1 px-1.5 text-[0.6875rem] font-medium leading-none text-ink-800"
               aria-hidden="true"
             >
               <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-700"></span>
-              <span class="min-w-0 truncate">{{ block.marker }}</span>
+              <span class="shrink-0 font-semibold uppercase text-ink-700"
+                >{{ block.marker }}</span
+              >
+              <span class="min-w-0 truncate">{{ block.label }}</span>
+              <span class="shrink-0 text-ink-600">
+                {{ formatScheduleTimeRange( block.item.start_at,
+                block.item.end_at, view.data.day?.time_zone ) }}
+              </span>
               @if (block.recoveryLabel) {
-              <span class="shrink-0">{{ block.recoveryLabel }}</span>
+              <span class="shrink-0 font-semibold uppercase text-ink-700"
+                >{{ block.recoveryLabel }}</span
+              >
               } @if (block.completionLabel) {
-              <span class="shrink-0">{{ block.completionLabel }}</span>
+              <span class="shrink-0 font-semibold uppercase text-ink-700"
+                >{{ block.completionLabel }}</span
+              >
               }
             </div>
             } @else {
