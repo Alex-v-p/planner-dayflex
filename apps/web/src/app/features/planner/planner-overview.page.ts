@@ -31,6 +31,16 @@ type OverviewCell =
   | { readonly kind: "padding"; readonly id: string; readonly label: string }
   | { readonly kind: "day"; readonly day: PlanningDaySummary };
 
+interface OverviewTotals {
+  readonly plannedMinutes: number;
+  readonly fixedEventCount: number;
+  readonly interruptionMinutes: number;
+  readonly deferredCount: number;
+  readonly usefulFreeTimeDays: number;
+  readonly savedInputDays: number;
+  readonly generatedPlanDays: number;
+}
+
 type OverviewState =
   | { readonly status: "loading"; readonly anchorDate: string }
   | {
@@ -56,6 +66,8 @@ const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
   { label: "Free time", value: "free", ariaLabel: "Show free-time finder" },
 ];
 
+const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 @Component({
   selector: "pdf-planner-overview-page",
   standalone: true,
@@ -71,6 +83,7 @@ const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
 })
 export class PlannerOverviewPage implements OnInit {
   protected readonly plannerViewOptions = PLANNER_VIEW_OPTIONS;
+  protected readonly weekdayLabels = WEEKDAY_LABELS;
   protected readonly mode = signal<OverviewMode>("week");
   protected readonly anchorDate = signal(todayLocalDate());
   protected readonly state = signal<OverviewState>({
@@ -200,6 +213,43 @@ export class PlannerOverviewPage implements OnInit {
     return `${formatDateLabel(summary.start_date)} to ${formatDateLabel(summary.end_date)}`;
   }
 
+  protected selectedDay(
+    summary: PlanningRangeSummary,
+  ): PlanningDaySummary | null {
+    return (
+      summary.days.find((day) => day.local_date === this.anchorDate()) ??
+      summary.days[0] ??
+      null
+    );
+  }
+
+  protected totals(summary: PlanningRangeSummary): OverviewTotals {
+    return summary.days.reduce(
+      (totals, day) => ({
+        plannedMinutes: totals.plannedMinutes + day.planned_minutes,
+        fixedEventCount: totals.fixedEventCount + day.fixed_event_count,
+        interruptionMinutes:
+          totals.interruptionMinutes + day.interruption_minutes,
+        deferredCount: totals.deferredCount + day.unscheduled_deferred_count,
+        usefulFreeTimeDays:
+          totals.usefulFreeTimeDays + (day.has_useful_free_time ? 1 : 0),
+        savedInputDays:
+          totals.savedInputDays + (day.status !== "empty" ? 1 : 0),
+        generatedPlanDays:
+          totals.generatedPlanDays + (day.status === "planned" ? 1 : 0),
+      }),
+      {
+        plannedMinutes: 0,
+        fixedEventCount: 0,
+        interruptionMinutes: 0,
+        deferredCount: 0,
+        usefulFreeTimeDays: 0,
+        savedInputDays: 0,
+        generatedPlanDays: 0,
+      },
+    );
+  }
+
   protected formatDateLabel(value: string): string {
     return formatDateLabel(value);
   }
@@ -222,11 +272,22 @@ export class PlannerOverviewPage implements OnInit {
   protected statusLabel(day: PlanningDaySummary): string {
     switch (day.status) {
       case "planned":
-        return `Snapshot v${day.snapshot_version ?? "?"}`;
+        return `Generated snapshot v${day.snapshot_version ?? "?"}`;
       case "incomplete":
-        return "Saved inputs";
+        return "Saved inputs only";
       case "empty":
         return "No saved day";
+    }
+  }
+
+  protected compactStatusLabel(day: PlanningDaySummary): string {
+    switch (day.status) {
+      case "planned":
+        return `Plan v${day.snapshot_version ?? "?"}`;
+      case "incomplete":
+        return "Inputs";
+      case "empty":
+        return "Empty";
     }
   }
 
@@ -247,8 +308,61 @@ export class PlannerOverviewPage implements OnInit {
 
   protected gridClass(): string {
     return this.mode() === "month"
-      ? "mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-7"
-      : "mt-5 grid gap-3 md:grid-cols-7";
+      ? "grid gap-2 sm:grid-cols-2 lg:grid-cols-7"
+      : "grid gap-2 md:grid-cols-7";
+  }
+
+  protected isSelectedDay(day: PlanningDaySummary): boolean {
+    return day.local_date === this.anchorDate();
+  }
+
+  protected dayCellClass(day: PlanningDaySummary): string {
+    const base =
+      "block min-h-44 rounded-md border p-3 text-left transition focus-visible:shadow-focus";
+    return this.isSelectedDay(day)
+      ? `${base} border-meadow-700 bg-meadow-50 shadow-sm ring-2 ring-meadow-700 ring-offset-2`
+      : `${base} border-mist-200 bg-white hover:border-meadow-600 hover:bg-mist-50`;
+  }
+
+  protected dayIndicators(day: PlanningDaySummary): readonly string[] {
+    const indicators: string[] = [];
+    if (day.status !== "empty") {
+      indicators.push("Inputs saved");
+    }
+    if (day.status === "planned") {
+      indicators.push(`Snapshot v${day.snapshot_version ?? "?"}`);
+    }
+    if (day.fixed_event_count > 0) {
+      indicators.push(`${day.fixed_event_count} fixed`);
+    }
+    if (day.interruption_minutes > 0) {
+      indicators.push(
+        `${formatDuration(day.interruption_minutes)} interrupted`,
+      );
+    }
+    if (day.unscheduled_deferred_count > 0) {
+      indicators.push(`${day.unscheduled_deferred_count} deferred`);
+    }
+    if (day.has_useful_free_time) {
+      indicators.push("Useful free time");
+    }
+    return indicators;
+  }
+
+  protected selectedDaySummary(day: PlanningDaySummary): string {
+    if (day.status === "empty") {
+      return "No saved inputs or current schedule snapshot for this date.";
+    }
+    if (day.status === "incomplete") {
+      return "Saved inputs exist, but no generated schedule snapshot is current.";
+    }
+    return "Current generated snapshot summarizes this day only.";
+  }
+
+  protected freeTimePresenceLabel(count: number): string {
+    return count === 0
+      ? "No days with useful free time"
+      : `${count} ${count === 1 ? "day" : "days"} with useful free time`;
   }
 
   protected overviewCells(

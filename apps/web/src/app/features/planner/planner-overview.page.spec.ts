@@ -107,23 +107,28 @@ describe("rendered planner overviews", () => {
     expect(plannerApi.weekStarts).toEqual(["2026-06-29"]);
     expect(text(fixture)).toContain("Week overview");
     expect(text(fixture)).toContain("Saved daily plans only.");
+    expect(text(fixture)).toContain("Monday-first calendar summary");
+    expect(text(fixture)).toContain("Selected day");
+    expect(text(fixture)).toContain("Selected date");
+    expect(text(fixture)).toContain("Week totals");
     expect(text(fixture)).toContain("Snapshot v2");
     expect(text(fixture)).toContain("1 hr 30 min");
-    expect(text(fixture)).toContain("Fixed");
+    expect(text(fixture)).toContain("Fixed events");
     expect(text(fixture)).toContain("2");
     expect(text(fixture)).toContain("Interruptions");
     expect(text(fixture)).toContain("45 min");
     expect(text(fixture)).toContain("Deferred");
     expect(text(fixture)).toContain("1");
     expect(text(fixture)).toContain("Useful free time:");
-    expect(text(fixture)).toContain("Saved inputs");
+    expect(text(fixture)).toContain("Present");
+    expect(text(fixture)).toContain("Saved inputs only");
     expect(text(fixture)).toContain(
-      "No saved inputs or current snapshot indicators for this date.",
+      "No saved inputs or current snapshot indicators.",
     );
     expect(
       linkByAriaLabel(
         fixture,
-        "Open planner workspace for Jul 1, 2026, Snapshot v2",
+        "Open planner workspace for Jul 1, 2026, Generated snapshot v2",
       )?.getAttribute("href"),
     ).toBe("/planner?date=2026-07-01");
     expect(announcement(fixture)).toContain("Week overview loaded");

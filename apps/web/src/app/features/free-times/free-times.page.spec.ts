@@ -108,15 +108,31 @@ describe("rendered free-time finder", () => {
       },
     ]);
     expect(text(fixture)).toContain("Free-time finder");
+    expect(text(fixture)).toContain(
+      "Results are grouped by saved daily snapshots",
+    );
+    expect(text(fixture)).toContain("1 useful window");
+    expect(text(fixture)).not.toContain("1 useful windows");
     expect(text(fixture)).toContain("45 min");
     expect(text(fixture)).toContain("Snapshot v2");
-    expect(text(fixture)).toContain("Day day-1");
-    expect(text(fixture)).toContain("Snapshot snapshot-1");
-    expect(text(fixture)).toContain("Item item-1");
+    expect(text(fixture)).toContain("Source:");
+    expect(text(fixture)).not.toContain("Day day-1");
+    expect(text(fixture)).not.toContain("Snapshot snapshot-1");
+    expect(text(fixture)).not.toContain("Item item-1");
     expect(text(fixture)).toContain("No generated plan");
+    expect(text(fixture)).toContain(
+      "No generated plan is available for comparison on this date.",
+    );
     expect(text(fixture)).toContain("Jul 3, 2026");
     expect(text(fixture)).toContain("No useful free time");
+    expect(text(fixture)).toContain("No useful free-time window meets");
     expect(text(fixture)).toContain("Jul 2, 2026");
+    expect(
+      elementByAriaLabel(
+        fixture,
+        "No useful free time: Current snapshot without a useful free-time window",
+      ),
+    ).not.toBeNull();
     expect(
       linkByAriaLabel(
         fixture,
@@ -344,6 +360,13 @@ function linkByAriaLabel<T>(
   label: string,
 ): HTMLAnchorElement | null {
   return fixture.nativeElement.querySelector(`a[aria-label="${label}"]`);
+}
+
+function elementByAriaLabel<T>(
+  fixture: ComponentFixture<T>,
+  label: string,
+): HTMLElement | null {
+  return fixture.nativeElement.querySelector(`[aria-label="${label}"]`);
 }
 
 function linkByText<T>(
