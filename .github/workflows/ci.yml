@@ -224,6 +224,9 @@ jobs:
       - name: End-to-end test
         run: npm run test:e2e
 
+      - name: Responsive visual QA
+        run: npm run test:e2e:visual
+
   local-compose-topology:
     name: Local Compose topology
     runs-on: ubuntu-latest
