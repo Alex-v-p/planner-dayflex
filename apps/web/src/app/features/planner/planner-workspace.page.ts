@@ -323,11 +323,13 @@ export class PlannerWorkspacePage implements OnInit {
         }),
         switchMap((selectedDate) =>
           this.plannerApi.loadWorkspaceDate(selectedDate).pipe(
-            map((data): WorkspaceLoadState => ({
-              status: "ready",
-              selectedDate,
-              data,
-            })),
+            map(
+              (data): WorkspaceLoadState => ({
+                status: "ready",
+                selectedDate,
+                data,
+              }),
+            ),
             catchError((error: unknown) => of(errorState(selectedDate, error))),
           ),
         ),
@@ -2308,7 +2310,8 @@ function mutationFocusTarget(
 
 function cssEscape(value: string): string {
   const css = globalThis.CSS as
-    { escape?: (input: string) => string } | undefined;
+    | { escape?: (input: string) => string }
+    | undefined;
   if (css !== undefined && typeof css.escape === "function") {
     return css.escape(value);
   }

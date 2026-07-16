@@ -132,11 +132,13 @@ export class PlannerOverviewPage implements OnInit {
             ? this.plannerApi.loadWeekOverview(startOfWeek(anchorDate))
             : this.plannerApi.loadMonthOverview(startOfMonth(anchorDate));
         return request.pipe(
-          map((summary): OverviewState => ({
-            status: "ready",
-            anchorDate,
-            summary,
-          })),
+          map(
+            (summary): OverviewState => ({
+              status: "ready",
+              anchorDate,
+              summary,
+            }),
+          ),
           catchError((error: unknown) =>
             of(overviewErrorState(anchorDate, error)),
           ),
