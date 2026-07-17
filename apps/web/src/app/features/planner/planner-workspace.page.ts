@@ -1151,6 +1151,86 @@ export class PlannerWorkspacePage implements OnInit {
     });
   }
 
+  protected focusInterruptionForm(): void {
+    this.interruptionState.set({
+      status: "idle",
+      message:
+        "Add the unavailable time, then submit when the details are right.",
+    });
+    this.focusEditorControl("#interruption-start");
+  }
+
+  protected reportInterruptionFromBlock(
+    block: TimelineBlock,
+    planningDayTimeZone: string | undefined,
+  ): void {
+    if (!isInterruptionSourceBlock(block.item.kind)) {
+      return;
+    }
+
+    const timeZone = planningDayTimeZone ?? "UTC";
+    this.prefillInterruptionForm({
+      startLocal: toDateTimeLocalValue(block.item.start_at, timeZone),
+      endLocal: toDateTimeLocalValue(block.item.end_at, timeZone),
+      timeZone,
+      message: `Unavailable time is ready from ${block.label}. Review before submitting.`,
+    });
+  }
+
+  protected canReportInterruptionFromTaskEditor(): boolean {
+    return this.selectedTaskBlockForCurrentEditor() !== null;
+  }
+
+  protected reportInterruptionFromTaskEditor(): void {
+    const selectedBlock = this.selectedTaskBlockForCurrentEditor();
+    if (selectedBlock === null) {
+      return;
+    }
+
+    this.resetTaskForm();
+    this.resetTaskSuggestion();
+    this.closeTaskEditor({ restoreFocus: false });
+    this.prefillInterruptionForm({
+      startLocal: selectedBlock.startLocal,
+      endLocal: selectedBlock.endLocal,
+      timeZone: selectedBlock.timeZone,
+      message: `Unavailable time is ready from ${selectedBlock.label}. Review before submitting.`,
+    });
+  }
+
+  protected reportInterruptionFromFixedEventEditor(): void {
+    const form = this.fixedEventForm();
+    if (form.id === null) {
+      return;
+    }
+
+    this.resetFixedEventForm();
+    this.closeFixedEventEditor({ restoreFocus: false });
+    this.prefillInterruptionForm({
+      startLocal: form.startLocal,
+      endLocal: form.endLocal,
+      timeZone: form.timeZone,
+      message: `Unavailable time is ready from ${form.title || "this event"}. Review before submitting.`,
+    });
+  }
+
+  protected reportInterruptionFromCalendarSelection(): void {
+    const selection = this.calendarCreateSelection();
+    if (selection === null) {
+      return;
+    }
+
+    this.calendarCreateReturnFocus = { element: null, selector: null };
+    this.calendarCreateSelection.set(null);
+    this.prefillInterruptionForm({
+      startLocal: selection.startLocal,
+      endLocal: selection.endLocal,
+      timeZone: selection.timeZone,
+      message:
+        "Unavailable time is ready from the selected range. Review before submitting.",
+    });
+  }
+
   protected unfinishedTasks(
     tasks: readonly Task[],
     progress: readonly TaskProgress[],
@@ -1824,6 +1904,44 @@ export class PlannerWorkspacePage implements OnInit {
     return state.status === "ready" ? state.data.fixedEvents : [];
   }
 
+  private selectedTaskBlockForCurrentEditor(): {
+    readonly label: string;
+    readonly startLocal: string;
+    readonly endLocal: string;
+    readonly timeZone: string;
+  } | null {
+    const state = this.state();
+    const taskId = this.taskForm().id;
+    if (
+      state.status !== "ready" ||
+      state.data.snapshot === null ||
+      taskId === null
+    ) {
+      return null;
+    }
+
+    const selectedItemId = this.selectedScheduleItemId();
+    const selectedItem = state.data.snapshot.items.find(
+      (item) =>
+        item.id === selectedItemId &&
+        item.kind === "task" &&
+        item.task_id === taskId,
+    );
+    if (selectedItem === undefined) {
+      return null;
+    }
+
+    const timeZone = state.data.day?.time_zone ?? guessTimeZone();
+    return {
+      label:
+        state.data.tasks.find((candidate) => candidate.id === taskId)?.title ??
+        "this work",
+      startLocal: toDateTimeLocalValue(selectedItem.start_at, timeZone),
+      endLocal: toDateTimeLocalValue(selectedItem.end_at, timeZone),
+      timeZone,
+    };
+  }
+
   private runMutation<T>(
     action: string,
     request$: Observable<T>,
@@ -2041,6 +2159,35 @@ export class PlannerWorkspacePage implements OnInit {
       result: null,
     });
   }
+
+  private resetInterruptionSuggestion(): void {
+    this.interruptionSuggestion.set({
+      status: "idle",
+      message: "",
+      result: null,
+    });
+  }
+
+  private prefillInterruptionForm(prefill: {
+    readonly startLocal: string;
+    readonly endLocal: string;
+    readonly timeZone: string;
+    readonly message: string;
+  }): void {
+    this.interruptionForm.set({
+      startLocal: prefill.startLocal,
+      endLocal: prefill.endLocal,
+      timeZone: prefill.timeZone,
+      reportedLocal: currentDateTimeLocalValue(prefill.timeZone),
+    });
+    this.interruptionFormErrors.set({});
+    this.resetInterruptionSuggestion();
+    this.interruptionState.set({
+      status: "idle",
+      message: prefill.message,
+    });
+    this.focusEditorControl("#interruption-start");
+  }
 }
 
 function errorState(selectedDate: string, error: unknown): WorkspaceLoadState {
@@ -2192,6 +2339,10 @@ function isBlankProgressForm(form: ProgressFormModel): boolean {
 
 function isBlankInterruptionForm(form: InterruptionFormModel): boolean {
   return form.startLocal === "" && form.endLocal === "";
+}
+
+function isInterruptionSourceBlock(kind: string): boolean {
+  return kind === "task" || kind === "fixed_event";
 }
 
 function buildTaskRequest(

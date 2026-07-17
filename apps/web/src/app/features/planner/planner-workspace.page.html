@@ -740,6 +740,16 @@
             }
           </ul>
         </div>
+        @if (selectedBlock.item.kind === "task" || selectedBlock.item.kind ===
+        "fixed_event") {
+        <button
+          type="button"
+          class="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-md border border-mist-200 bg-white px-4 py-2 text-sm font-semibold text-ink-900 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+          (click)="reportInterruptionFromBlock(selectedBlock, view.data.day?.time_zone)"
+        >
+          Report interruption
+        </button>
+        }
       </section>
       } } @if (calendarCreateSelection(); as selection) {
       <div
@@ -803,6 +813,16 @@
               Flexible task
               <span class="mt-1 block text-xs font-medium text-ink-600">
                 Can move around fixed time
+              </span>
+            </button>
+            <button
+              type="button"
+              class="min-h-12 rounded-md border border-mist-200 px-3 py-2 text-left text-sm font-semibold text-ink-900 transition hover:border-meadow-600 hover:bg-mist-50 focus-visible:shadow-focus sm:col-span-2"
+              (click)="reportInterruptionFromCalendarSelection()"
+            >
+              Report interruption
+              <span class="mt-1 block text-xs font-medium text-ink-600">
+                Use this selected range as unavailable time
               </span>
             </button>
           </div>
@@ -1135,7 +1155,14 @@
         </p>
         <button
           type="button"
-          class="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
+          class="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-md border border-mist-200 bg-white px-4 py-2 text-sm font-semibold text-ink-900 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+          (click)="focusInterruptionForm()"
+        >
+          Report interruption
+        </button>
+        <button
+          type="button"
+          class="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-md bg-meadow-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-300"
           (click)="generatePlan()"
           [disabled]="!canGeneratePlan()"
           [attr.aria-busy]="generatePlanState().status === 'pending' ? 'true' : null"
@@ -1362,6 +1389,14 @@
                   Cancel
                 </button>
                 @if (fixedEventForm().id) {
+                <button
+                  type="button"
+                  class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
+                  (click)="reportInterruptionFromFixedEventEditor()"
+                  [disabled]="busyAction() !== null"
+                >
+                  Report interruption
+                </button>
                 <button
                   type="button"
                   class="inline-flex min-h-10 items-center rounded-md border border-signal-600 px-4 py-2 text-sm font-medium text-signal-700 transition hover:bg-mist-50 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
@@ -1752,7 +1787,17 @@
                 >
                   Cancel
                 </button>
-                @if (taskForm().id) {
+                @if (taskForm().id) { @if
+                (canReportInterruptionFromTaskEditor()) {
+                <button
+                  type="button"
+                  class="inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"
+                  (click)="reportInterruptionFromTaskEditor()"
+                  [disabled]="busyAction() !== null"
+                >
+                  Report interruption
+                </button>
+                }
                 <button
                   type="button"
                   class="inline-flex min-h-10 items-center rounded-md border border-signal-600 px-4 py-2 text-sm font-medium text-signal-700 transition hover:bg-mist-50 focus-visible:shadow-focus disabled:cursor-not-allowed disabled:bg-mist-100"

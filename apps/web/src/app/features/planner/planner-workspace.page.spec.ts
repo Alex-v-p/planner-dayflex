@@ -1668,6 +1668,113 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.savedFixedEvents).toEqual([]);
   });
 
+  it("prefills interruption details from selected task and fixed-event blocks", async () => {
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      fixedEvents: canonicalFixedEvents,
+      tasks: canonicalTasks,
+      snapshot: canonicalInitialSnapshot,
+    });
+    routeParams.next(convertToParamMap({ date: canonicalDate }));
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonsByText(
+      query(fixture, "[data-testid='selected-block-detail']"),
+      "Report interruption",
+    )[0].click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#interruption-start")).toBe(
+      `${canonicalDate}T08:00`,
+    );
+    expect(inputValue(fixture, "#interruption-end")).toBe(
+      `${canonicalDate}T08:45`,
+    );
+    expect(inputValue(fixture, "#interruption-zone")).toBe("Europe/Brussels");
+    expect(text(fixture)).toContain(
+      "Unavailable time is ready from Reply to inbox.",
+    );
+    expect(document.activeElement?.id).toBe("interruption-start");
+
+    scheduleBlockById(fixture, "canonical-team-meeting-item").dispatchEvent(
+      new FocusEvent("focus", { bubbles: true }),
+    );
+    fixture.detectChanges();
+    buttonsByText(
+      query(fixture, "[data-testid='selected-block-detail']"),
+      "Report interruption",
+    )[0].click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#interruption-start")).toBe(
+      `${canonicalDate}T09:00`,
+    );
+    expect(inputValue(fixture, "#interruption-end")).toBe(
+      `${canonicalDate}T10:00`,
+    );
+    expect(text(fixture)).toContain(
+      "Unavailable time is ready from Team meeting.",
+    );
+  });
+
+  it("reports an interruption from an empty selected calendar range", async () => {
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      fixedEvents: canonicalFixedEvents,
+      tasks: canonicalTasks,
+      snapshot: canonicalInitialSnapshot,
+    });
+    plannerApi.interruptionResponse = of(canonicalRevisedSnapshot);
+    routeParams.next(convertToParamMap({ date: canonicalDate }));
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    calendarSlot(fixture, `slot-${canonicalDate}-16:00`).click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    buttonByText(fixture, "Report interruption", "Calendar create").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#interruption-start")).toBe(
+      `${canonicalDate}T16:00`,
+    );
+    expect(inputValue(fixture, "#interruption-end")).toBe(
+      `${canonicalDate}T16:30`,
+    );
+    expect(text(fixture)).toContain(
+      "Unavailable time is ready from the selected range.",
+    );
+    expect(document.activeElement?.id).toBe("interruption-start");
+
+    formByLabel(fixture, "Report interruption").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.reportedInterruptions).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          start_at: "2026-06-22T16:00:00+02:00",
+          end_at: "2026-06-22T16:30:00+02:00",
+          time_zone: "Europe/Brussels",
+          reported_at: expect.stringMatching(
+            /^20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/,
+          ),
+        },
+      },
+    ]);
+    expect(text(fixture)).toContain(
+      "Revised schedule snapshot v2 is now shown.",
+    );
+  });
+
   it("uses the selected day for calendar slots when the snapshot has no items", async () => {
     const emptySnapshot: ScheduleSnapshot = {
       ...canonicalInitialSnapshot,
@@ -1939,6 +2046,49 @@ describe("rendered planner workspace", () => {
 
     expect(text(fixture)).toContain("Edit fixed event");
     expect(inputValue(fixture, "#fixed-event-title")).toBe("Team meeting");
+  });
+
+  it("prefills interruption details from clicked task and fixed-event editors", async () => {
+    plannerApi.result = workspaceData({
+      fixedEvents: [fixedEvent],
+      tasks: [task],
+      snapshot: canonicalSnapshot,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    scheduleBlockById(fixture, "task-item").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    buttonByText(fixture, "Report interruption", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(query(fixture, "#task-editor-dialog")).toBeNull();
+    expect(inputValue(fixture, "#interruption-start")).toBe("2026-07-04T10:00");
+    expect(inputValue(fixture, "#interruption-end")).toBe("2026-07-04T11:30");
+    expect(text(fixture)).toContain(
+      "Unavailable time is ready from Write report.",
+    );
+
+    scheduleBlockById(fixture, "fixed-item").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    buttonByText(fixture, "Report interruption", "Fixed events").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(query(fixture, "#fixed-event-editor-dialog")).toBeNull();
+    expect(inputValue(fixture, "#interruption-start")).toBe("2026-07-04T09:00");
+    expect(inputValue(fixture, "#interruption-end")).toBe("2026-07-04T10:00");
+    expect(text(fixture)).toContain(
+      "Unavailable time is ready from Team meeting.",
+    );
   });
 
   it("returns focus to recreated planning controls after successful editor mutations", async () => {
@@ -2368,6 +2518,21 @@ describe("rendered planner workspace", () => {
     expect(inputValue(fixture, "#interruption-start")).toBe("");
     expect(inputValue(fixture, "#interruption-end")).toBe("");
     expect(plannerApi.reportedInterruptions).toEqual([]);
+  });
+
+  it("focuses the manual interruption form from the daily recovery action area", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    buttonByText(fixture, "Report interruption", "Generate schedule").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(document.activeElement?.id).toBe("interruption-start");
+    expect(text(fixture)).toContain(
+      "Add the unavailable time, then submit when the details are right.",
+    );
   });
 
   it("records partial study progress and replaces the visible plan after an interruption", async () => {
