@@ -2492,6 +2492,52 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.reportedInterruptions).toEqual([]);
   });
 
+  it("saves the user's edited interruption proposal after explicit confirmation", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    plannerApi.interruptionResponse = of(revisedStudySnapshot);
+    plannerApi.interruptionSuggestionResponse = of({
+      status: "suggested",
+      confidence: 0.7,
+      proposed_fields: {
+        start_at: "2026-07-04T13:00:00+02:00",
+        end_at: "2026-07-04T14:00:00+02:00",
+        time_zone: "Europe/Brussels",
+        reported_at: "2026-07-04T13:00:00+02:00",
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-ai-text", "appointment from 13 to 14");
+    buttonByText(fixture, "Suggest details", "Report interruption").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    buttonByText(fixture, "Apply to form", "Report interruption").click();
+    fixture.detectChanges();
+    setInput(fixture, "#interruption-end", "2026-07-04T13:45");
+    formByLabel(fixture, "Report interruption").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.reportedInterruptions).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          start_at: "2026-07-04T13:00:00+02:00",
+          end_at: "2026-07-04T13:45:00+02:00",
+          time_zone: "Europe/Brussels",
+          reported_at: "2026-07-04T13:00:00+02:00",
+        },
+      },
+    ]);
+    expect(text(fixture)).toContain(
+      "Revised schedule snapshot v3 is now shown.",
+    );
+  });
+
   it("shows interruption fallback without changing editable fields", async () => {
     plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
     plannerApi.interruptionSuggestionResponse = of({
@@ -2518,6 +2564,51 @@ describe("rendered planner workspace", () => {
     expect(inputValue(fixture, "#interruption-start")).toBe("");
     expect(inputValue(fixture, "#interruption-end")).toBe("");
     expect(plannerApi.reportedInterruptions).toEqual([]);
+  });
+
+  it("saves manual interruption details and replans when suggestions are unavailable", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    plannerApi.interruptionSuggestionResponse = throwError(
+      () => new Error("suggestion service unavailable"),
+    );
+    plannerApi.interruptionResponse = of(revisedStudySnapshot);
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-ai-text", "appointment");
+    buttonByText(fixture, "Suggest details", "Report interruption").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Suggestions are unavailable");
+    expect(plannerApi.reportedInterruptions).toEqual([]);
+
+    setInput(fixture, "#interruption-start", "2026-07-04T14:00");
+    setInput(fixture, "#interruption-end", "2026-07-04T15:15");
+    setInput(fixture, "#interruption-zone", "Europe/Brussels");
+    setInput(fixture, "#interruption-reported", "2026-07-04T14:00");
+    formByLabel(fixture, "Report interruption").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(plannerApi.reportedInterruptions).toEqual([
+      {
+        planningDayId: "day-1",
+        request: {
+          start_at: "2026-07-04T14:00:00+02:00",
+          end_at: "2026-07-04T15:15:00+02:00",
+          time_zone: "Europe/Brussels",
+          reported_at: "2026-07-04T14:00:00+02:00",
+        },
+      },
+    ]);
+    expect(text(fixture)).toContain(
+      "Revised schedule snapshot v3 is now shown.",
+    );
+    expect(announcement(fixture)).toContain(
+      "Revised schedule snapshot v3 is now shown.",
+    );
   });
 
   it("focuses the manual interruption form from the daily recovery action area", async () => {
