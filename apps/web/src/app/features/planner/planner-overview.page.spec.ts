@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from "@angular/core/testing";
 import { HttpErrorResponse } from "@angular/common/http";
 import { ActivatedRoute, Router, convertToParamMap } from "@angular/router";
-import { BehaviorSubject, Observable, of, throwError } from "rxjs";
+import { BehaviorSubject, NEVER, Observable, of, throwError } from "rxjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientService } from "../../core/api/api-client.service";
@@ -378,6 +378,8 @@ describe("rendered planner overviews", () => {
     );
     const fixed = weekBlock(fixture, "fixed-item");
     const done = weekBlock(fixture, "task-done-item");
+    const interruption = weekBlock(fixture, "interruption-item");
+    const buffer = weekBlock(fixture, "buffer-item");
     const moved = weekBlock(fixture, "moved-item");
     const free = weekBlock(fixture, "free-item");
 
@@ -389,10 +391,22 @@ describe("rendered planner overviews", () => {
     expect(done?.getAttribute("data-height-minutes")).toBe("90");
     expect(done?.getAttribute("data-completion")).toBe("Done");
     expect(done?.textContent).toContain("Done");
+    expect(done?.getAttribute("aria-label")).toContain("Flexible work");
+    expect(fixed?.textContent).toContain("Fixed");
+    expect(fixed?.getAttribute("aria-label")).toContain("Fixed event");
+    expect(interruption?.textContent).toContain("Unavailable");
+    expect(interruption?.getAttribute("aria-label")).toContain(
+      "Reported unavailable time",
+    );
+    expect(buffer?.textContent).toContain("Buffer");
+    expect(buffer?.getAttribute("aria-label")).toContain("Buffer");
     expect(moved?.getAttribute("data-recovery-state")).toBe("moved");
     expect(moved?.textContent).toContain("Moved");
+    expect(moved?.getAttribute("aria-label")).toContain("Moved");
     expect(free?.getAttribute("data-kind")).toBe("designated_free_time");
     expect(free?.textContent).toContain("Free");
+    expect(free?.getAttribute("aria-label")).toContain("Useful free time");
+    expect(text(fixture)).toContain("Deferred: 1");
   });
 
   it("uses one Day Week Month switcher and keeps free-time out of route header modes", async () => {
@@ -413,6 +427,36 @@ describe("rendered planner overviews", () => {
       commands: ["/planner/month"],
       queryParams: { date: "2026-07-01" },
     });
+
+    clickButtonWithText(fixture, "Day");
+
+    expect(router.navigations.at(-1)).toEqual({
+      commands: ["/planner"],
+      queryParams: { date: "2026-07-01" },
+    });
+  });
+
+  it("keeps the selected week range and primary grid visible while loading", async () => {
+    plannerApi.pendingWeek = true;
+    const fixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+
+    expect(text(fixture)).toContain("Loading week calendar");
+    expect(text(fixture)).toContain("Jun 29, 2026 to Jul 5, 2026");
+    expect(text(fixture)).toContain("Day");
+    expect(text(fixture)).toContain("Week");
+    expect(text(fixture)).toContain("Month");
+    expect(weekGrid(fixture).textContent).toContain("Time");
+    expect(weekGrid(fixture).textContent).toContain("Wed");
+    expect(weekGrid(fixture).textContent).toContain("1");
+    expect(weekGrid(fixture).textContent).toContain("Selected date");
+    expect(announcement(fixture)).toContain(
+      "Loading week calendar for Jul 1, 2026.",
+    );
   });
 
   it("loads a month overview from the first day of the selected month", async () => {
@@ -681,6 +725,7 @@ class FakeApiClient {
 
 class FakePlannerApi {
   error: unknown = null;
+  pendingWeek = false;
   responseWeekDetail: PlanningWeekDetail = weekDetail;
   responseMonthSummary: PlanningRangeSummary = monthSummary;
   readonly weekStarts: string[] = [];
@@ -688,6 +733,9 @@ class FakePlannerApi {
 
   loadWeekDetail(startDate: string): Observable<PlanningWeekDetail> {
     this.weekStarts.push(startDate);
+    if (this.pendingWeek) {
+      return NEVER;
+    }
     if (this.error !== null) {
       return throwError(() => this.error);
     }
