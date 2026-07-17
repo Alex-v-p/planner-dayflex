@@ -363,9 +363,15 @@ describe("rendered planner overviews", () => {
     expect(
       linkByAriaLabel(
         fixture,
-        "Open planner workspace for Jul 1, 2026, Generated snapshot v2",
+        "Open planner workspace for Jul 1, 2026, Generated snapshot v2, 1 deferred",
       )?.getAttribute("href"),
     ).toBe("/planner?date=2026-07-01");
+    expect(
+      linkByAriaLabel(
+        fixture,
+        "Open planner workspace for Jul 1, 2026, Generated snapshot v2, 1 deferred",
+      )?.textContent,
+    ).toContain("1 deferred");
     expect(announcement(fixture)).toContain("Week calendar loaded");
   });
 
@@ -406,6 +412,8 @@ describe("rendered planner overviews", () => {
     expect(free?.getAttribute("data-kind")).toBe("designated_free_time");
     expect(free?.textContent).toContain("Free");
     expect(free?.getAttribute("aria-label")).toContain("Useful free time");
+    expect(fixed?.hasAttribute("tabindex")).toBe(false);
+    expect(done?.hasAttribute("tabindex")).toBe(false);
     expect(text(fixture)).toContain("Deferred: 1");
   });
 
