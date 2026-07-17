@@ -10,7 +10,15 @@ import {
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { FormsModule } from "@angular/forms";
 import { ActivatedRoute, Router, RouterLink } from "@angular/router";
-import { catchError, combineLatest, map, of, switchMap, tap } from "rxjs";
+import {
+  Observable,
+  catchError,
+  combineLatest,
+  map,
+  of,
+  switchMap,
+  tap,
+} from "rxjs";
 
 import { IconButtonComponent } from "../../shared/ui/icon-button/icon-button.component";
 import {
@@ -20,12 +28,21 @@ import {
 import { StatusChipComponent } from "../../shared/ui/status-chip/status-chip.component";
 import { SummaryValueComponent } from "../../shared/ui/summary-value/summary-value.component";
 import {
+  FixedEvent,
   PlannerApiService,
   PlanningDaySummary,
   PlanningRangeSummary,
+  PlanningWeekDayDetail,
+  PlanningWeekDetail,
+  ScheduleDecision,
+  ScheduleItem,
+  ScheduleSnapshot,
+  Task,
+  TaskProgress,
 } from "./planner-api.service";
 
 type OverviewMode = "week" | "month";
+type TimelineRecoveryState = "moved" | "split";
 
 type OverviewCell =
   | { readonly kind: "padding"; readonly id: string; readonly label: string }
@@ -41,12 +58,55 @@ interface OverviewTotals {
   readonly generatedPlanDays: number;
 }
 
+interface WeekBlock {
+  readonly item: ScheduleItem;
+  readonly day: PlanningWeekDayDetail;
+  readonly label: string;
+  readonly kindLabel: string;
+  readonly marker: string;
+  readonly recoveryState: TimelineRecoveryState | null;
+  readonly recoveryLabel: string | null;
+  readonly completionLabel: string | null;
+  readonly minutes: number;
+  readonly topPercent: number;
+  readonly heightPercent: number;
+  readonly topMinutes: number;
+  readonly heightMinutes: number;
+  readonly laneIndex: number;
+  readonly laneCount: number;
+  readonly leftPercent: number;
+  readonly widthPercent: number;
+  readonly isCompact: boolean;
+}
+
+interface WeekTick {
+  readonly label: string;
+  readonly topPercent: number;
+  readonly labelTopPercent: number | null;
+  readonly labelClass: string;
+  readonly minutesFromStart: number;
+}
+
+interface CurrentTimeIndicator {
+  readonly date: string;
+  readonly label: string;
+  readonly topPercent: number;
+}
+
+interface WeekPlaceholderDay {
+  readonly localDate: string;
+  readonly name: string;
+  readonly number: string;
+  readonly isSelected: boolean;
+}
+
 type OverviewState =
   | { readonly status: "loading"; readonly anchorDate: string }
   | {
       readonly status: "ready";
       readonly anchorDate: string;
       readonly summary: PlanningRangeSummary;
+      readonly week: PlanningWeekDetail | null;
     }
   | {
       readonly status: "permission";
@@ -59,14 +119,14 @@ type OverviewState =
       readonly message: string;
     };
 
-const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
+const PLANNER_MODE_OPTIONS: readonly SegmentedControlOption[] = [
   { label: "Day", value: "day", ariaLabel: "Show day planner" },
-  { label: "Week", value: "week", ariaLabel: "Show week overview" },
-  { label: "Month", value: "month", ariaLabel: "Show month overview" },
-  { label: "Free time", value: "free", ariaLabel: "Show free-time finder" },
+  { label: "Week", value: "week", ariaLabel: "Show week calendar" },
+  { label: "Month", value: "month", ariaLabel: "Show month calendar" },
 ];
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const COMPACT_WEEK_BLOCK_MINUTES = 45;
 
 @Component({
   selector: "pdf-planner-overview-page",
@@ -82,8 +142,12 @@ const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   templateUrl: "./planner-overview.page.html",
 })
 export class PlannerOverviewPage implements OnInit {
-  protected readonly plannerViewOptions = PLANNER_VIEW_OPTIONS;
+  protected readonly plannerModeOptions = PLANNER_MODE_OPTIONS;
   protected readonly weekdayLabels = WEEKDAY_LABELS;
+  protected readonly monthPlaceholderCells = Array.from(
+    { length: 35 },
+    (_, index) => index,
+  );
   protected readonly mode = signal<OverviewMode>("week");
   protected readonly anchorDate = signal(todayLocalDate());
   protected readonly state = signal<OverviewState>({
@@ -91,7 +155,7 @@ export class PlannerOverviewPage implements OnInit {
     anchorDate: todayLocalDate(),
   });
   protected readonly title = computed(() =>
-    this.mode() === "week" ? "Week overview" : "Month overview",
+    this.mode() === "week" ? "Week calendar" : "Month calendar",
   );
   protected readonly announcement = computed(() => {
     const state = this.state();
@@ -127,16 +191,30 @@ export class PlannerOverviewPage implements OnInit {
         this.state.set({ status: "loading", anchorDate });
       }),
       switchMap(({ mode, anchorDate }) => {
-        const request =
+        const request: Observable<{
+          readonly summary: PlanningRangeSummary;
+          readonly week: PlanningWeekDetail | null;
+        }> =
           mode === "week"
-            ? this.plannerApi.loadWeekOverview(startOfWeek(anchorDate))
-            : this.plannerApi.loadMonthOverview(startOfMonth(anchorDate));
+            ? this.plannerApi.loadWeekDetail(startOfWeek(anchorDate)).pipe(
+                map((week) => ({
+                  summary: week.summary,
+                  week,
+                })),
+              )
+            : this.plannerApi.loadMonthOverview(startOfMonth(anchorDate)).pipe(
+                map((summary) => ({
+                  summary,
+                  week: null,
+                })),
+              );
         return request.pipe(
           map(
-            (summary): OverviewState => ({
+            ({ summary, week }): OverviewState => ({
               status: "ready",
               anchorDate,
               summary,
+              week,
             }),
           ),
           catchError((error: unknown) =>
@@ -190,23 +268,61 @@ export class PlannerOverviewPage implements OnInit {
         ? "/planner/week"
         : view === "month"
           ? "/planner/month"
-          : view === "free"
-            ? "/free-times"
-            : "/planner";
-    const queryParams =
-      view === "free"
-        ? {
-            start_date: date,
-            end_date: addDays(date, 6),
-            minimum_minutes: 30,
-          }
-        : { date };
+          : "/planner";
 
-    void this.router.navigate([route], { queryParams });
+    void this.router.navigate([route], { queryParams: { date } });
   }
 
   protected retry(): void {
     this.openAnchorDate();
+  }
+
+  protected overviewDescription(): string {
+    return this.mode() === "week"
+      ? "Timed week grid from persisted daily snapshots. Each date opens the day workspace."
+      : "Monday-first calendar summary of saved daily inputs and current snapshots. Each date opens the day workspace.";
+  }
+
+  protected weekMetaLabel(week: PlanningWeekDetail): string {
+    return `${this.weekTimeZoneLabel(week)} - Day bounds ${this.weekBoundsLabel(week)}`;
+  }
+
+  protected fallbackRangeLabel(anchorDate: string): string {
+    if (this.mode() === "week") {
+      const startDate = startOfWeek(anchorDate);
+      return `${formatDateLabel(startDate)} to ${formatDateLabel(addDays(startDate, 6))}`;
+    }
+
+    const startDate = startOfMonth(anchorDate);
+    const endDate = localDateFromDate(
+      new Date(
+        Date.UTC(
+          dateFromLocalDate(startDate).getUTCFullYear(),
+          dateFromLocalDate(startDate).getUTCMonth() + 1,
+          0,
+        ),
+      ),
+    );
+    return `${formatDateLabel(startDate)} to ${formatDateLabel(endDate)}`;
+  }
+
+  protected fallbackTimeZoneLabel(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "Local time";
+  }
+
+  protected weekPlaceholderDays(
+    anchorDate: string,
+  ): readonly WeekPlaceholderDay[] {
+    const startDate = startOfWeek(anchorDate);
+    return Array.from({ length: 7 }, (_, index) => {
+      const localDate = addDays(startDate, index);
+      return {
+        localDate,
+        name: this.dayName(localDate),
+        number: this.dayNumber(localDate),
+        isSelected: localDate === anchorDate,
+      };
+    });
   }
 
   protected rangeLabel(summary: PlanningRangeSummary): string {
@@ -396,6 +512,232 @@ export class PlannerOverviewPage implements OnInit {
 
     return [...leadingCells, ...dayCells, ...trailingCells];
   }
+
+  protected weekTimeZoneLabel(week: PlanningWeekDetail): string {
+    const selected = week.days.find(
+      (day) => day.summary.local_date === this.anchorDate(),
+    );
+    return (
+      selected?.day?.time_zone ??
+      selected?.summary.time_zone ??
+      week.days.find((day) => day.day?.time_zone)?.day?.time_zone ??
+      week.days.find((day) => day.summary.time_zone)?.summary.time_zone ??
+      Intl.DateTimeFormat().resolvedOptions().timeZone ??
+      "Local time"
+    );
+  }
+
+  protected weekBoundsLabel(week: PlanningWeekDetail): string {
+    const bounds = weekBounds(week);
+    return `${formatMinutesAsTime(bounds.startMinutes)}-${formatMinutesAsTime(bounds.endMinutes)}`;
+  }
+
+  protected weekHeightRem(week: PlanningWeekDetail): number {
+    const bounds = weekBounds(week);
+    return Math.max(
+      36,
+      ((bounds.endMinutes - bounds.startMinutes) * 1.15) / 16,
+    );
+  }
+
+  protected weekTicks(week: PlanningWeekDetail): readonly WeekTick[] {
+    const bounds = weekBounds(week);
+    const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
+    const firstHour = Math.ceil(bounds.startMinutes / 60) * 60;
+    const ticks: WeekTick[] = [
+      {
+        label: formatMinutesAsTime(bounds.startMinutes),
+        topPercent: 0,
+        labelTopPercent: null,
+        labelClass: "absolute right-2 top-1",
+        minutesFromStart: 0,
+      },
+    ];
+
+    for (let minutes = firstHour; minutes < bounds.endMinutes; minutes += 60) {
+      if (minutes === bounds.startMinutes) {
+        continue;
+      }
+      ticks.push({
+        label: formatMinutesAsTime(minutes),
+        topPercent: ((minutes - bounds.startMinutes) / totalMinutes) * 100,
+        labelTopPercent: ((minutes - bounds.startMinutes) / totalMinutes) * 100,
+        labelClass: "absolute right-2 -translate-y-1/2",
+        minutesFromStart: minutes - bounds.startMinutes,
+      });
+    }
+
+    ticks.push({
+      label: formatMinutesAsTime(bounds.endMinutes),
+      topPercent: 100,
+      labelTopPercent: null,
+      labelClass: "absolute bottom-1 right-2",
+      minutesFromStart: totalMinutes,
+    });
+
+    return ticks;
+  }
+
+  protected weekBlocksForDay(
+    day: PlanningWeekDayDetail,
+    week: PlanningWeekDetail,
+  ): readonly WeekBlock[] {
+    if (day.snapshot === null) {
+      return [];
+    }
+
+    const bounds = weekBounds(week);
+    const timeZone = day.day?.time_zone ?? day.summary.time_zone ?? "UTC";
+    const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
+    const laneLayout = timelineLaneLayout(day.snapshot.items, timeZone);
+    const completedIds = completedScheduleItemIds(
+      day.snapshot,
+      day.progress,
+      timeZone,
+    );
+    const recoveryStates = recoveryStatesByTask(day.snapshot.decisions);
+
+    return day.snapshot.items.map((item) => {
+      const startMinutes = minutesFromIsoInZone(item.start_at, timeZone);
+      const endMinutes = minutesFromIsoInZone(item.end_at, timeZone);
+      const topMinutes = Math.max(0, startMinutes - bounds.startMinutes);
+      const heightMinutes = Math.max(1, endMinutes - startMinutes);
+      const lanes = laneLayout.get(item.id) ?? { laneIndex: 0, laneCount: 1 };
+      const widthPercent = 100 / lanes.laneCount;
+      const completionLabel = completedIds.has(item.id) ? "Done" : null;
+      const recoveryState =
+        item.kind === "task" &&
+        item.task_id !== null &&
+        completionLabel === null
+          ? (recoveryStates.get(item.task_id) ?? null)
+          : null;
+
+      return {
+        item,
+        day,
+        label: itemLabel(item, week.tasks, day.fixedEvents),
+        kindLabel: formatKindLabel(item.kind),
+        marker: itemMarker(item.kind),
+        recoveryState,
+        recoveryLabel:
+          recoveryState === null ? null : recoveryLabelForState(recoveryState),
+        completionLabel,
+        minutes: heightMinutes,
+        topPercent: (topMinutes / totalMinutes) * 100,
+        heightPercent: (heightMinutes / totalMinutes) * 100,
+        topMinutes,
+        heightMinutes,
+        laneIndex: lanes.laneIndex,
+        laneCount: lanes.laneCount,
+        leftPercent: lanes.laneIndex * widthPercent,
+        widthPercent,
+        isCompact: heightMinutes <= COMPACT_WEEK_BLOCK_MINUTES,
+      };
+    });
+  }
+
+  protected weekBlockClass(block: WeekBlock): string {
+    const shared =
+      "absolute overflow-hidden rounded-sm border bg-white px-2 py-1 text-left shadow-sm transition focus-visible:z-20 focus-visible:shadow-focus";
+
+    switch (block.item.kind) {
+      case "task":
+        return `${shared} border-mist-200 border-l-4 border-l-meadow-600`;
+      case "fixed_event":
+        return `${shared} border-mist-200 border-l-4 border-l-signal-600`;
+      case "interruption":
+        return `${shared} border-mist-200 border-l-4 border-l-rose-500`;
+      case "designated_free_time":
+        return `${shared} border-mist-200 border-l-4 border-l-sky-500`;
+      case "buffer":
+        return `${shared} border-mist-200 border-l-4 border-l-mist-400`;
+      default:
+        return `${shared} border-mist-200 border-l-4 border-l-mist-300`;
+    }
+  }
+
+  protected weekBlockAriaLabel(block: WeekBlock): string {
+    const parts = [
+      block.label,
+      block.kindLabel,
+      formatDuration(block.minutes),
+      this.formatScheduleTimeRange(
+        block.item.start_at,
+        block.item.end_at,
+        block.day.day?.time_zone ?? block.day.summary.time_zone ?? "UTC",
+      ),
+    ];
+
+    if (block.recoveryLabel) {
+      parts.push(block.recoveryLabel);
+    }
+    if (block.completionLabel) {
+      parts.push(block.completionLabel);
+    }
+
+    return parts.join(", ");
+  }
+
+  protected formatScheduleTimeRange(
+    start: string,
+    end: string,
+    timeZone: string | undefined | null,
+  ): string {
+    return `${formatTime(start, timeZone ?? "UTC")}-${formatTime(end, timeZone ?? "UTC")}`;
+  }
+
+  protected currentTimeIndicator(
+    week: PlanningWeekDetail,
+  ): CurrentTimeIndicator | null {
+    const today = todayLocalDate();
+    if (!week.summary.days.some((day) => day.local_date === today)) {
+      return null;
+    }
+
+    const day = week.days.find(
+      (candidate) => candidate.summary.local_date === today,
+    );
+    const timeZone =
+      day?.day?.time_zone ??
+      day?.summary.time_zone ??
+      this.weekTimeZoneLabel(week);
+    const nowMinutes = minutesNowInZone(timeZone);
+    const bounds = weekBounds(week);
+    if (nowMinutes < bounds.startMinutes || nowMinutes > bounds.endMinutes) {
+      return null;
+    }
+
+    return {
+      date: today,
+      label: `Current time ${formatMinutesAsTime(nowMinutes)}`,
+      topPercent:
+        ((nowMinutes - bounds.startMinutes) /
+          Math.max(1, bounds.endMinutes - bounds.startMinutes)) *
+        100,
+    };
+  }
+
+  protected deferredDecisionCount(week: PlanningWeekDetail): number {
+    return week.days.reduce(
+      (total, day) =>
+        total +
+        (day.snapshot?.decisions.filter((decision) =>
+          isDeferredReasonCode(decision.reason_code),
+        ).length ?? 0),
+      0,
+    );
+  }
+
+  protected movedDecisionCount(week: PlanningWeekDetail): number {
+    return week.days.reduce(
+      (total, day) =>
+        total +
+        (day.snapshot?.decisions.filter(
+          (decision) => decision.reason_code === "moved_after_interruption",
+        ).length ?? 0),
+      0,
+    );
+  }
 }
 
 function overviewErrorState(anchorDate: string, error: unknown): OverviewState {
@@ -512,4 +854,331 @@ function formatDuration(minutes: number): string {
     return `${hours} hr`;
   }
   return `${hours} hr ${remainder} min`;
+}
+
+function formatMinutesAsTime(minutes: number): string {
+  const normalizedMinutes = Math.max(0, minutes);
+  const hours = Math.floor(normalizedMinutes / 60) % 24;
+  const remainder = normalizedMinutes % 60;
+
+  return `${String(hours).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function formatTime(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatKindLabel(kind: string): string {
+  switch (kind) {
+    case "task":
+      return "Flexible work";
+    case "fixed_event":
+      return "Fixed event";
+    case "interruption":
+      return "Reported unavailable time";
+    case "buffer":
+      return "Buffer";
+    case "designated_free_time":
+      return "Useful free time";
+    default:
+      return kind.replaceAll("_", " ");
+  }
+}
+
+function itemMarker(kind: string): string {
+  switch (kind) {
+    case "task":
+      return "Work";
+    case "fixed_event":
+      return "Fixed";
+    case "interruption":
+      return "Unavailable";
+    case "buffer":
+      return "Buffer";
+    case "designated_free_time":
+      return "Free";
+    default:
+      return "Block";
+  }
+}
+
+function itemLabel(
+  item: ScheduleItem,
+  tasks: readonly Task[],
+  fixedEvents: readonly FixedEvent[],
+): string {
+  if (item.kind === "task") {
+    return tasks.find((task) => task.id === item.task_id)?.title ?? "Task";
+  }
+
+  if (item.kind === "fixed_event") {
+    return (
+      fixedEvents.find((event) => event.id === item.fixed_event_id)?.title ??
+      "Fixed event"
+    );
+  }
+
+  return formatKindLabel(item.kind);
+}
+
+function weekBounds(week: PlanningWeekDetail): {
+  readonly startMinutes: number;
+  readonly endMinutes: number;
+} {
+  const bounds = week.days
+    .map((day) => {
+      if (day.snapshot === null) {
+        return null;
+      }
+      return timelineBounds(
+        day.snapshot,
+        day.day?.time_zone ?? day.summary.time_zone ?? "UTC",
+      );
+    })
+    .filter((value): value is { startMinutes: number; endMinutes: number } =>
+      Boolean(value),
+    );
+
+  if (bounds.length === 0) {
+    return { startMinutes: 8 * 60, endMinutes: 18 * 60 };
+  }
+
+  return {
+    startMinutes: Math.min(...bounds.map((bound) => bound.startMinutes)),
+    endMinutes: Math.max(...bounds.map((bound) => bound.endMinutes)),
+  };
+}
+
+function timelineBounds(
+  snapshot: ScheduleSnapshot,
+  timeZone: string,
+): { readonly startMinutes: number; readonly endMinutes: number } {
+  const configuredStart = configurationTimeMinutes(
+    snapshot.configuration["day_start"],
+  );
+  const configuredEnd = configurationTimeMinutes(
+    snapshot.configuration["day_end"],
+  );
+  const itemStarts = snapshot.items.map((item) =>
+    minutesFromIsoInZone(item.start_at, timeZone),
+  );
+  const itemEnds = snapshot.items.map((item) =>
+    minutesFromIsoInZone(item.end_at, timeZone),
+  );
+  const startMinutes = Math.min(configuredStart ?? 8 * 60, ...itemStarts);
+  const endMinutes = Math.max(configuredEnd ?? 18 * 60, ...itemEnds);
+
+  return { startMinutes, endMinutes };
+}
+
+function timelineLaneLayout(
+  items: readonly ScheduleItem[],
+  timeZone: string,
+): ReadonlyMap<
+  string,
+  { readonly laneIndex: number; readonly laneCount: number }
+> {
+  const sortedItems = items
+    .map((item, index) => ({
+      item,
+      index,
+      startMinutes: minutesFromIsoInZone(item.start_at, timeZone),
+      endMinutes: minutesFromIsoInZone(item.end_at, timeZone),
+    }))
+    .sort(
+      (a, b) =>
+        a.startMinutes - b.startMinutes ||
+        a.endMinutes - b.endMinutes ||
+        a.index - b.index,
+    );
+  const layout = new Map<string, { laneIndex: number; laneCount: number }>();
+  let active: Array<{
+    readonly laneIndex: number;
+    readonly endMinutes: number;
+  }> = [];
+  let groupIds: string[] = [];
+  let groupLaneCount = 0;
+
+  const closeGroup = () => {
+    if (groupIds.length === 0) {
+      return;
+    }
+
+    for (const id of groupIds) {
+      const existing = layout.get(id);
+      if (existing) {
+        layout.set(id, {
+          laneIndex: existing.laneIndex,
+          laneCount: Math.max(1, groupLaneCount),
+        });
+      }
+    }
+    groupIds = [];
+    groupLaneCount = 0;
+  };
+
+  for (const entry of sortedItems) {
+    const nextActive = active.filter(
+      (candidate) => candidate.endMinutes > entry.startMinutes,
+    );
+    if (nextActive.length === 0) {
+      closeGroup();
+    }
+    active = nextActive;
+
+    const usedLanes = new Set(active.map((candidate) => candidate.laneIndex));
+    let laneIndex = 0;
+    while (usedLanes.has(laneIndex)) {
+      laneIndex += 1;
+    }
+
+    layout.set(entry.item.id, { laneIndex, laneCount: 1 });
+    active.push({
+      laneIndex,
+      endMinutes: Math.max(entry.endMinutes, entry.startMinutes + 1),
+    });
+    groupIds.push(entry.item.id);
+    groupLaneCount = Math.max(groupLaneCount, active.length);
+  }
+
+  closeGroup();
+
+  return layout;
+}
+
+function configurationTimeMinutes(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(value);
+  if (match === null) {
+    return null;
+  }
+
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function minutesFromIsoInZone(value: string, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(value));
+  const part = (type: string) =>
+    Number(parts.find((candidate) => candidate.type === type)?.value ?? "0");
+
+  return part("hour") * 60 + part("minute");
+}
+
+function minutesNowInZone(timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const part = (type: string) =>
+    Number(parts.find((candidate) => candidate.type === type)?.value ?? "0");
+
+  return part("hour") * 60 + part("minute");
+}
+
+function completedScheduleItemIds(
+  snapshot: ScheduleSnapshot,
+  progress: readonly TaskProgress[],
+  timeZone: string,
+): ReadonlySet<string> {
+  const completedByTask = new Map<string, number>();
+  for (const record of progress) {
+    completedByTask.set(
+      record.task_id,
+      (completedByTask.get(record.task_id) ?? 0) + record.completed_minutes,
+    );
+  }
+
+  const completedItemIds = new Set<string>();
+  const taskItems = snapshot.items
+    .filter((item) => item.kind === "task" && item.task_id !== null)
+    .map((item, index) => ({
+      item,
+      index,
+      startMinutes: minutesFromIsoInZone(item.start_at, timeZone),
+      endMinutes: minutesFromIsoInZone(item.end_at, timeZone),
+    }))
+    .sort(
+      (a, b) =>
+        a.startMinutes - b.startMinutes ||
+        a.endMinutes - b.endMinutes ||
+        a.index - b.index,
+    );
+
+  for (const entry of taskItems) {
+    const taskId = entry.item.task_id;
+    if (taskId === null) {
+      continue;
+    }
+    const remainingCompletedMinutes = completedByTask.get(taskId) ?? 0;
+    const itemMinutes = Math.max(
+      1,
+      (Date.parse(entry.item.end_at) - Date.parse(entry.item.start_at)) /
+        60_000,
+    );
+
+    if (remainingCompletedMinutes >= itemMinutes) {
+      completedItemIds.add(entry.item.id);
+      completedByTask.set(taskId, remainingCompletedMinutes - itemMinutes);
+    } else {
+      completedByTask.set(taskId, 0);
+    }
+  }
+
+  return completedItemIds;
+}
+
+function recoveryStatesByTask(
+  decisions: readonly ScheduleDecision[],
+): ReadonlyMap<string, TimelineRecoveryState> {
+  const states = new Map<string, TimelineRecoveryState>();
+
+  for (const decision of decisions) {
+    if (decision.task_id === null) {
+      continue;
+    }
+
+    if (decision.reason_code === "moved_after_interruption") {
+      states.set(decision.task_id, "moved");
+    } else if (
+      decision.reason_code === "split_across_available_windows" &&
+      !states.has(decision.task_id)
+    ) {
+      states.set(decision.task_id, "split");
+    }
+  }
+
+  return states;
+}
+
+function recoveryLabelForState(state: TimelineRecoveryState): string {
+  switch (state) {
+    case "moved":
+      return "Moved";
+    case "split":
+      return "Split";
+  }
+}
+
+function isDeferredReasonCode(reasonCode: string): boolean {
+  return (
+    reasonCode === "blocked_by_fixed_event" ||
+    reasonCode === "blocked_by_interruption" ||
+    reasonCode === "missed_before_current_time" ||
+    reasonCode === "insufficient_time_before_deadline" ||
+    reasonCode === "insufficient_remaining_day_time"
+  );
 }

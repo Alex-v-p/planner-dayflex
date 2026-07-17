@@ -192,7 +192,6 @@ const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
   { label: "Day", value: "day", ariaLabel: "Show day planner" },
   { label: "Week", value: "week", ariaLabel: "Show week overview" },
   { label: "Month", value: "month", ariaLabel: "Show month overview" },
-  { label: "Free time", value: "free", ariaLabel: "Show free-time finder" },
 ];
 const COMPACT_TIMELINE_BLOCK_MINUTES = 20;
 
@@ -396,19 +395,9 @@ export class PlannerWorkspacePage implements OnInit {
         ? "/planner/week"
         : view === "month"
           ? "/planner/month"
-          : view === "free"
-            ? "/free-times"
-            : "/planner";
-    const queryParams =
-      view === "free"
-        ? {
-            start_date: date,
-            end_date: addDays(date, 6),
-            minimum_minutes: 30,
-          }
-        : { date };
+          : "/planner";
 
-    void this.router.navigate([route], { queryParams });
+    void this.router.navigate([route], { queryParams: { date } });
   }
 
   protected reload(): void {
