@@ -1845,6 +1845,38 @@ describe("rendered planner workspace", () => {
     });
   });
 
+  it("returns focus to a stable planner control when a route create slot is missing", async () => {
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      snapshot: canonicalInitialSnapshot,
+    });
+    routeParams.next(
+      convertToParamMap({
+        date: canonicalDate,
+        create: "slot",
+        start: "11:00",
+      }),
+    );
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    expect(
+      query(fixture, `[data-calendar-slot='slot-${canonicalDate}-11:00']`),
+    ).toBeNull();
+
+    buttonByText(fixture, "Flexible task", "Calendar create").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    buttonByText(fixture, "Cancel", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(document.activeElement).toBe(
+      query(fixture, '[data-editor-trigger="fixed-event-add"]'),
+    );
+  });
+
   it("clears consumed route create intent params during normal date navigation", async () => {
     plannerApi.result = workspaceData({
       selectedDate: canonicalDate,

@@ -110,6 +110,7 @@ type PendingMutationFocus = {
 type EditorReturnFocus = {
   readonly element: HTMLElement | null;
   readonly selector: string | null;
+  readonly fallbackSelector?: string | null;
 };
 type RouteEditorIntent =
   | {
@@ -1372,12 +1373,14 @@ export class PlannerWorkspacePage implements OnInit {
     readonly endLocal: string;
     readonly timeZone: string;
     readonly returnFocusSelector?: string;
+    readonly returnFocusFallbackSelector?: string;
   }): void {
     const activeElement = document.activeElement;
     this.calendarCreateReturnFocus = {
       element: activeElement instanceof HTMLElement ? activeElement : null,
       selector:
         slot.returnFocusSelector ?? calendarSlotSelector(slot.sourceId) ?? null,
+      fallbackSelector: slot.returnFocusFallbackSelector ?? null,
     };
     const durationMinutes = Math.max(
       30,
@@ -1936,9 +1939,10 @@ export class PlannerWorkspacePage implements OnInit {
         startLocal,
         endLocal: addMinutesToDateTimeLocal(startLocal, 30),
         timeZone,
-        returnFocusSelector:
-          calendarSlotSelector(`slot-${intent.selectedDate}-${intent.start}`) ??
-          '[data-editor-trigger="fixed-event-add"]',
+        returnFocusSelector: calendarSlotSelector(
+          `slot-${intent.selectedDate}-${intent.start}`,
+        ),
+        returnFocusFallbackSelector: '[data-editor-trigger="fixed-event-add"]',
       });
       return;
     }
@@ -2016,7 +2020,11 @@ export class PlannerWorkspacePage implements OnInit {
       }
 
       if (target.selector !== null) {
-        const control = document.querySelector(target.selector);
+        const control =
+          document.querySelector(target.selector) ??
+          (target.fallbackSelector
+            ? document.querySelector(target.fallbackSelector)
+            : null);
         if (control instanceof HTMLElement) {
           control.focus();
         }
@@ -2602,7 +2610,7 @@ function dateNavigationQueryParams(
   };
 }
 
-function calendarSlotSelector(slotId: string): string | null {
+function calendarSlotSelector(slotId: string): string {
   return `[data-calendar-slot="${cssEscape(slotId)}"]`;
 }
 
