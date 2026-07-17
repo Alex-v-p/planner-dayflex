@@ -193,7 +193,7 @@ const PLANNER_VIEW_OPTIONS: readonly SegmentedControlOption[] = [
   { label: "Week", value: "week", ariaLabel: "Show week overview" },
   { label: "Month", value: "month", ariaLabel: "Show month overview" },
 ];
-const COMPACT_TIMELINE_BLOCK_MINUTES = 20;
+const COMPACT_TIMELINE_BLOCK_MINUTES = 45;
 
 @Component({
   selector: "pdf-planner-workspace-page",
@@ -1197,8 +1197,8 @@ export class PlannerWorkspacePage implements OnInit {
 
   protected itemClass(kind: string, isCompact: boolean): string {
     const shared = isCompact
-      ? "absolute overflow-hidden rounded-sm border border-mist-200 bg-white shadow-sm transition focus-visible:z-20 focus-visible:shadow-focus"
-      : "absolute overflow-hidden rounded-md border border-mist-200 bg-white p-3 shadow-sm transition focus-visible:z-20 focus-visible:shadow-focus";
+      ? "absolute min-w-0 overflow-hidden rounded-sm border border-mist-200 bg-white shadow-sm transition focus-visible:z-20 focus-visible:shadow-focus"
+      : "absolute min-w-0 overflow-hidden rounded-md border border-mist-200 bg-white p-2 shadow-sm transition focus-visible:z-20 focus-visible:shadow-focus sm:p-3";
 
     switch (kind) {
       case "task":
@@ -1460,7 +1460,7 @@ export class PlannerWorkspacePage implements OnInit {
     planningDayTimeZone: string | undefined,
   ): number {
     const bounds = timelineBounds(snapshot, planningDayTimeZone ?? "UTC");
-    return Math.max(26, (bounds.endMinutes - bounds.startMinutes) * 1.1);
+    return Math.max(26, (bounds.endMinutes - bounds.startMinutes) * 1.5);
   }
 
   protected scheduleSummary(

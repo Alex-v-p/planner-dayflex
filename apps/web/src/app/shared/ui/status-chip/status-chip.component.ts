@@ -8,6 +8,9 @@ import {
 @Component({
   selector: "pdf-status-chip",
   standalone: true,
+  host: {
+    class: "inline-flex max-w-full align-top",
+  },
   templateUrl: "./status-chip.component.html",
 })
 export class StatusChipComponent {

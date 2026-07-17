@@ -425,8 +425,8 @@ export class PlannerOverviewPage implements OnInit {
 
   protected gridClass(): string {
     return this.mode() === "month"
-      ? "grid gap-2 sm:grid-cols-2 lg:grid-cols-7"
-      : "grid gap-2 md:grid-cols-7";
+      ? "grid gap-2 sm:grid-cols-2 xl:grid-cols-7"
+      : "grid gap-2 sm:grid-cols-2 xl:grid-cols-7";
   }
 
   protected isSelectedDay(day: PlanningDaySummary): boolean {
