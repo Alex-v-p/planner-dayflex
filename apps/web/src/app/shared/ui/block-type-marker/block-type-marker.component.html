@@ -1,5 +1,5 @@
 <span
-  class="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-normal"
+  class="inline-flex max-w-full flex-wrap items-center gap-x-1 gap-y-0.5 text-xs font-semibold uppercase leading-4 tracking-normal"
   [attr.aria-label]="displayLabel + ': ' + treatment.description"
 >
   <span
@@ -10,5 +10,5 @@
   >
     {{ treatment.cue }}
   </span>
-  <span>{{ displayLabel }}</span>
+  <span class="min-w-0 whitespace-normal break-words">{{ displayLabel }}</span>
 </span>

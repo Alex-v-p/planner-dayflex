@@ -236,8 +236,10 @@
           <ol class="mt-4 grid gap-3 md:grid-cols-2">
             @for (window of day.windows; track window.schedule_item_id) {
             <li class="rounded-md border border-mist-200 bg-mist-50 p-3">
-              <div class="flex items-start justify-between gap-3">
-                <div>
+              <div
+                class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
+              >
+                <div class="min-w-0">
                   <p class="text-sm font-semibold text-ink-950">
                     {{ formatTime(window.start_at, window.time_zone) }} to {{
                     formatTime(window.end_at, window.time_zone) }}
