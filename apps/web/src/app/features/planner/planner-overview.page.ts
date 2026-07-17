@@ -76,7 +76,9 @@ interface WeekBlock {
   readonly laneCount: number;
   readonly leftPercent: number;
   readonly widthPercent: number;
+  readonly isTiny: boolean;
   readonly isCompact: boolean;
+  readonly showsDetails: boolean;
 }
 
 interface WeekTick {
@@ -126,7 +128,9 @@ const PLANNER_MODE_OPTIONS: readonly SegmentedControlOption[] = [
 ];
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const TINY_WEEK_BLOCK_MINUTES = 20;
 const COMPACT_WEEK_BLOCK_MINUTES = 45;
+const DETAILED_WEEK_BLOCK_MINUTES = 90;
 
 @Component({
   selector: "pdf-planner-overview-page",
@@ -631,14 +635,20 @@ export class PlannerOverviewPage implements OnInit {
         laneCount: lanes.laneCount,
         leftPercent: lanes.laneIndex * widthPercent,
         widthPercent,
+        isTiny: heightMinutes <= TINY_WEEK_BLOCK_MINUTES,
         isCompact: heightMinutes <= COMPACT_WEEK_BLOCK_MINUTES,
+        showsDetails: heightMinutes >= DETAILED_WEEK_BLOCK_MINUTES,
       };
     });
   }
 
   protected weekBlockClass(block: WeekBlock): string {
-    const shared =
-      "absolute overflow-hidden rounded-sm border bg-white px-2 py-1 text-left shadow-sm transition focus-visible:z-20 focus-visible:shadow-focus";
+    const density = block.isTiny
+      ? "px-1 py-0"
+      : block.isCompact
+        ? "px-1 py-0.5"
+        : "px-2 py-1";
+    const shared = `absolute overflow-hidden rounded-sm border bg-white ${density} text-left shadow-sm transition focus-visible:z-20 focus-visible:shadow-focus`;
 
     switch (block.item.kind) {
       case "task":
@@ -654,6 +664,17 @@ export class PlannerOverviewPage implements OnInit {
       default:
         return `${shared} border-mist-200 border-l-4 border-l-mist-300`;
     }
+  }
+
+  protected weekBlockMarkerLabel(block: WeekBlock): string {
+    const labels = [block.marker, block.recoveryLabel, block.completionLabel]
+      .filter((label): label is string => label !== null)
+      .join(" - ");
+    return labels.length > 0 ? labels : block.marker;
+  }
+
+  protected weekBlockCompactLabel(block: WeekBlock): string {
+    return `${this.weekBlockMarkerLabel(block)} - ${block.label}`;
   }
 
   protected weekBlockAriaLabel(block: WeekBlock): string {

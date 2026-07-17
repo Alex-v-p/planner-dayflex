@@ -231,7 +231,9 @@ test("canonical recovery journey works with a stubbed API", async ({
   await expect(
     page.getByRole("heading", { name: "Week calendar" }),
   ).toBeVisible();
-  await expect(page.getByText("Snapshot v2")).toBeVisible();
+  await expect(page.getByTestId("week-calendar-surface")).toContainText(
+    "Plan v2",
+  );
 
   await page.getByRole("link", { name: "Open planner month overview" }).click();
   await expect(

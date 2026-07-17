@@ -278,9 +278,9 @@
     </button>
   </section>
   } @else {
-  <div class="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_22rem]">
+  <div class="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_22rem]">
     <section
-      class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
+      class="min-w-0 rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
       aria-labelledby="overview-grid-title"
     >
       <div
@@ -312,7 +312,7 @@
 
       @if (view.week; as week) {
       <div
-        class="mt-5 overflow-x-auto rounded-md border border-mist-200 bg-mist-50"
+        class="mt-5 max-w-full overflow-x-auto rounded-md border border-mist-200 bg-mist-50"
         data-testid="week-calendar-surface"
       >
         <div class="min-w-[58rem]">
@@ -420,26 +420,35 @@
                 [attr.aria-label]="weekBlockAriaLabel(block)"
                 data-testid="week-schedule-block"
               >
+                @if (block.isCompact) {
+                <p
+                  [class]="block.isTiny ? 'truncate text-[0.625rem] font-semibold leading-none text-ink-950' : 'truncate text-[0.6875rem] font-semibold leading-4 text-ink-950'"
+                >
+                  {{ weekBlockCompactLabel(block) }}
+                </p>
+                } @else {
                 <p
                   class="truncate text-[0.6875rem] font-semibold uppercase leading-4 text-ink-700"
                 >
-                  {{ block.marker }} @if (block.recoveryLabel) { - {{
-                  block.recoveryLabel }} } @if (block.completionLabel) { - {{
-                  block.completionLabel }} }
+                  {{ weekBlockMarkerLabel(block) }}
                 </p>
-                <p class="truncate text-sm font-semibold text-ink-950">
+                <p
+                  class="truncate text-sm font-semibold leading-5 text-ink-950"
+                >
                   {{ block.label }}
                 </p>
-                @if (!block.isCompact) {
-                <p class="mt-0.5 text-xs font-medium leading-4 text-ink-600">
+                @if (block.showsDetails) {
+                <p
+                  class="mt-0.5 truncate text-xs font-medium leading-4 text-ink-600"
+                >
                   {{ block.kindLabel }} - {{ formatDuration(block.minutes) }}
                 </p>
-                <p class="text-xs leading-4 text-ink-600">
+                <p class="truncate text-xs leading-4 text-ink-600">
                   {{ formatScheduleTimeRange(block.item.start_at,
                   block.item.end_at, day.day?.time_zone ??
                   day.summary.time_zone) }}
                 </p>
-                }
+                } }
               </article>
               } @empty { @if (day.summary.status === "empty") {
               <p
