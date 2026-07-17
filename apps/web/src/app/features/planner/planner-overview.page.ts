@@ -89,6 +89,17 @@ interface WeekTick {
   readonly minutesFromStart: number;
 }
 
+interface WeekSlot {
+  readonly id: string;
+  readonly localDate: string;
+  readonly start: string;
+  readonly label: string;
+  readonly topPercent: number;
+  readonly heightPercent: number;
+  readonly topMinutes: number;
+  readonly heightMinutes: number;
+}
+
 interface CurrentTimeIndicator {
   readonly date: string;
   readonly label: string;
@@ -640,6 +651,93 @@ export class PlannerOverviewPage implements OnInit {
         showsDetails: heightMinutes >= DETAILED_WEEK_BLOCK_MINUTES,
       };
     });
+  }
+
+  protected weekSlotsForDay(
+    day: PlanningWeekDayDetail,
+    week: PlanningWeekDetail,
+  ): readonly WeekSlot[] {
+    const bounds = weekBounds(week);
+    const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
+    const timeZone = day.day?.time_zone ?? day.summary.time_zone ?? "UTC";
+    const unavailable =
+      day.snapshot?.items
+        .filter((item) => item.kind !== "designated_free_time")
+        .map((item) => ({
+          startMinutes: minutesFromIsoInZone(item.start_at, timeZone),
+          endMinutes: minutesFromIsoInZone(item.end_at, timeZone),
+        })) ?? [];
+    const fixedEventUnavailable = day.fixedEvents.map((event) => ({
+      startMinutes: minutesFromIsoInZone(event.start_at, timeZone),
+      endMinutes: minutesFromIsoInZone(event.end_at, timeZone),
+    }));
+    const unavailableIntervals = [...unavailable, ...fixedEventUnavailable];
+    const slots: WeekSlot[] = [];
+
+    for (
+      let startMinutes = bounds.startMinutes;
+      startMinutes < bounds.endMinutes;
+      startMinutes += 30
+    ) {
+      const endMinutes = Math.min(startMinutes + 30, bounds.endMinutes);
+      if (
+        unavailableIntervals.some(
+          (item) =>
+            startMinutes < item.endMinutes && endMinutes > item.startMinutes,
+        )
+      ) {
+        continue;
+      }
+
+      const topMinutes = startMinutes - bounds.startMinutes;
+      const start = formatMinutesAsTime(startMinutes);
+      slots.push({
+        id: `slot-${day.summary.local_date}-${start}`,
+        localDate: day.summary.local_date,
+        start,
+        label: `${formatDateLabel(day.summary.local_date)} at ${start}`,
+        topPercent: (topMinutes / totalMinutes) * 100,
+        heightPercent: ((endMinutes - startMinutes) / totalMinutes) * 100,
+        topMinutes,
+        heightMinutes: endMinutes - startMinutes,
+      });
+    }
+
+    return slots;
+  }
+
+  protected openWeekSlot(slot: WeekSlot): void {
+    void this.router.navigate(["/planner"], {
+      queryParams: {
+        date: slot.localDate,
+        create: "slot",
+        start: slot.start,
+      },
+    });
+  }
+
+  protected openWeekBlock(block: WeekBlock): void {
+    const queryParams: Record<string, string> = {
+      date: block.day.summary.local_date,
+    };
+    if (block.item.kind === "task" && block.item.task_id !== null) {
+      queryParams["editTask"] = block.item.task_id;
+    } else if (
+      block.item.kind === "fixed_event" &&
+      block.item.fixed_event_id !== null
+    ) {
+      queryParams["editFixedEvent"] = block.item.fixed_event_id;
+    } else if (block.item.kind === "designated_free_time") {
+      queryParams["create"] = "slot";
+      queryParams["start"] = formatMinutesAsTime(
+        minutesFromIsoInZone(
+          block.item.start_at,
+          block.day.day?.time_zone ?? block.day.summary.time_zone ?? "UTC",
+        ),
+      );
+    }
+
+    void this.router.navigate(["/planner"], { queryParams });
   }
 
   protected weekBlockClass(block: WeekBlock): string {

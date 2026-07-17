@@ -412,9 +412,103 @@ describe("rendered planner overviews", () => {
     expect(free?.getAttribute("data-kind")).toBe("designated_free_time");
     expect(free?.textContent).toContain("Free");
     expect(free?.getAttribute("aria-label")).toContain("Useful free time");
-    expect(fixed?.hasAttribute("tabindex")).toBe(false);
-    expect(done?.hasAttribute("tabindex")).toBe(false);
+    expect(fixed?.getAttribute("role")).toBe("button");
+    expect(done?.getAttribute("tabindex")).toBe("0");
     expect(text(fixture)).toContain("Deferred: 1");
+  });
+
+  it("opens week slots and existing blocks in the day workspace editor flow", async () => {
+    const fixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+    const openSlot = weekOpenSlot(fixture, "2026-07-04", "08:00");
+
+    expect(openSlot.tagName).toBe("BUTTON");
+    expect(openSlot.getAttribute("type")).toBe("button");
+    expect(openSlot.getAttribute("aria-label")).toBe(
+      "Create planner item on Jul 4, 2026 at 08:00, choose fixed event or flexible task",
+    );
+    expect(openSlot.className).toContain("min-h-10");
+    expect(openSlot.className).toContain("border-dashed");
+    expect(openSlot.className).toContain("border-meadow-500");
+    expect(openSlot.className).not.toContain("text-transparent");
+
+    openSlot.click();
+    fixture.detectChanges();
+
+    expect(router.navigations.at(-1)).toEqual({
+      commands: ["/planner"],
+      queryParams: {
+        date: "2026-07-04",
+        create: "slot",
+        start: "08:00",
+      },
+    });
+
+    weekBlock(fixture, "fixed-item")?.click();
+    fixture.detectChanges();
+
+    expect(weekBlock(fixture, "fixed-item")?.getAttribute("role")).toBe(
+      "button",
+    );
+    expect(weekBlock(fixture, "fixed-item")?.getAttribute("tabindex")).toBe(
+      "0",
+    );
+    expect(router.navigations.at(-1)).toEqual({
+      commands: ["/planner"],
+      queryParams: {
+        date: "2026-07-01",
+        editFixedEvent: "fixed-standup",
+      },
+    });
+
+    weekBlock(fixture, "moved-item")?.dispatchEvent(
+      keyboardEvent("keydown", "Enter"),
+    );
+    fixture.detectChanges();
+
+    expect(router.navigations.at(-1)).toEqual({
+      commands: ["/planner"],
+      queryParams: {
+        date: "2026-07-01",
+        editTask: "task-moved",
+      },
+    });
+  });
+
+  it("does not offer week create slots over saved fixed events before a plan exists", async () => {
+    plannerApi.responseWeekDetail = {
+      ...weekDetail,
+      days: weekDetail.days.map((day) =>
+        day.summary.local_date === "2026-07-02"
+          ? {
+              ...day,
+              fixedEvents: [
+                fixedEvent(
+                  "fixed-input-only",
+                  "day-2",
+                  "Client call",
+                  "2026-07-02T08:00:00+02:00",
+                  "2026-07-02T08:30:00+02:00",
+                ),
+              ],
+              snapshot: null,
+            }
+          : day,
+      ),
+    };
+    const fixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+
+    expect(queryWeekOpenSlot(fixture, "2026-07-02", "08:00")).toBeNull();
+    expect(queryWeekOpenSlot(fixture, "2026-07-02", "08:30")).not.toBeNull();
   });
 
   it("places the current-time marker using the planning time zone date", async () => {
@@ -1044,6 +1138,28 @@ function weekBlock<T>(
   );
 }
 
+function weekOpenSlot<T>(
+  fixture: ComponentFixture<T>,
+  date: string,
+  start: string,
+): HTMLButtonElement {
+  const slot = queryWeekOpenSlot(fixture, date, start);
+  if (slot === null) {
+    throw new Error(`Could not find week slot ${date} ${start}`);
+  }
+  return slot as HTMLButtonElement;
+}
+
+function queryWeekOpenSlot<T>(
+  fixture: ComponentFixture<T>,
+  date: string,
+  start: string,
+): HTMLButtonElement | null {
+  return (fixture.nativeElement as HTMLElement).querySelector(
+    `[data-testid='week-open-slot'][data-date='${date}'][data-start='${start}']`,
+  );
+}
+
 function weekTimeRuler<T>(fixture: ComponentFixture<T>): HTMLElement {
   const element = (fixture.nativeElement as HTMLElement).querySelector(
     "[data-testid='week-time-ruler']",
@@ -1086,6 +1202,19 @@ function clickButtonWithText<T>(
 
   (button as HTMLButtonElement).click();
   fixture.detectChanges();
+}
+
+function keyboardEvent(
+  type: string,
+  key: string,
+  options: KeyboardEventInit = {},
+): KeyboardEvent {
+  return new KeyboardEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    key,
+    ...options,
+  });
 }
 
 function overviewSummary<T>(fixture: ComponentFixture<T>): HTMLElement {

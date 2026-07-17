@@ -397,6 +397,28 @@
                 [style.top.%]="tick.topPercent"
                 aria-hidden="true"
               ></span>
+              } @for (slot of weekSlotsForDay(day, week); track slot.id) {
+              <button
+                type="button"
+                class="absolute left-1 right-1 flex min-h-10 items-center gap-1 overflow-hidden rounded-sm border border-dashed border-meadow-500 bg-white/80 px-1.5 text-left text-[0.625rem] font-medium text-ink-700 transition hover:border-meadow-600 hover:bg-meadow-50 focus-visible:z-10 focus-visible:border-meadow-700 focus-visible:bg-white focus-visible:shadow-focus"
+                [style.top.%]="slot.topPercent"
+                [style.height.%]="slot.heightPercent"
+                [attr.data-testid]="'week-open-slot'"
+                [attr.data-date]="slot.localDate"
+                [attr.data-start]="slot.start"
+                [attr.data-top-minutes]="slot.topMinutes"
+                [attr.data-height-minutes]="slot.heightMinutes"
+                [attr.aria-label]="'Create planner item on ' + slot.label + ', choose fixed event or flexible task'"
+                (click)="openWeekSlot(slot)"
+              >
+                <span class="sr-only">Create planner item</span>
+                <span aria-hidden="true" class="shrink-0 text-xs leading-none"
+                  >+</span
+                >
+                <span aria-hidden="true" class="min-w-0 truncate"
+                  >{{ slot.start }}</span
+                >
+              </button>
               } @for (block of weekBlocksForDay(day, week); track block.item.id)
               {
               <article
@@ -419,6 +441,11 @@
                 [attr.data-width-percent]="block.widthPercent"
                 [attr.aria-label]="weekBlockAriaLabel(block)"
                 data-testid="week-schedule-block"
+                role="button"
+                tabindex="0"
+                (click)="openWeekBlock(block)"
+                (keydown.enter)="openWeekBlock(block)"
+                (keydown.space)="$event.preventDefault(); openWeekBlock(block)"
               >
                 @if (block.isCompact) {
                 <p
