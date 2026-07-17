@@ -424,8 +424,15 @@ describe("rendered planner overviews", () => {
       plannerApi,
       router,
     );
+    const openSlot = weekOpenSlot(fixture, "2026-07-04", "08:00");
 
-    weekOpenSlot(fixture, "2026-07-04", "08:00").click();
+    expect(openSlot.tagName).toBe("BUTTON");
+    expect(openSlot.getAttribute("type")).toBe("button");
+    expect(openSlot.getAttribute("aria-label")).toBe(
+      "Create planner item on Jul 4, 2026 at 08:00, choose fixed event or flexible task",
+    );
+
+    openSlot.click();
     fixture.detectChanges();
 
     expect(router.navigations.at(-1)).toEqual({
@@ -440,6 +447,12 @@ describe("rendered planner overviews", () => {
     weekBlock(fixture, "fixed-item")?.click();
     fixture.detectChanges();
 
+    expect(weekBlock(fixture, "fixed-item")?.getAttribute("role")).toBe(
+      "button",
+    );
+    expect(weekBlock(fixture, "fixed-item")?.getAttribute("tabindex")).toBe(
+      "0",
+    );
     expect(router.navigations.at(-1)).toEqual({
       commands: ["/planner"],
       queryParams: {

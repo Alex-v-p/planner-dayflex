@@ -1544,6 +1544,126 @@ describe("rendered planner workspace", () => {
     expect(inputValue(fixture, "#task-earliest-zone")).toBe("Europe/Brussels");
   });
 
+  it("saves flexible calendar-slot input without sending final placement fields", async () => {
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      fixedEvents: canonicalFixedEvents,
+      tasks: canonicalTasks,
+      snapshot: canonicalInitialSnapshot,
+    });
+    routeParams.next(convertToParamMap({ date: canonicalDate }));
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const slot = calendarSlot(fixture, `slot-${canonicalDate}-16:30`);
+
+    slot.click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    buttonByText(fixture, "Flexible task", "Calendar create").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    setInput(fixture, "#task-title", "Calendar-created task");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    await settleEditorMutation(fixture);
+
+    expect(plannerApi.createdTasks).toEqual([
+      {
+        title: "Calendar-created task",
+        estimated_minutes: 30,
+        priority: 3,
+        due_date: canonicalDate,
+        earliest_start_at: "2026-06-22T16:30:00+02:00",
+        splitting_allowed: false,
+        min_segment_minutes: null,
+      },
+    ]);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        plannerApi.createdTasks[0] as Record<string, unknown>,
+        "start_at",
+      ),
+    ).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        plannerApi.createdTasks[0] as Record<string, unknown>,
+        "end_at",
+      ),
+    ).toBe(false);
+    expect(plannerApi.loadedDates).toEqual([canonicalDate, canonicalDate]);
+  });
+
+  it("keeps calendar-prefilled flexible-task details after validation errors", async () => {
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      fixedEvents: canonicalFixedEvents,
+      tasks: canonicalTasks,
+      snapshot: canonicalInitialSnapshot,
+    });
+    routeParams.next(convertToParamMap({ date: canonicalDate }));
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    calendarSlot(fixture, `slot-${canonicalDate}-16:30`).click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    buttonByText(fixture, "Flexible task", "Calendar create").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    setInput(fixture, "#task-title", "Preserved calendar task");
+    setInput(fixture, "#task-estimate", "0");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Estimate must be at least 1 minute.");
+    expect(inputValue(fixture, "#task-title")).toBe("Preserved calendar task");
+    expect(inputValue(fixture, "#task-estimate")).toBe("0");
+    expect(inputValue(fixture, "#task-due-date")).toBe(canonicalDate);
+    expect(inputValue(fixture, "#task-earliest")).toBe(
+      `${canonicalDate}T16:30`,
+    );
+    expect(inputValue(fixture, "#task-earliest-zone")).toBe("Europe/Brussels");
+    expect(plannerApi.createdTasks).toEqual([]);
+  });
+
+  it("keeps calendar-prefilled fixed-event details after validation errors", async () => {
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      fixedEvents: canonicalFixedEvents,
+      tasks: canonicalTasks,
+      snapshot: canonicalInitialSnapshot,
+    });
+    routeParams.next(convertToParamMap({ date: canonicalDate }));
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    calendarSlot(fixture, `slot-${canonicalDate}-16:00`).click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    buttonByText(fixture, "Fixed event", "Calendar create").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Enter an event title.");
+    expect(inputValue(fixture, "#fixed-event-start")).toBe(
+      `${canonicalDate}T16:00`,
+    );
+    expect(inputValue(fixture, "#fixed-event-end")).toBe(
+      `${canonicalDate}T16:30`,
+    );
+    expect(inputValue(fixture, "#fixed-event-time-zone")).toBe(
+      "Europe/Brussels",
+    );
+    expect(plannerApi.savedFixedEvents).toEqual([]);
+  });
+
   it("uses the selected day for calendar slots when the snapshot has no items", async () => {
     const emptySnapshot: ScheduleSnapshot = {
       ...canonicalInitialSnapshot,
