@@ -689,18 +689,12 @@ export class PlannerOverviewPage implements OnInit {
   protected currentTimeIndicator(
     week: PlanningWeekDetail,
   ): CurrentTimeIndicator | null {
-    const today = todayLocalDate();
-    if (!week.summary.days.some((day) => day.local_date === today)) {
+    const timeZone = this.weekTimeZoneLabel(week);
+    const currentDate = localDateNowInZone(timeZone);
+    if (!week.summary.days.some((day) => day.local_date === currentDate)) {
       return null;
     }
 
-    const day = week.days.find(
-      (candidate) => candidate.summary.local_date === today,
-    );
-    const timeZone =
-      day?.day?.time_zone ??
-      day?.summary.time_zone ??
-      this.weekTimeZoneLabel(week);
     const nowMinutes = minutesNowInZone(timeZone);
     const bounds = weekBounds(week);
     if (nowMinutes < bounds.startMinutes || nowMinutes > bounds.endMinutes) {
@@ -708,7 +702,7 @@ export class PlannerOverviewPage implements OnInit {
     }
 
     return {
-      date: today,
+      date: currentDate,
       label: `Current time ${formatMinutesAsTime(nowMinutes)}`,
       topPercent:
         ((nowMinutes - bounds.startMinutes) /
@@ -819,6 +813,19 @@ function todayLocalDate(): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function localDateNowInZone(timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: string) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
 function dateFromLocalDate(value: string): Date {

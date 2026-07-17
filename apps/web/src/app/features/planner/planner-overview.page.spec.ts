@@ -417,6 +417,67 @@ describe("rendered planner overviews", () => {
     expect(text(fixture)).toContain("Deferred: 1");
   });
 
+  it("places the current-time marker using the planning time zone date", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-30T19:00:00Z"));
+    const timeZone = "Pacific/Kiritimati";
+    const nextWeekSummary = {
+      ...weekSummary,
+      days: weekSummary.days.map((day) =>
+        day.local_date === "2026-07-01"
+          ? { ...day, time_zone: timeZone, status: "planned" as const }
+          : day,
+      ),
+    };
+    plannerApi.responseWeekDetail = {
+      ...weekDetail,
+      summary: nextWeekSummary,
+      days: weekDetail.days.map((day) => ({
+        ...day,
+        summary:
+          nextWeekSummary.days.find(
+            (summary) => summary.local_date === day.summary.local_date,
+          ) ?? day.summary,
+        day:
+          day.summary.local_date === "2026-07-01"
+            ? {
+                id: "day-1",
+                local_date: "2026-07-01",
+                time_zone: timeZone,
+                current_snapshot_id: "snapshot-timezone",
+                created_at: "2026-07-01T08:00:00+14:00",
+              }
+            : day.day,
+        snapshot:
+          day.summary.local_date === "2026-07-01"
+            ? {
+                ...weekSnapshot,
+                id: "snapshot-timezone",
+                items: [],
+                decisions: [],
+              }
+            : day.snapshot,
+      })),
+    };
+
+    try {
+      const fixture = await renderOverview(
+        routeData,
+        queryParamMap,
+        plannerApi,
+        router,
+      );
+      const indicator = currentTimeIndicator(fixture);
+
+      expect(indicator?.getAttribute("aria-label")).toBe("Current time 09:00");
+      expect(weekDayColumn(fixture, "2026-07-01")?.contains(indicator)).toBe(
+        true,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses one Day Week Month switcher and keeps free-time out of route header modes", async () => {
     const fixture = await renderOverview(
       routeData,
@@ -1001,6 +1062,14 @@ function weekGrid<T>(fixture: ComponentFixture<T>): HTMLElement {
     throw new Error("Could not find week time grid");
   }
   return element as HTMLElement;
+}
+
+function currentTimeIndicator<T>(
+  fixture: ComponentFixture<T>,
+): HTMLElement | null {
+  return (fixture.nativeElement as HTMLElement).querySelector(
+    "[data-testid='current-time-indicator']",
+  );
 }
 
 function clickButtonWithText<T>(
