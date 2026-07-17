@@ -237,10 +237,10 @@
             aria-hidden="true"
           ></span>
           } @for (slot of timelineSlots(snapshot, view.data.day?.time_zone,
-          view.selectedDate); track slot.id) {
+          view.selectedDate, view.data.fixedEvents); track slot.id) {
           <button
             type="button"
-            class="absolute left-3 right-3 min-h-7 rounded-sm border border-dashed border-transparent bg-transparent px-2 text-left text-[0.6875rem] font-medium text-transparent transition hover:border-meadow-600 hover:bg-meadow-50 hover:text-ink-700 focus-visible:z-10 focus-visible:border-meadow-700 focus-visible:bg-white focus-visible:text-ink-700 focus-visible:shadow-focus sm:left-4 sm:right-4"
+            class="absolute left-3 right-3 flex min-h-10 items-center gap-1 overflow-hidden rounded-sm border border-dashed border-meadow-500 bg-white/80 px-2 text-left text-[0.6875rem] font-medium text-ink-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)] transition hover:border-meadow-600 hover:bg-meadow-50 focus-visible:z-10 focus-visible:border-meadow-700 focus-visible:bg-white focus-visible:shadow-focus sm:left-4 sm:right-4"
             [style.top.%]="slot.topPercent"
             [style.height.%]="slot.heightPercent"
             [attr.data-calendar-slot]="slot.id"
@@ -256,7 +256,12 @@
             })"
           >
             <span class="sr-only">Create planner item</span>
-            <span aria-hidden="true">Add {{ slot.startLocal.slice(11) }}</span>
+            <span aria-hidden="true" class="shrink-0 text-sm leading-none"
+              >+</span
+            >
+            <span aria-hidden="true" class="min-w-0 truncate"
+              >{{ slot.startLocal.slice(11) }}</span
+            >
           </button>
           } @for (block of timelineBlocks( snapshot, view.data.tasks,
           view.data.fixedEvents, view.data.progress, view.data.day?.time_zone );
@@ -494,13 +499,132 @@
         </ul>
       </section>
       } } @else if (view.data.day) {
+      <div
+        class="mt-5 grid min-h-[26rem] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-md border border-mist-200 bg-mist-50"
+        data-testid="daily-timeline"
+        [style.height.rem]="timelineHeight(null, view.data.day.time_zone) / 16"
+      >
+        <div
+          class="relative border-r border-mist-200 bg-white text-[0.6875rem] font-medium text-ink-600"
+          data-testid="time-ruler"
+          aria-label="Visible time ruler"
+        >
+          @for (tick of timeRulerTicks(null, view.data.day.time_zone); track
+          tick.minutesFromStart) {
+          <span
+            [class]="tick.labelClass"
+            [style.top.%]="tick.labelTopPercent"
+            [attr.data-ruler-minute]="tick.minutesFromStart"
+          >
+            {{ tick.label }}
+          </span>
+          }
+        </div>
+        <div class="relative min-w-0 p-3 sm:p-4">
+          @for (tick of timeRulerTicks(null, view.data.day.time_zone); track
+          tick.minutesFromStart) {
+          <span
+            class="pointer-events-none absolute left-0 right-0 border-t border-mist-200"
+            [style.top.%]="tick.topPercent"
+            aria-hidden="true"
+          ></span>
+          } @for (slot of timelineSlots(null, view.data.day.time_zone,
+          view.selectedDate, view.data.fixedEvents); track slot.id) {
+          <button
+            type="button"
+            class="absolute left-3 right-3 flex min-h-10 items-center gap-1 overflow-hidden rounded-sm border border-dashed border-meadow-500 bg-white/80 px-2 text-left text-[0.6875rem] font-medium text-ink-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)] transition hover:border-meadow-600 hover:bg-meadow-50 focus-visible:z-10 focus-visible:border-meadow-700 focus-visible:bg-white focus-visible:shadow-focus sm:left-4 sm:right-4"
+            [style.top.%]="slot.topPercent"
+            [style.height.%]="slot.heightPercent"
+            [attr.data-calendar-slot]="slot.id"
+            [attr.data-top-minutes]="slot.topMinutes"
+            [attr.data-height-minutes]="slot.heightMinutes"
+            [attr.aria-label]="'Create planner item on ' + formatDateLabel(view.selectedDate) + ' at ' + slot.startLocal.slice(11) + ', choose fixed event or flexible task'"
+            (click)="openCalendarCreateChoice({
+              sourceId: slot.id,
+              localDate: view.selectedDate,
+              startLocal: slot.startLocal,
+              endLocal: slot.endLocal,
+              timeZone: slot.timeZone
+            })"
+          >
+            <span class="sr-only">Create planner item</span>
+            <span aria-hidden="true" class="shrink-0 text-sm leading-none"
+              >+</span
+            >
+            <span aria-hidden="true" class="min-w-0 truncate"
+              >{{ slot.startLocal.slice(11) }}</span
+            >
+          </button>
+          }
+        </div>
+      </div>
       <div class="mt-5 rounded-md border border-dashed border-mist-300 p-5">
         <p class="font-medium text-ink-950">No schedule snapshot yet.</p>
         <p class="mt-2 text-sm leading-6 text-ink-600">
           Saved inputs are still shown below so the day remains easy to review.
         </p>
       </div>
-      } @else {
+      } @else { @if (fallbackTimeZone(); as timeZone) {
+      <div
+        class="mt-5 grid min-h-[26rem] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-md border border-mist-200 bg-mist-50"
+        data-testid="daily-timeline"
+        [style.height.rem]="timelineHeight(null, timeZone) / 16"
+      >
+        <div
+          class="relative border-r border-mist-200 bg-white text-[0.6875rem] font-medium text-ink-600"
+          data-testid="time-ruler"
+          aria-label="Visible time ruler"
+        >
+          @for (tick of timeRulerTicks(null, timeZone); track
+          tick.minutesFromStart) {
+          <span
+            [class]="tick.labelClass"
+            [style.top.%]="tick.labelTopPercent"
+            [attr.data-ruler-minute]="tick.minutesFromStart"
+          >
+            {{ tick.label }}
+          </span>
+          }
+        </div>
+        <div class="relative min-w-0 p-3 sm:p-4">
+          @for (tick of timeRulerTicks(null, timeZone); track
+          tick.minutesFromStart) {
+          <span
+            class="pointer-events-none absolute left-0 right-0 border-t border-mist-200"
+            [style.top.%]="tick.topPercent"
+            aria-hidden="true"
+          ></span>
+          } @for (slot of timelineSlots(null, timeZone, view.selectedDate);
+          track slot.id) {
+          <button
+            type="button"
+            class="absolute left-3 right-3 flex min-h-10 items-center gap-1 overflow-hidden rounded-sm border border-dashed border-meadow-500 bg-white/80 px-2 text-left text-[0.6875rem] font-medium text-ink-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)] transition hover:border-meadow-600 hover:bg-meadow-50 focus-visible:z-10 focus-visible:border-meadow-700 focus-visible:bg-white focus-visible:shadow-focus sm:left-4 sm:right-4"
+            [style.top.%]="slot.topPercent"
+            [style.height.%]="slot.heightPercent"
+            [attr.data-calendar-slot]="slot.id"
+            [attr.data-top-minutes]="slot.topMinutes"
+            [attr.data-height-minutes]="slot.heightMinutes"
+            [attr.aria-label]="'Create planner item on ' + formatDateLabel(view.selectedDate) + ' at ' + slot.startLocal.slice(11) + ', choose fixed event or flexible task'"
+            (click)="openCalendarCreateChoice({
+              sourceId: slot.id,
+              localDate: view.selectedDate,
+              startLocal: slot.startLocal,
+              endLocal: slot.endLocal,
+              timeZone: slot.timeZone
+            })"
+          >
+            <span class="sr-only">Create planner item</span>
+            <span aria-hidden="true" class="shrink-0 text-sm leading-none"
+              >+</span
+            >
+            <span aria-hidden="true" class="min-w-0 truncate"
+              >{{ slot.startLocal.slice(11) }}</span
+            >
+          </button>
+          }
+        </div>
+      </div>
+      }
       <div class="mt-5 rounded-md border border-dashed border-mist-300 p-5">
         <p class="font-medium text-ink-950">
           No saved planning day for this date.

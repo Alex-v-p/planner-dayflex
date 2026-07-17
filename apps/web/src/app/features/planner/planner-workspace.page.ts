@@ -107,6 +107,10 @@ type PendingMutationFocus = {
   readonly readySelector: string;
   readonly fallbackReadySelector: string;
 };
+type EditorReturnFocus = {
+  readonly element: HTMLElement | null;
+  readonly selector: string | null;
+};
 type RouteEditorIntent =
   | {
       readonly kind: "create";
@@ -337,9 +341,18 @@ export class PlannerWorkspacePage implements OnInit {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly reloadRequests = new Subject<string>();
-  private taskEditorReturnFocus: HTMLElement | null = null;
-  private fixedEventEditorReturnFocus: HTMLElement | null = null;
-  private calendarCreateReturnFocus: HTMLElement | null = null;
+  private taskEditorReturnFocus: EditorReturnFocus = {
+    element: null,
+    selector: null,
+  };
+  private fixedEventEditorReturnFocus: EditorReturnFocus = {
+    element: null,
+    selector: null,
+  };
+  private calendarCreateReturnFocus: EditorReturnFocus = {
+    element: null,
+    selector: null,
+  };
   private pendingMutationFocus: PendingMutationFocus | null = null;
   private pendingRouteEditorIntent: RouteEditorIntent | null = null;
   private handledRouteEditorIntentKey: string | null = null;
@@ -414,7 +427,7 @@ export class PlannerWorkspacePage implements OnInit {
   protected openSelectedDate(): void {
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { date: this.selectedDate() },
+      queryParams: dateNavigationQueryParams(this.selectedDate()),
       queryParamsHandling: "merge",
     });
   }
@@ -424,7 +437,7 @@ export class PlannerWorkspacePage implements OnInit {
     this.selectedDate.set(nextDate);
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { date: nextDate },
+      queryParams: dateNavigationQueryParams(nextDate),
       queryParamsHandling: "merge",
     });
   }
@@ -434,7 +447,7 @@ export class PlannerWorkspacePage implements OnInit {
     this.selectedDate.set(nextDate);
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { date: nextDate },
+      queryParams: dateNavigationQueryParams(nextDate),
       queryParamsHandling: "merge",
     });
   }
@@ -1228,11 +1241,21 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected timelineSlots(
-    snapshot: ScheduleSnapshot,
+    snapshot: ScheduleSnapshot | null,
     planningDayTimeZone: string | undefined,
     selectedDate: string,
+    fixedEvents: readonly FixedEvent[] = [],
   ): readonly TimelineSlot[] {
-    return timelineSlots(snapshot, planningDayTimeZone ?? "UTC", selectedDate);
+    return timelineSlots(
+      snapshot,
+      planningDayTimeZone ?? "UTC",
+      selectedDate,
+      fixedEvents,
+    );
+  }
+
+  protected fallbackTimeZone(): string {
+    return guessTimeZone();
   }
 
   protected itemLabel(
@@ -1348,10 +1371,14 @@ export class PlannerWorkspacePage implements OnInit {
     readonly startLocal: string;
     readonly endLocal: string;
     readonly timeZone: string;
+    readonly returnFocusSelector?: string;
   }): void {
     const activeElement = document.activeElement;
-    this.calendarCreateReturnFocus =
-      activeElement instanceof HTMLElement ? activeElement : null;
+    this.calendarCreateReturnFocus = {
+      element: activeElement instanceof HTMLElement ? activeElement : null,
+      selector:
+        slot.returnFocusSelector ?? calendarSlotSelector(slot.sourceId) ?? null,
+    };
     const durationMinutes = Math.max(
       30,
       durationMinutesBetweenDateTimeLocal(slot.startLocal, slot.endLocal),
@@ -1366,9 +1393,9 @@ export class PlannerWorkspacePage implements OnInit {
 
   protected closeCalendarCreateChoice(): void {
     const target = this.calendarCreateReturnFocus;
-    this.calendarCreateReturnFocus = null;
+    this.calendarCreateReturnFocus = { element: null, selector: null };
     this.calendarCreateSelection.set(null);
-    queueMicrotask(() => target?.focus());
+    this.restoreFocusTarget(target);
   }
 
   protected createFixedEventFromCalendarSelection(): void {
@@ -1377,7 +1404,7 @@ export class PlannerWorkspacePage implements OnInit {
       return;
     }
     const returnFocus = this.calendarCreateReturnFocus;
-    this.calendarCreateReturnFocus = null;
+    this.calendarCreateReturnFocus = { element: null, selector: null };
     this.calendarCreateSelection.set(null);
     this.fixedEventEditorReturnFocus = returnFocus;
     this.fixedEventForm.set({
@@ -1400,7 +1427,7 @@ export class PlannerWorkspacePage implements OnInit {
       return;
     }
     const returnFocus = this.calendarCreateReturnFocus;
-    this.calendarCreateReturnFocus = null;
+    this.calendarCreateReturnFocus = { element: null, selector: null };
     this.calendarCreateSelection.set(null);
     this.taskEditorReturnFocus = returnFocus;
     this.taskForm.set({
@@ -1528,7 +1555,7 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected timeRulerTicks(
-    snapshot: ScheduleSnapshot,
+    snapshot: ScheduleSnapshot | null,
     planningDayTimeZone: string | undefined,
   ): readonly TimelineTick[] {
     const timeZone = planningDayTimeZone ?? "UTC";
@@ -1570,7 +1597,7 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected dayBoundsLabel(
-    snapshot: ScheduleSnapshot,
+    snapshot: ScheduleSnapshot | null,
     planningDayTimeZone: string | undefined,
   ): string {
     const bounds = timelineBounds(snapshot, planningDayTimeZone ?? "UTC");
@@ -1635,7 +1662,7 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected timelineHeight(
-    snapshot: ScheduleSnapshot,
+    snapshot: ScheduleSnapshot | null,
     planningDayTimeZone: string | undefined,
   ): number {
     const bounds = timelineBounds(snapshot, planningDayTimeZone ?? "UTC");
@@ -1835,8 +1862,10 @@ export class PlannerWorkspacePage implements OnInit {
 
   private rememberEditorReturnFocus(kind: EditorKind): void {
     const activeElement = document.activeElement;
-    const returnFocus =
-      activeElement instanceof HTMLElement ? activeElement : null;
+    const returnFocus: EditorReturnFocus = {
+      element: activeElement instanceof HTMLElement ? activeElement : null,
+      selector: null,
+    };
     if (kind === "task") {
       this.taskEditorReturnFocus = returnFocus;
     } else {
@@ -1852,7 +1881,7 @@ export class PlannerWorkspacePage implements OnInit {
     if (options.restoreFocus) {
       this.restoreEditorFocus("task");
     } else {
-      this.taskEditorReturnFocus = null;
+      this.taskEditorReturnFocus = { element: null, selector: null };
     }
   }
 
@@ -1863,7 +1892,7 @@ export class PlannerWorkspacePage implements OnInit {
     if (options.restoreFocus) {
       this.restoreEditorFocus("fixedEvent");
     } else {
-      this.fixedEventEditorReturnFocus = null;
+      this.fixedEventEditorReturnFocus = { element: null, selector: null };
     }
   }
 
@@ -1873,11 +1902,11 @@ export class PlannerWorkspacePage implements OnInit {
         ? this.taskEditorReturnFocus
         : this.fixedEventEditorReturnFocus;
     if (kind === "task") {
-      this.taskEditorReturnFocus = null;
+      this.taskEditorReturnFocus = { element: null, selector: null };
     } else {
-      this.fixedEventEditorReturnFocus = null;
+      this.fixedEventEditorReturnFocus = { element: null, selector: null };
     }
-    queueMicrotask(() => target?.focus());
+    this.restoreFocusTarget(target);
   }
 
   private focusEditorControl(selector: string): void {
@@ -1896,6 +1925,7 @@ export class PlannerWorkspacePage implements OnInit {
       return;
     }
     this.handledRouteEditorIntentKey = key;
+    this.clearRouteEditorIntentParams();
 
     if (intent.kind === "create") {
       const timeZone = state.data.day?.time_zone ?? guessTimeZone();
@@ -1906,6 +1936,9 @@ export class PlannerWorkspacePage implements OnInit {
         startLocal,
         endLocal: addMinutesToDateTimeLocal(startLocal, 30),
         timeZone,
+        returnFocusSelector:
+          calendarSlotSelector(`slot-${intent.selectedDate}-${intent.start}`) ??
+          '[data-editor-trigger="fixed-event-add"]',
       });
       return;
     }
@@ -1916,6 +1949,10 @@ export class PlannerWorkspacePage implements OnInit {
       );
       if (task) {
         this.editTask(task);
+        this.taskEditorReturnFocus = {
+          element: null,
+          selector: `[data-editor-trigger="task-edit"][data-item-id="${cssEscape(intent.taskId)}"], [data-editor-trigger="task-add"]`,
+        };
       }
       return;
     }
@@ -1925,6 +1962,10 @@ export class PlannerWorkspacePage implements OnInit {
     );
     if (event) {
       this.editFixedEvent(event);
+      this.fixedEventEditorReturnFocus = {
+        element: null,
+        selector: `[data-editor-trigger="fixed-event-edit"][data-item-id="${cssEscape(intent.fixedEventId)}"], [data-editor-trigger="fixed-event-add"]`,
+      };
     }
   }
 
@@ -1950,6 +1991,37 @@ export class PlannerWorkspacePage implements OnInit {
       pendingFocus.readySelector,
       pendingFocus.fallbackReadySelector,
     );
+  }
+
+  private clearRouteEditorIntentParams(): void {
+    this.pendingRouteEditorIntent = null;
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        create: null,
+        start: null,
+        editTask: null,
+        editFixedEvent: null,
+      },
+      queryParamsHandling: "merge",
+      replaceUrl: true,
+    });
+  }
+
+  private restoreFocusTarget(target: EditorReturnFocus): void {
+    queueMicrotask(() => {
+      if (target.element?.isConnected && target.element !== document.body) {
+        target.element.focus();
+        return;
+      }
+
+      if (target.selector !== null) {
+        const control = document.querySelector(target.selector);
+        if (control instanceof HTMLElement) {
+          control.focus();
+        }
+      }
+    });
   }
 
   private resetTaskSuggestion(): void {
@@ -2463,18 +2535,25 @@ function dateTimeLocalToUtcMinutes(value: string): number | null {
 }
 
 function timelineSlots(
-  snapshot: ScheduleSnapshot,
+  snapshot: ScheduleSnapshot | null,
   timeZone: string,
   localDate: string,
+  fixedEvents: readonly FixedEvent[] = [],
 ): readonly TimelineSlot[] {
   const bounds = timelineBounds(snapshot, timeZone);
   const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
-  const unavailable = snapshot.items
-    .filter((item) => item.kind !== "designated_free_time")
-    .map((item) => ({
-      startMinutes: minutesFromIsoInZone(item.start_at, timeZone),
-      endMinutes: minutesFromIsoInZone(item.end_at, timeZone),
-    }));
+  const unavailable =
+    snapshot?.items
+      .filter((item) => item.kind !== "designated_free_time")
+      .map((item) => ({
+        startMinutes: minutesFromIsoInZone(item.start_at, timeZone),
+        endMinutes: minutesFromIsoInZone(item.end_at, timeZone),
+      })) ?? [];
+  const fixedEventUnavailable = fixedEvents.map((event) => ({
+    startMinutes: minutesFromIsoInZone(event.start_at, timeZone),
+    endMinutes: minutesFromIsoInZone(event.end_at, timeZone),
+  }));
+  const unavailableIntervals = [...unavailable, ...fixedEventUnavailable];
   const slots: TimelineSlot[] = [];
 
   for (
@@ -2484,7 +2563,7 @@ function timelineSlots(
   ) {
     const endMinutes = Math.min(startMinutes + 30, bounds.endMinutes);
     if (
-      unavailable.some(
+      unavailableIntervals.some(
         (item) =>
           startMinutes < item.endMinutes && endMinutes > item.startMinutes,
       )
@@ -2509,6 +2588,22 @@ function timelineSlots(
   }
 
   return slots;
+}
+
+function dateNavigationQueryParams(
+  date: string,
+): Record<string, string | null> {
+  return {
+    date,
+    create: null,
+    start: null,
+    editTask: null,
+    editFixedEvent: null,
+  };
+}
+
+function calendarSlotSelector(slotId: string): string | null {
+  return `[data-calendar-slot="${cssEscape(slotId)}"]`;
 }
 
 function routeEditorIntent(
@@ -2947,21 +3042,23 @@ function completedScheduleItemIds(
 }
 
 function timelineBounds(
-  snapshot: ScheduleSnapshot,
+  snapshot: ScheduleSnapshot | null,
   timeZone: string,
 ): { readonly startMinutes: number; readonly endMinutes: number } {
   const configuredStart = configurationTimeMinutes(
-    snapshot.configuration["day_start"],
+    snapshot?.configuration["day_start"],
   );
   const configuredEnd = configurationTimeMinutes(
-    snapshot.configuration["day_end"],
+    snapshot?.configuration["day_end"],
   );
-  const itemStarts = snapshot.items.map((item) =>
-    minutesFromIsoInZone(item.start_at, timeZone),
-  );
-  const itemEnds = snapshot.items.map((item) =>
-    minutesFromIsoInZone(item.end_at, timeZone),
-  );
+  const itemStarts =
+    snapshot?.items.map((item) =>
+      minutesFromIsoInZone(item.start_at, timeZone),
+    ) ?? [];
+  const itemEnds =
+    snapshot?.items.map((item) =>
+      minutesFromIsoInZone(item.end_at, timeZone),
+    ) ?? [];
   const startMinutes = Math.min(configuredStart ?? 8 * 60, ...itemStarts);
   const endMinutes = Math.max(configuredEnd ?? 18 * 60, ...itemEnds);
 

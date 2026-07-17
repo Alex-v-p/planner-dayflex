@@ -431,6 +431,10 @@ describe("rendered planner overviews", () => {
     expect(openSlot.getAttribute("aria-label")).toBe(
       "Create planner item on Jul 4, 2026 at 08:00, choose fixed event or flexible task",
     );
+    expect(openSlot.className).toContain("min-h-10");
+    expect(openSlot.className).toContain("border-dashed");
+    expect(openSlot.className).toContain("border-meadow-500");
+    expect(openSlot.className).not.toContain("text-transparent");
 
     openSlot.click();
     fixture.detectChanges();

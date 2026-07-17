@@ -400,7 +400,7 @@
               } @for (slot of weekSlotsForDay(day, week); track slot.id) {
               <button
                 type="button"
-                class="absolute left-1 right-1 min-h-7 rounded-sm border border-dashed border-transparent bg-transparent px-1 text-left text-[0.625rem] font-medium text-transparent transition hover:border-meadow-600 hover:bg-meadow-50 hover:text-ink-700 focus-visible:z-10 focus-visible:border-meadow-700 focus-visible:bg-white focus-visible:text-ink-700 focus-visible:shadow-focus"
+                class="absolute left-1 right-1 flex min-h-10 items-center gap-1 overflow-hidden rounded-sm border border-dashed border-meadow-500 bg-white/80 px-1.5 text-left text-[0.625rem] font-medium text-ink-700 transition hover:border-meadow-600 hover:bg-meadow-50 focus-visible:z-10 focus-visible:border-meadow-700 focus-visible:bg-white focus-visible:shadow-focus"
                 [style.top.%]="slot.topPercent"
                 [style.height.%]="slot.heightPercent"
                 [attr.data-testid]="'week-open-slot'"
@@ -412,7 +412,12 @@
                 (click)="openWeekSlot(slot)"
               >
                 <span class="sr-only">Create planner item</span>
-                <span aria-hidden="true">Add {{ slot.start }}</span>
+                <span aria-hidden="true" class="shrink-0 text-xs leading-none"
+                  >+</span
+                >
+                <span aria-hidden="true" class="min-w-0 truncate"
+                  >{{ slot.start }}</span
+                >
               </button>
               } @for (block of weekBlocksForDay(day, week); track block.item.id)
               {
