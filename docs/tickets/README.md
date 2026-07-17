@@ -16,6 +16,7 @@ small design.
 | Optional enrichment | TKT-022–TKT-024 | AI assistance and background work that never control immediate scheduling |
 | Operations | TKT-025–TKT-026 | Local multi-service topology and end-to-end hardening |
 | Post-MVP UI/UX correction | TKT-027–TKT-032 | Calendar-style planner shell, daily schedule redesign, contextual editing, recovery clarity, summary redesign, and visual QA |
+| Calendar interaction hardening | TKT-033-TKT-037 | Unified day/week/month calendar modes, direct grid creation, first-class interruption entry, plain-language status copy, and automatic plan refresh |
 
 ## Working rules
 

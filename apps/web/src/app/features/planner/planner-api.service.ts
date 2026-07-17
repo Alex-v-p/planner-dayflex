@@ -106,6 +106,20 @@ export interface PlannerWorkspaceData {
   readonly snapshot: ScheduleSnapshot | null;
 }
 
+export interface PlanningWeekDayDetail {
+  readonly summary: PlanningDaySummary;
+  readonly day: PlanningDay | null;
+  readonly fixedEvents: readonly FixedEvent[];
+  readonly progress: readonly TaskProgress[];
+  readonly snapshot: ScheduleSnapshot | null;
+}
+
+export interface PlanningWeekDetail {
+  readonly summary: PlanningRangeSummary;
+  readonly tasks: readonly Task[];
+  readonly days: readonly PlanningWeekDayDetail[];
+}
+
 export interface PlanningDayCreateRequest {
   readonly local_date: string;
   readonly time_zone: string;
@@ -204,6 +218,58 @@ export class PlannerApiService {
   loadWeekOverview(startDate: string): Observable<PlanningRangeSummary> {
     return this.api.getJson<PlanningRangeSummary>(
       `/planning/overviews/week?start_date=${encodeURIComponent(startDate)}`,
+    );
+  }
+
+  loadWeekDetail(startDate: string): Observable<PlanningWeekDetail> {
+    return this.loadWeekOverview(startDate).pipe(
+      switchMap((summary) =>
+        forkJoin({
+          planningDays: this.api.getJson<PlanningDay[]>("/planning/days"),
+          tasks: this.api.getJson<Task[]>("/planning/tasks"),
+        }).pipe(
+          switchMap(({ planningDays, tasks }) =>
+            forkJoin(
+              summary.days.map((daySummary) => {
+                const day =
+                  planningDays.find(
+                    (candidate) =>
+                      candidate.id === daySummary.planning_day_id ||
+                      candidate.local_date === daySummary.local_date,
+                  ) ?? null;
+
+                if (day === null) {
+                  return of({
+                    summary: daySummary,
+                    day,
+                    fixedEvents: [],
+                    progress: [],
+                    snapshot: null,
+                  });
+                }
+
+                return forkJoin({
+                  fixedEvents: this.api.getJson<FixedEvent[]>(
+                    `/planning/days/${day.id}/fixed-events`,
+                  ),
+                  progress: this.api.getJson<TaskProgress[]>(
+                    `/planning/days/${day.id}/task-progress`,
+                  ),
+                  snapshot: this.loadLatestSnapshot(day),
+                }).pipe(
+                  map(({ fixedEvents, progress, snapshot }) => ({
+                    summary: daySummary,
+                    day,
+                    fixedEvents,
+                    progress,
+                    snapshot,
+                  })),
+                );
+              }),
+            ).pipe(map((days) => ({ summary, tasks, days }))),
+          ),
+        ),
+      ),
     );
   }
 

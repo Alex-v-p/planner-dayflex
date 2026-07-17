@@ -25,10 +25,10 @@ const visualRoutes = [
     surface: "[data-testid='daily-timeline']",
   },
   {
-    name: "week overview",
+    name: "week calendar",
     path: "/planner/week?date=2026-06-22",
     state: "revised",
-    surface: "[data-testid='overview-grid']",
+    surface: "[data-testid='week-calendar-surface']",
   },
   {
     name: "month overview",
@@ -109,13 +109,13 @@ test.describe("responsive visual QA @visual", () => {
 
     await page.goto("/planner/week?date=2026-06-22");
     await expect(page.getByTestId("overview-announcement")).toContainText(
-      "Week overview loaded",
+      "Week calendar loaded",
     );
-    await expect(page.getByTestId("overview-grid")).toContainText(
+    await expect(page.getByTestId("week-calendar-surface")).toContainText(
       "Useful free time",
     );
-    await expect(page.getByTestId("overview-grid")).toContainText(
-      "Snapshot v2",
+    await expect(page.getByTestId("week-calendar-surface")).toContainText(
+      "Plan v2",
     );
     await assertStatusCueHasAccessibleText(page, "Plan v2");
     await assertFocusVisible(
@@ -223,6 +223,7 @@ async function assertNoTextOverflow(
         "pdf-status-chip span",
         "pdf-summary-value",
         "[data-testid='daily-timeline'] article",
+        "[data-testid='week-schedule-block']",
         "[data-testid='overview-day-cell']",
         "[data-testid='free-time-results'] article",
       ].join(", "),
@@ -270,9 +271,11 @@ async function assertSurfaceItemsDoNotOverlap(
   const itemSelector =
     surfaceSelector === "[data-testid='daily-timeline']"
       ? "[data-testid='daily-timeline'] article"
-      : surfaceSelector === "[data-testid='overview-grid']"
-        ? "[data-testid='overview-day-cell']"
-        : "[data-testid='free-time-results'] > li > article";
+      : surfaceSelector === "[data-testid='week-calendar-surface']"
+        ? "[data-testid='week-schedule-block']"
+        : surfaceSelector === "[data-testid='overview-grid']"
+          ? "[data-testid='overview-day-cell']"
+          : "[data-testid='free-time-results'] > li > article";
 
   const overlaps = await page.locator(itemSelector).evaluateAll((elements) => {
     const boxes = elements.map((element, index) => {

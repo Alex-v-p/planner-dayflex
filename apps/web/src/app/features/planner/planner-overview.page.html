@@ -11,7 +11,7 @@
   <header class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_28rem] lg:items-end">
     <div>
       <p class="text-sm font-medium uppercase tracking-normal text-ink-600">
-        Planner summaries
+        Planner calendar
       </p>
       <h1
         class="mt-2 text-2xl font-semibold tracking-normal text-ink-950 sm:text-3xl"
@@ -19,23 +19,23 @@
         {{ title() }}
       </h1>
       <p class="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
-        Saved daily plans only. These summaries do not move work between days or
-        run cross-day scheduling.
+        Saved daily plans only. Week and month views summarize each day without
+        moving work between days.
       </p>
     </div>
 
     <form
       class="rounded-md border border-mist-200 bg-white p-3 shadow-sm"
       (submit)="$event.preventDefault(); openAnchorDate()"
-      aria-label="Select overview date"
+      aria-label="Select calendar date"
     >
       <div
         class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
       >
         <pdf-segmented-control
-          [options]="plannerViewOptions"
+          [options]="plannerModeOptions"
           [selected]="mode()"
-          ariaLabel="Planner view"
+          ariaLabel="Calendar mode"
           (selectedChange)="switchPlannerView($event)"
         />
         <div class="flex items-center gap-2">
@@ -59,7 +59,7 @@
         </div>
       </div>
       <div class="mt-3 flex flex-col gap-2 sm:flex-row">
-        <label for="overview-date" class="sr-only">Overview date</label>
+        <label for="overview-date" class="sr-only">Calendar date</label>
         <input
           id="overview-date"
           name="overview-date"
@@ -89,14 +89,113 @@
     <p class="mt-2 text-sm leading-6 text-ink-600">
       Reading saved daily snapshots and inputs for the selected range.
     </p>
+    <p class="mt-2 text-sm font-medium text-ink-800">
+      {{ fallbackRangeLabel(view.anchorDate) }} - {{ fallbackTimeZoneLabel() }}
+    </p>
+    @if (mode() === "week") {
+    <div
+      class="mt-5 grid min-h-80 grid-cols-[3.5rem_repeat(7,minmax(7rem,1fr))] overflow-x-auto rounded-md border border-mist-200 bg-mist-50"
+      data-testid="week-time-grid"
+    >
+      <div
+        class="border-r border-mist-200 bg-white px-2 py-3 text-xs font-semibold uppercase text-ink-600"
+      >
+        Time
+      </div>
+      @for (day of weekPlaceholderDays(view.anchorDate); track day.localDate) {
+      <div
+        class="border-r border-mist-200 bg-white px-2 py-3 text-sm font-semibold text-ink-700"
+        [class.bg-meadow-50]="day.isSelected"
+      >
+        <span class="block text-xs uppercase">{{ day.name }}</span>
+        <span class="mt-1 block text-xl text-ink-950">{{ day.number }}</span>
+        @if (day.isSelected) {
+        <span class="mt-2 block text-xs uppercase text-meadow-800">
+          Selected date
+        </span>
+        }
+      </div>
+      }
+    </div>
+    } @else {
+    <div class="mt-5 rounded-md border border-mist-200 bg-mist-50 p-3">
+      <div
+        class="hidden grid-cols-7 gap-2 text-xs font-semibold uppercase tracking-normal text-ink-600 sm:grid"
+        aria-hidden="true"
+      >
+        @for (label of weekdayLabels; track label) {
+        <span class="px-2">{{ label }}</span>
+        }
+      </div>
+      <div class="mt-2 grid gap-2 sm:grid-cols-7" data-testid="overview-grid">
+        @for (cell of monthPlaceholderCells; track cell) {
+        <div
+          class="min-h-24 rounded-md border border-dashed border-mist-200 bg-white"
+          aria-hidden="true"
+        ></div>
+        }
+      </div>
+    </div>
+    }
   </section>
   } @else if (view.status === "permission") {
   <section
     class="rounded-lg border border-signal-600 bg-white p-6 shadow-sm"
     role="alert"
   >
-    <p class="text-sm font-semibold text-ink-950">Overview unavailable</p>
+    <p class="text-sm font-semibold text-ink-950">Calendar unavailable</p>
     <p class="mt-2 text-sm leading-6 text-ink-600">{{ view.message }}</p>
+    @if (mode() === "week") {
+    <p class="mt-2 text-sm font-medium text-ink-800">
+      {{ fallbackRangeLabel(view.anchorDate) }} - {{ fallbackTimeZoneLabel() }}
+    </p>
+    <div
+      class="mt-5 grid min-h-80 grid-cols-[3.5rem_repeat(7,minmax(7rem,1fr))] overflow-x-auto rounded-md border border-mist-200 bg-mist-50"
+      data-testid="week-time-grid"
+    >
+      <div
+        class="border-r border-mist-200 bg-white px-2 py-3 text-xs font-semibold uppercase text-ink-600"
+      >
+        Time
+      </div>
+      @for (day of weekPlaceholderDays(view.anchorDate); track day.localDate) {
+      <div
+        class="border-r border-mist-200 bg-white px-2 py-3 text-sm font-semibold text-ink-700"
+        [class.bg-meadow-50]="day.isSelected"
+      >
+        <span class="block text-xs uppercase">{{ day.name }}</span>
+        <span class="mt-1 block text-xl text-ink-950">{{ day.number }}</span>
+        @if (day.isSelected) {
+        <span class="mt-2 block text-xs uppercase text-meadow-800">
+          Selected date
+        </span>
+        }
+      </div>
+      }
+    </div>
+    } @else {
+    <p class="mt-2 text-sm font-medium text-ink-800">
+      {{ fallbackRangeLabel(view.anchorDate) }}
+    </p>
+    <div class="mt-5 rounded-md border border-mist-200 bg-mist-50 p-3">
+      <div
+        class="hidden grid-cols-7 gap-2 text-xs font-semibold uppercase tracking-normal text-ink-600 sm:grid"
+        aria-hidden="true"
+      >
+        @for (label of weekdayLabels; track label) {
+        <span class="px-2">{{ label }}</span>
+        }
+      </div>
+      <div class="mt-2 grid gap-2 sm:grid-cols-7" data-testid="overview-grid">
+        @for (cell of monthPlaceholderCells; track cell) {
+        <div
+          class="min-h-24 rounded-md border border-dashed border-mist-200 bg-white"
+          aria-hidden="true"
+        ></div>
+        }
+      </div>
+    </div>
+    }
     <a
       routerLink="/sign-in"
       [queryParams]="{
@@ -116,9 +215,60 @@
     role="alert"
   >
     <p class="text-sm font-semibold text-ink-950">
-      Planner summary did not load
+      Planner calendar did not load
     </p>
     <p class="mt-2 text-sm leading-6 text-ink-600">{{ view.message }}</p>
+    @if (mode() === "week") {
+    <p class="mt-2 text-sm font-medium text-ink-800">
+      {{ fallbackRangeLabel(view.anchorDate) }} - {{ fallbackTimeZoneLabel() }}
+    </p>
+    <div
+      class="mt-5 grid min-h-80 grid-cols-[3.5rem_repeat(7,minmax(7rem,1fr))] overflow-x-auto rounded-md border border-mist-200 bg-mist-50"
+      data-testid="week-time-grid"
+    >
+      <div
+        class="border-r border-mist-200 bg-white px-2 py-3 text-xs font-semibold uppercase text-ink-600"
+      >
+        Time
+      </div>
+      @for (day of weekPlaceholderDays(view.anchorDate); track day.localDate) {
+      <div
+        class="border-r border-mist-200 bg-white px-2 py-3 text-sm font-semibold text-ink-700"
+        [class.bg-meadow-50]="day.isSelected"
+      >
+        <span class="block text-xs uppercase">{{ day.name }}</span>
+        <span class="mt-1 block text-xl text-ink-950">{{ day.number }}</span>
+        @if (day.isSelected) {
+        <span class="mt-2 block text-xs uppercase text-meadow-800">
+          Selected date
+        </span>
+        }
+      </div>
+      }
+    </div>
+    } @else {
+    <p class="mt-2 text-sm font-medium text-ink-800">
+      {{ fallbackRangeLabel(view.anchorDate) }}
+    </p>
+    <div class="mt-5 rounded-md border border-mist-200 bg-mist-50 p-3">
+      <div
+        class="hidden grid-cols-7 gap-2 text-xs font-semibold uppercase tracking-normal text-ink-600 sm:grid"
+        aria-hidden="true"
+      >
+        @for (label of weekdayLabels; track label) {
+        <span class="px-2">{{ label }}</span>
+        }
+      </div>
+      <div class="mt-2 grid gap-2 sm:grid-cols-7" data-testid="overview-grid">
+        @for (cell of monthPlaceholderCells; track cell) {
+        <div
+          class="min-h-24 rounded-md border border-dashed border-mist-200 bg-white"
+          aria-hidden="true"
+        ></div>
+        }
+      </div>
+    </div>
+    }
     <button
       type="button"
       class="mt-4 inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
@@ -128,9 +278,9 @@
     </button>
   </section>
   } @else {
-  <div class="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_22rem]">
+  <div class="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_22rem]">
     <section
-      class="rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
+      class="min-w-0 rounded-lg border border-mist-200 bg-white p-4 shadow-sm sm:p-6"
       aria-labelledby="overview-grid-title"
     >
       <div
@@ -144,9 +294,15 @@
             {{ rangeLabel(view.summary) }}
           </h2>
           <p class="mt-1 text-sm leading-6 text-ink-600">
-            Monday-first calendar summary of saved daily inputs and current
-            snapshots. Each date opens the day workspace.
+            {{ overviewDescription() }}
           </p>
+          @if (view.week; as week) {
+          <p
+            class="mt-1 text-xs font-semibold uppercase tracking-normal text-ink-600"
+          >
+            {{ weekMetaLabel(week) }}
+          </p>
+          }
         </div>
         <pdf-status-chip
           [status]="mode() === 'week' ? 'planned' : 'incomplete'"
@@ -154,6 +310,199 @@
         />
       </div>
 
+      @if (view.week; as week) {
+      <div
+        class="mt-5 max-w-full overflow-x-auto rounded-md border border-mist-200 bg-mist-50"
+        data-testid="week-calendar-surface"
+      >
+        <div class="min-w-[58rem]">
+          <div
+            class="grid grid-cols-[3.5rem_repeat(7,minmax(7rem,1fr))] border-b border-mist-200 bg-white"
+          >
+            <div
+              class="border-r border-mist-200 px-2 py-3 text-xs font-semibold uppercase text-ink-600"
+            >
+              Time
+            </div>
+            @for (day of week.days; track day.summary.local_date) {
+            <a
+              [routerLink]="dayLink(day.summary)"
+              [queryParams]="{ date: day.summary.local_date }"
+              class="border-r border-mist-200 px-2 py-3 transition hover:bg-mist-50 focus-visible:shadow-focus"
+              [class.bg-meadow-50]="isSelectedDay(day.summary)"
+              [class.ring-2]="isSelectedDay(day.summary)"
+              [class.ring-inset]="isSelectedDay(day.summary)"
+              [class.ring-meadow-700]="isSelectedDay(day.summary)"
+              [attr.aria-current]="isSelectedDay(day.summary) ? 'date' : null"
+              [attr.aria-label]="'Open planner workspace for ' + formatDateLabel(day.summary.local_date) + ', ' + statusLabel(day.summary) + (day.summary.unscheduled_deferred_count > 0 ? ', ' + day.summary.unscheduled_deferred_count + ' deferred' : '')"
+            >
+              <span class="block text-xs font-semibold uppercase text-ink-600">
+                {{ dayName(day.summary.local_date) }}
+              </span>
+              <span class="mt-1 block text-xl font-semibold text-ink-950">
+                {{ dayNumber(day.summary.local_date) }}
+              </span>
+              <span class="mt-2 inline-flex">
+                <pdf-status-chip
+                  [status]="day.summary.status"
+                  [label]="compactStatusLabel(day.summary)"
+                />
+              </span>
+              @if (day.summary.unscheduled_deferred_count > 0) {
+              <span class="mt-2 block text-xs font-semibold text-ink-800">
+                {{ day.summary.unscheduled_deferred_count }} deferred
+              </span>
+              } @if (isSelectedDay(day.summary)) {
+              <span
+                class="mt-2 block text-xs font-semibold uppercase text-meadow-800"
+              >
+                Selected date
+              </span>
+              }
+            </a>
+            }
+          </div>
+
+          <div
+            class="grid grid-cols-[3.5rem_repeat(7,minmax(7rem,1fr))]"
+            data-testid="week-time-grid"
+            [style.height.rem]="weekHeightRem(week)"
+          >
+            <div
+              class="relative border-r border-mist-200 bg-white text-[0.6875rem] font-medium text-ink-600"
+              data-testid="week-time-ruler"
+              aria-label="Visible week time ruler"
+            >
+              @for (tick of weekTicks(week); track tick.minutesFromStart) {
+              <span
+                [class]="tick.labelClass"
+                [style.top.%]="tick.labelTopPercent"
+                [attr.data-ruler-minute]="tick.minutesFromStart"
+              >
+                {{ tick.label }}
+              </span>
+              }
+            </div>
+
+            @for (day of week.days; track day.summary.local_date) {
+            <div
+              class="relative min-w-0 border-r border-mist-200 bg-white"
+              [class.bg-meadow-50]="isSelectedDay(day.summary)"
+              data-testid="week-day-column"
+              [attr.data-date]="day.summary.local_date"
+            >
+              @for (tick of weekTicks(week); track tick.minutesFromStart) {
+              <span
+                class="pointer-events-none absolute left-0 right-0 border-t border-mist-200"
+                [style.top.%]="tick.topPercent"
+                aria-hidden="true"
+              ></span>
+              } @for (block of weekBlocksForDay(day, week); track block.item.id)
+              {
+              <article
+                [class]="weekBlockClass(block)"
+                [style.top.%]="block.topPercent"
+                [style.height.%]="block.heightPercent"
+                [style.left.%]="block.leftPercent"
+                [style.width.%]="block.widthPercent"
+                [attr.data-kind]="block.item.kind"
+                [attr.data-item-id]="block.item.id"
+                [attr.data-date]="day.summary.local_date"
+                [attr.data-recovery]="block.recoveryLabel"
+                [attr.data-recovery-state]="block.recoveryState"
+                [attr.data-completion]="block.completionLabel"
+                [attr.data-top-minutes]="block.topMinutes"
+                [attr.data-height-minutes]="block.heightMinutes"
+                [attr.data-lane-index]="block.laneIndex"
+                [attr.data-lane-count]="block.laneCount"
+                [attr.data-left-percent]="block.leftPercent"
+                [attr.data-width-percent]="block.widthPercent"
+                [attr.aria-label]="weekBlockAriaLabel(block)"
+                data-testid="week-schedule-block"
+              >
+                @if (block.isCompact) {
+                <p
+                  [class]="block.isTiny ? 'truncate text-[0.625rem] font-semibold leading-none text-ink-950' : 'truncate text-[0.6875rem] font-semibold leading-4 text-ink-950'"
+                >
+                  {{ weekBlockCompactLabel(block) }}
+                </p>
+                } @else {
+                <p
+                  class="truncate text-[0.6875rem] font-semibold uppercase leading-4 text-ink-700"
+                >
+                  {{ weekBlockMarkerLabel(block) }}
+                </p>
+                <p
+                  class="truncate text-sm font-semibold leading-5 text-ink-950"
+                >
+                  {{ block.label }}
+                </p>
+                @if (block.showsDetails) {
+                <p
+                  class="mt-0.5 truncate text-xs font-medium leading-4 text-ink-600"
+                >
+                  {{ block.kindLabel }} - {{ formatDuration(block.minutes) }}
+                </p>
+                <p class="truncate text-xs leading-4 text-ink-600">
+                  {{ formatScheduleTimeRange(block.item.start_at,
+                  block.item.end_at, day.day?.time_zone ??
+                  day.summary.time_zone) }}
+                </p>
+                } }
+              </article>
+              } @empty { @if (day.summary.status === "empty") {
+              <p
+                class="absolute left-2 right-2 top-3 rounded-md border border-dashed border-mist-300 bg-white p-2 text-xs leading-5 text-ink-600"
+              >
+                No saved day
+              </p>
+              } @else if (day.snapshot === null) {
+              <p
+                class="absolute left-2 right-2 top-3 rounded-md border border-dashed border-mist-300 bg-white p-2 text-xs leading-5 text-ink-600"
+              >
+                Saved inputs only
+              </p>
+              } } @if (currentTimeIndicator(week); as now) { @if (now.date ===
+              day.summary.local_date) {
+              <div
+                class="absolute left-0 right-0 z-10 border-t-2 border-rose-500"
+                data-testid="current-time-indicator"
+                [style.top.%]="now.topPercent"
+                [attr.aria-label]="now.label"
+              >
+                <span
+                  class="absolute -top-2 left-1 rounded bg-rose-50 px-1 text-[0.625rem] font-semibold uppercase text-rose-800"
+                >
+                  Now
+                </span>
+              </div>
+              } }
+            </div>
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 flex flex-wrap gap-2 text-xs">
+        <pdf-status-chip status="fixed_event" label="Fixed event" />
+        <pdf-status-chip status="task" label="Flexible work" />
+        <pdf-status-chip status="interruption" label="Unavailable" />
+        <pdf-status-chip status="buffer" label="Buffer" />
+        <pdf-status-chip
+          status="designated_free_time"
+          label="Useful free time"
+        />
+        <pdf-status-chip
+          status="moved"
+          [label]="'Moved work: ' + movedDecisionCount(week)"
+        />
+        <pdf-status-chip status="completed" label="Completed work" />
+        <pdf-status-chip
+          status="deferred"
+          [label]="'Deferred: ' + deferredDecisionCount(week)"
+        />
+      </div>
+      } @else {
       <div
         class="mt-5 hidden grid-cols-7 gap-2 text-xs font-semibold uppercase tracking-normal text-ink-600 xl:grid"
         aria-hidden="true"
@@ -251,6 +600,7 @@
         </a>
         } }
       </div>
+      }
     </section>
 
     <aside

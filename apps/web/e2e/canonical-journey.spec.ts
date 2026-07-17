@@ -229,13 +229,15 @@ test("canonical recovery journey works with a stubbed API", async ({
 
   await page.getByRole("link", { name: "Open planner week overview" }).click();
   await expect(
-    page.getByRole("heading", { name: "Week overview" }),
+    page.getByRole("heading", { name: "Week calendar" }),
   ).toBeVisible();
-  await expect(page.getByText("Snapshot v2")).toBeVisible();
+  await expect(page.getByTestId("week-calendar-surface")).toContainText(
+    "Plan v2",
+  );
 
   await page.getByRole("link", { name: "Open planner month overview" }).click();
   await expect(
-    page.getByRole("heading", { name: "Month overview" }),
+    page.getByRole("heading", { name: "Month calendar" }),
   ).toBeVisible();
   await expect(page.getByText("Useful free time:")).toBeVisible();
 
@@ -399,25 +401,71 @@ function scheduleItem(
 }
 
 function overviewSummary(startDate: string, endDate: string) {
+  const days = datesBetween(startDate, endDate).map((localDate) =>
+    localDate === "2026-07-04"
+      ? {
+          local_date: "2026-07-04",
+          planning_day_id: "day-1",
+          time_zone: "Europe/Brussels",
+          status: "planned",
+          snapshot_id: "snapshot-2",
+          snapshot_version: 2,
+          planned_minutes: 45,
+          fixed_event_count: 1,
+          interruption_minutes: 30,
+          unscheduled_deferred_count: 0,
+          has_useful_free_time: true,
+        }
+      : {
+          local_date: localDate,
+          planning_day_id: null,
+          time_zone: null,
+          status: "empty",
+          snapshot_id: null,
+          snapshot_version: null,
+          planned_minutes: 0,
+          fixed_event_count: 0,
+          interruption_minutes: 0,
+          unscheduled_deferred_count: 0,
+          has_useful_free_time: false,
+        },
+  );
+
   return {
     start_date: startDate,
     end_date: endDate,
-    days: [
-      {
-        local_date: "2026-07-04",
-        planning_day_id: "day-1",
-        time_zone: "Europe/Brussels",
-        status: "planned",
-        snapshot_id: "snapshot-2",
-        snapshot_version: 2,
-        planned_minutes: 45,
-        fixed_event_count: 1,
-        interruption_minutes: 30,
-        unscheduled_deferred_count: 0,
-        has_useful_free_time: true,
-      },
-    ],
+    days,
   };
+}
+
+function datesBetween(startDate: string, endDate: string): string[] {
+  const dates: string[] = [];
+  let cursor = dateFromLocalDate(startDate);
+  const last = dateFromLocalDate(endDate);
+
+  while (cursor.getTime() <= last.getTime()) {
+    dates.push(localDateFromDate(cursor));
+    cursor = new Date(
+      Date.UTC(
+        cursor.getUTCFullYear(),
+        cursor.getUTCMonth(),
+        cursor.getUTCDate() + 1,
+      ),
+    );
+  }
+
+  return dates;
+}
+
+function dateFromLocalDate(value: string): Date {
+  return new Date(`${value}T00:00:00Z`);
+}
+
+function localDateFromDate(date: Date): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function freeTimesSummary() {

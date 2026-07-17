@@ -1,11 +1,19 @@
 import { ComponentFixture, TestBed } from "@angular/core/testing";
 import { HttpErrorResponse } from "@angular/common/http";
 import { ActivatedRoute, Router, convertToParamMap } from "@angular/router";
-import { BehaviorSubject, Observable, of, throwError } from "rxjs";
+import { BehaviorSubject, NEVER, Observable, of, throwError } from "rxjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientService } from "../../core/api/api-client.service";
-import { PlannerApiService, PlanningRangeSummary } from "./planner-api.service";
+import {
+  FixedEvent,
+  PlannerApiService,
+  PlanningRangeSummary,
+  PlanningWeekDetail,
+  ScheduleSnapshot,
+  Task,
+  TaskProgress,
+} from "./planner-api.service";
 import { PlannerOverviewPage } from "./planner-overview.page";
 
 const weekSummary: PlanningRangeSummary = {
@@ -53,13 +61,221 @@ const monthSummary: PlanningRangeSummary = {
   ),
 };
 
+const weekTasks: readonly Task[] = [
+  task("task-focus", "Focus draft", 90),
+  task("task-moved", "Moved follow-up", 60),
+  task("task-deferred", "Deferred admin", 45),
+];
+
+const weekFixedEvents: readonly FixedEvent[] = [
+  fixedEvent(
+    "fixed-standup",
+    "day-1",
+    "Team standup",
+    "2026-07-01T08:00:00+02:00",
+    "2026-07-01T08:30:00+02:00",
+  ),
+];
+
+const weekProgress: readonly TaskProgress[] = [
+  {
+    id: "progress-1",
+    task_id: "task-focus",
+    planning_day_id: "day-1",
+    completed_minutes: 90,
+    recorded_at: "2026-07-01T12:00:00+02:00",
+    created_at: "2026-07-01T12:00:00+02:00",
+  },
+];
+
+const weekSnapshot: ScheduleSnapshot = {
+  id: "snapshot-1",
+  planning_day_id: "day-1",
+  version: 2,
+  created_at: "2026-07-01T07:00:00+02:00",
+  scheduler_version: "test",
+  configuration: { day_start: "08:00", day_end: "12:00" },
+  items: [
+    scheduleItem(
+      "fixed-item",
+      "fixed_event",
+      null,
+      "fixed-standup",
+      null,
+      "2026-07-01T08:00:00+02:00",
+      "2026-07-01T08:30:00+02:00",
+    ),
+    scheduleItem(
+      "task-done-item",
+      "task",
+      "task-focus",
+      null,
+      null,
+      "2026-07-01T08:30:00+02:00",
+      "2026-07-01T10:00:00+02:00",
+    ),
+    scheduleItem(
+      "interruption-item",
+      "interruption",
+      null,
+      null,
+      "interruption-1",
+      "2026-07-01T10:00:00+02:00",
+      "2026-07-01T10:30:00+02:00",
+    ),
+    scheduleItem(
+      "buffer-item",
+      "buffer",
+      null,
+      null,
+      null,
+      "2026-07-01T10:30:00+02:00",
+      "2026-07-01T10:45:00+02:00",
+    ),
+    scheduleItem(
+      "moved-item",
+      "task",
+      "task-moved",
+      null,
+      null,
+      "2026-07-01T10:45:00+02:00",
+      "2026-07-01T11:45:00+02:00",
+    ),
+    scheduleItem(
+      "free-item",
+      "designated_free_time",
+      null,
+      null,
+      null,
+      "2026-07-01T11:45:00+02:00",
+      "2026-07-01T12:00:00+02:00",
+    ),
+  ],
+  decisions: [
+    {
+      id: "decision-moved",
+      task_id: "task-moved",
+      reason_code: "moved_after_interruption",
+      details: {},
+    },
+    {
+      id: "decision-deferred",
+      task_id: "task-deferred",
+      reason_code: "blocked_by_interruption",
+      details: {},
+    },
+    {
+      id: "decision-free",
+      task_id: null,
+      reason_code: "designated_free_time",
+      details: {},
+    },
+  ],
+};
+
+const weekDetail: PlanningWeekDetail = {
+  summary: weekSummary,
+  tasks: weekTasks,
+  days: weekSummary.days.map((summary) => ({
+    summary,
+    day:
+      summary.local_date === "2026-07-01"
+        ? {
+            id: "day-1",
+            local_date: "2026-07-01",
+            time_zone: "Europe/Brussels",
+            current_snapshot_id: "snapshot-1",
+            created_at: "2026-07-01T07:00:00+02:00",
+          }
+        : summary.planning_day_id !== null
+          ? {
+              id: summary.planning_day_id,
+              local_date: summary.local_date,
+              time_zone: summary.time_zone ?? "Europe/Brussels",
+              current_snapshot_id: null,
+              created_at: `${summary.local_date}T00:00:00+02:00`,
+            }
+          : null,
+    fixedEvents: summary.local_date === "2026-07-01" ? weekFixedEvents : [],
+    progress: summary.local_date === "2026-07-01" ? weekProgress : [],
+    snapshot: summary.local_date === "2026-07-01" ? weekSnapshot : null,
+  })),
+};
+
 describe("planner overview API contract", () => {
-  it("loads week and month summaries through authenticated overview endpoints", async () => {
+  it("loads week details through existing summary and day endpoints", async () => {
     const api = new FakeApiClient();
     api.responses.set(
       "/planning/overviews/week?start_date=2026-06-29",
       weekSummary,
     );
+    api.responses.set("/planning/days", [
+      {
+        id: "day-1",
+        local_date: "2026-07-01",
+        time_zone: "Europe/Brussels",
+        current_snapshot_id: "snapshot-1",
+        created_at: "2026-07-01T07:00:00+02:00",
+      },
+      {
+        id: "day-2",
+        local_date: "2026-07-02",
+        time_zone: "Europe/Brussels",
+        current_snapshot_id: null,
+        created_at: "2026-07-02T07:00:00+02:00",
+      },
+      {
+        id: "day-3",
+        local_date: "2026-07-03",
+        time_zone: "Europe/Brussels",
+        current_snapshot_id: null,
+        created_at: "2026-07-03T07:00:00+02:00",
+      },
+    ]);
+    api.responses.set("/planning/tasks", weekTasks);
+    api.responses.set("/planning/days/day-1/fixed-events", weekFixedEvents);
+    api.responses.set("/planning/days/day-1/task-progress", weekProgress);
+    api.responses.set("/planning/days/day-1/schedule", weekSnapshot);
+    api.responses.set("/planning/days/day-2/fixed-events", []);
+    api.responses.set("/planning/days/day-2/task-progress", []);
+    api.responses.set("/planning/days/day-3/fixed-events", []);
+    api.responses.set("/planning/days/day-3/task-progress", []);
+    await TestBed.configureTestingModule({
+      providers: [
+        PlannerApiService,
+        { provide: ApiClientService, useValue: api },
+      ],
+    }).compileComponents();
+    const service = TestBed.inject(PlannerApiService);
+
+    const detail = await firstValue(service.loadWeekDetail("2026-06-29"));
+
+    expect(detail.summary).toEqual(weekSummary);
+    expect(detail.tasks).toEqual(weekTasks);
+    expect(
+      detail.days.find((day) => day.summary.local_date === "2026-07-01"),
+    ).toMatchObject({
+      fixedEvents: weekFixedEvents,
+      progress: weekProgress,
+      snapshot: weekSnapshot,
+    });
+    expect(api.gets).toEqual([
+      "/planning/overviews/week?start_date=2026-06-29",
+      "/planning/days",
+      "/planning/tasks",
+      "/planning/days/day-1/fixed-events",
+      "/planning/days/day-1/task-progress",
+      "/planning/days/day-1/schedule",
+      "/planning/days/day-2/fixed-events",
+      "/planning/days/day-2/task-progress",
+      "/planning/days/day-3/fixed-events",
+      "/planning/days/day-3/task-progress",
+    ]);
+    expect(api.gets.join("\n")).not.toContain("user-1");
+  });
+
+  it("loads month summaries through the authenticated overview endpoint", async () => {
+    const api = new FakeApiClient();
     api.responses.set(
       "/planning/overviews/month?month=2026-07-01",
       monthSummary,
@@ -72,16 +288,10 @@ describe("planner overview API contract", () => {
     }).compileComponents();
     const service = TestBed.inject(PlannerApiService);
 
-    expect(await firstValue(service.loadWeekOverview("2026-06-29"))).toEqual(
-      weekSummary,
-    );
     expect(await firstValue(service.loadMonthOverview("2026-07-01"))).toEqual(
       monthSummary,
     );
-    expect(api.gets).toEqual([
-      "/planning/overviews/week?start_date=2026-06-29",
-      "/planning/overviews/month?month=2026-07-01",
-    ]);
+    expect(api.gets).toEqual(["/planning/overviews/month?month=2026-07-01"]);
     expect(api.gets.join("\n")).not.toContain("user-1");
   });
 });
@@ -101,7 +311,7 @@ describe("rendered planner overviews", () => {
     router = new FakeRouter();
   });
 
-  it("renders planned, incomplete, and empty week days with day workspace links", async () => {
+  it("renders the week route as a timed grid with schedule block cues", async () => {
     const fixture = await renderOverview(
       routeData,
       queryParamMap,
@@ -110,13 +320,15 @@ describe("rendered planner overviews", () => {
     );
 
     expect(plannerApi.weekStarts).toEqual(["2026-06-29"]);
-    expect(text(fixture)).toContain("Week overview");
+    expect(text(fixture)).toContain("Week calendar");
     expect(text(fixture)).toContain("Saved daily plans only.");
-    expect(text(fixture)).toContain("Monday-first calendar summary");
+    expect(text(fixture)).toContain("Timed week grid");
+    expect(text(fixture)).toContain("Europe/Brussels");
+    expect(text(fixture)).toContain("Day bounds 08:00-12:00");
     expect(text(fixture)).toContain("Selected day");
     expect(text(fixture)).toContain("Selected date");
     expect(text(fixture)).toContain("Week totals");
-    expect(text(fixture)).toContain("Snapshot v2");
+    expect(text(fixture)).toContain("Plan v2");
     expect(text(fixture)).toContain("1 hr 30 min");
     expect(text(fixture)).toContain("Fixed events");
     expect(text(fixture)).toContain("2");
@@ -126,30 +338,194 @@ describe("rendered planner overviews", () => {
     expect(text(fixture)).toContain("1");
     expect(text(fixture)).toContain("Useful free time:");
     expect(text(fixture)).toContain("Present");
+    expect(text(fixture)).toContain("Team standup");
+    expect(text(fixture)).toContain("Focus draft");
+    expect(text(fixture)).toContain("Unavailable");
+    expect(text(fixture)).toContain("Buffer");
+    expect(text(fixture)).toContain("Useful free time");
+    expect(text(fixture)).toContain("Moved work: 1");
+    expect(text(fixture)).toContain("Completed work");
+    expect(text(fixture)).toContain("Deferred: 1");
     expect(
       linkByAriaLabel(
         fixture,
         "Open planner workspace for Jul 2, 2026, Saved inputs only",
       )?.getAttribute("href"),
     ).toBe("/planner?date=2026-07-02");
-    expect(text(fixture)).toContain(
-      "No saved inputs or current snapshot indicators.",
+    expect(weekDayColumn(fixture, "2026-07-04")?.textContent).toContain(
+      "No saved day",
     );
-    expect(overviewDayCell(fixture, "2026-07-03")?.textContent).toContain(
-      "Inputs saved",
-    );
-    expect(overviewDayCell(fixture, "2026-07-03")?.textContent).not.toContain(
-      "No saved inputs or current snapshot indicators.",
+    expect(weekDayColumn(fixture, "2026-07-03")?.textContent).toContain(
+      "Saved inputs only",
     );
     expect(overviewSummary(fixture).className).toContain("order-first");
     expect(overviewSummary(fixture).className).toContain("xl:order-none");
     expect(
       linkByAriaLabel(
         fixture,
-        "Open planner workspace for Jul 1, 2026, Generated snapshot v2",
+        "Open planner workspace for Jul 1, 2026, Generated snapshot v2, 1 deferred",
       )?.getAttribute("href"),
     ).toBe("/planner?date=2026-07-01");
-    expect(announcement(fixture)).toContain("Week overview loaded");
+    expect(
+      linkByAriaLabel(
+        fixture,
+        "Open planner workspace for Jul 1, 2026, Generated snapshot v2, 1 deferred",
+      )?.textContent,
+    ).toContain("1 deferred");
+    expect(announcement(fixture)).toContain("Week calendar loaded");
+  });
+
+  it("places week blocks proportionally and preserves non-color status cues", async () => {
+    const fixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+    const fixed = weekBlock(fixture, "fixed-item");
+    const done = weekBlock(fixture, "task-done-item");
+    const interruption = weekBlock(fixture, "interruption-item");
+    const buffer = weekBlock(fixture, "buffer-item");
+    const moved = weekBlock(fixture, "moved-item");
+    const free = weekBlock(fixture, "free-item");
+
+    expect(weekTimeRuler(fixture).textContent).toContain("08:00");
+    expect(weekTimeRuler(fixture).textContent).toContain("12:00");
+    expect(fixed?.getAttribute("data-top-minutes")).toBe("0");
+    expect(fixed?.getAttribute("data-height-minutes")).toBe("30");
+    expect(done?.getAttribute("data-top-minutes")).toBe("30");
+    expect(done?.getAttribute("data-height-minutes")).toBe("90");
+    expect(done?.getAttribute("data-completion")).toBe("Done");
+    expect(done?.textContent).toContain("Done");
+    expect(done?.getAttribute("aria-label")).toContain("Flexible work");
+    expect(fixed?.textContent).toContain("Fixed");
+    expect(fixed?.getAttribute("aria-label")).toContain("Fixed event");
+    expect(interruption?.textContent).toContain("Unavailable");
+    expect(interruption?.getAttribute("aria-label")).toContain(
+      "Reported unavailable time",
+    );
+    expect(buffer?.textContent).toContain("Buffer");
+    expect(buffer?.getAttribute("aria-label")).toContain("Buffer");
+    expect(moved?.getAttribute("data-recovery-state")).toBe("moved");
+    expect(moved?.textContent).toContain("Moved");
+    expect(moved?.getAttribute("aria-label")).toContain("Moved");
+    expect(free?.getAttribute("data-kind")).toBe("designated_free_time");
+    expect(free?.textContent).toContain("Free");
+    expect(free?.getAttribute("aria-label")).toContain("Useful free time");
+    expect(fixed?.hasAttribute("tabindex")).toBe(false);
+    expect(done?.hasAttribute("tabindex")).toBe(false);
+    expect(text(fixture)).toContain("Deferred: 1");
+  });
+
+  it("places the current-time marker using the planning time zone date", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-30T19:00:00Z"));
+    const timeZone = "Pacific/Kiritimati";
+    const nextWeekSummary = {
+      ...weekSummary,
+      days: weekSummary.days.map((day) =>
+        day.local_date === "2026-07-01"
+          ? { ...day, time_zone: timeZone, status: "planned" as const }
+          : day,
+      ),
+    };
+    plannerApi.responseWeekDetail = {
+      ...weekDetail,
+      summary: nextWeekSummary,
+      days: weekDetail.days.map((day) => ({
+        ...day,
+        summary:
+          nextWeekSummary.days.find(
+            (summary) => summary.local_date === day.summary.local_date,
+          ) ?? day.summary,
+        day:
+          day.summary.local_date === "2026-07-01"
+            ? {
+                id: "day-1",
+                local_date: "2026-07-01",
+                time_zone: timeZone,
+                current_snapshot_id: "snapshot-timezone",
+                created_at: "2026-07-01T08:00:00+14:00",
+              }
+            : day.day,
+        snapshot:
+          day.summary.local_date === "2026-07-01"
+            ? {
+                ...weekSnapshot,
+                id: "snapshot-timezone",
+                items: [],
+                decisions: [],
+              }
+            : day.snapshot,
+      })),
+    };
+
+    try {
+      const fixture = await renderOverview(
+        routeData,
+        queryParamMap,
+        plannerApi,
+        router,
+      );
+      const indicator = currentTimeIndicator(fixture);
+
+      expect(indicator?.getAttribute("aria-label")).toBe("Current time 09:00");
+      expect(weekDayColumn(fixture, "2026-07-01")?.contains(indicator)).toBe(
+        true,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses one Day Week Month switcher and keeps free-time out of route header modes", async () => {
+    const fixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+
+    expect(text(fixture)).toContain("Day");
+    expect(text(fixture)).toContain("Week");
+    expect(text(fixture)).toContain("Month");
+    expect(text(fixture)).not.toContain("Free time finder");
+    clickButtonWithText(fixture, "Month");
+
+    expect(router.navigations.at(-1)).toEqual({
+      commands: ["/planner/month"],
+      queryParams: { date: "2026-07-01" },
+    });
+
+    clickButtonWithText(fixture, "Day");
+
+    expect(router.navigations.at(-1)).toEqual({
+      commands: ["/planner"],
+      queryParams: { date: "2026-07-01" },
+    });
+  });
+
+  it("keeps the selected week range and primary grid visible while loading", async () => {
+    plannerApi.pendingWeek = true;
+    const fixture = await renderOverview(
+      routeData,
+      queryParamMap,
+      plannerApi,
+      router,
+    );
+
+    expect(text(fixture)).toContain("Loading week calendar");
+    expect(text(fixture)).toContain("Jun 29, 2026 to Jul 5, 2026");
+    expect(text(fixture)).toContain("Day");
+    expect(text(fixture)).toContain("Week");
+    expect(text(fixture)).toContain("Month");
+    expect(weekGrid(fixture).textContent).toContain("Time");
+    expect(weekGrid(fixture).textContent).toContain("Wed");
+    expect(weekGrid(fixture).textContent).toContain("1");
+    expect(weekGrid(fixture).textContent).toContain("Selected date");
+    expect(announcement(fixture)).toContain(
+      "Loading week calendar for Jul 1, 2026.",
+    );
   });
 
   it("loads a month overview from the first day of the selected month", async () => {
@@ -164,7 +540,7 @@ describe("rendered planner overviews", () => {
     );
 
     expect(plannerApi.monthStarts).toEqual(["2026-07-01"]);
-    expect(text(fixture)).toContain("Month overview");
+    expect(text(fixture)).toContain("Month calendar");
     expect(text(fixture)).toContain("Jul 1, 2026 to Jul 31, 2026");
   });
 
@@ -233,7 +609,7 @@ describe("rendered planner overviews", () => {
   });
 
   it("keeps selected-day empty and no-generated summaries distinct", async () => {
-    plannerApi.responseWeekSummary = {
+    const nextSummary = {
       ...weekSummary,
       days: weekSummary.days.map((day) =>
         day.local_date === "2026-07-02"
@@ -241,11 +617,22 @@ describe("rendered planner overviews", () => {
               ...day,
               planning_day_id: "day-2",
               time_zone: "Europe/Brussels",
-              status: "incomplete",
+              status: "incomplete" as const,
               fixed_event_count: 1,
             }
           : day,
       ),
+    };
+    plannerApi.responseWeekDetail = {
+      ...weekDetail,
+      summary: nextSummary,
+      days: weekDetail.days.map((day) => ({
+        ...day,
+        summary:
+          nextSummary.days.find(
+            (summary) => summary.local_date === day.summary.local_date,
+          ) ?? day.summary,
+      })),
     };
     queryParamMap.next(convertToParamMap({ date: "2026-07-02" }));
 
@@ -304,7 +691,7 @@ describe("rendered planner overviews", () => {
       ).toBe("/planner?date=2026-07-01");
       expect(firstDayHeading(fixture)).toBe("Wed");
       expect(announcement(fixture)).toContain(
-        "Month overview loaded for Jul 1, 2026 through Jul 31, 2026.",
+        "Month calendar loaded for Jul 1, 2026 through Jul 31, 2026.",
       );
     } finally {
       restoreDateTimeFormat();
@@ -348,7 +735,7 @@ describe("rendered planner overviews", () => {
     fixture.detectChanges();
 
     expect(router.navigations).toEqual([
-      { queryParams: { date: "2026-07-08" } },
+      { commands: [], queryParams: { date: "2026-07-08" } },
     ]);
     expect(JSON.stringify(router.navigations)).not.toContain("user-1");
   });
@@ -362,11 +749,15 @@ describe("rendered planner overviews", () => {
       router,
     );
 
-    expect(text(fixture)).toContain("Planner summary did not load");
+    expect(text(fixture)).toContain("Planner calendar did not load");
     expect(text(fixture)).toContain("Planner overview data did not load.");
     expect(announcement(fixture)).toContain(
       "Planner overview data did not load.",
     );
+    expect(text(fixture)).toContain("Jun 29, 2026 to Jul 5, 2026");
+    expect(text(fixture)).toContain("Selected date");
+    expect(weekGrid(fixture).textContent).toContain("Wed");
+    expect(weekGrid(fixture).textContent).toContain("1");
   });
 
   it("links permission failures back to sign-in with the selected overview context", async () => {
@@ -381,7 +772,7 @@ describe("rendered planner overviews", () => {
       router,
     );
 
-    expect(text(fixture)).toContain("Overview unavailable");
+    expect(text(fixture)).toContain("Calendar unavailable");
     expect(linkByText(fixture, "Sign in again")?.getAttribute("href")).toBe(
       "/sign-in?returnUrl=%2Fplanner%2Fmonth%3Fdate%3D2026-07-20",
     );
@@ -403,17 +794,21 @@ class FakeApiClient {
 
 class FakePlannerApi {
   error: unknown = null;
-  responseWeekSummary: PlanningRangeSummary = weekSummary;
+  pendingWeek = false;
+  responseWeekDetail: PlanningWeekDetail = weekDetail;
   responseMonthSummary: PlanningRangeSummary = monthSummary;
   readonly weekStarts: string[] = [];
   readonly monthStarts: string[] = [];
 
-  loadWeekOverview(startDate: string): Observable<PlanningRangeSummary> {
+  loadWeekDetail(startDate: string): Observable<PlanningWeekDetail> {
     this.weekStarts.push(startDate);
+    if (this.pendingWeek) {
+      return NEVER;
+    }
     if (this.error !== null) {
       return throwError(() => this.error);
     }
-    return of(this.responseWeekSummary);
+    return of(this.responseWeekDetail);
   }
 
   loadMonthOverview(monthDate: string): Observable<PlanningRangeSummary> {
@@ -426,13 +821,16 @@ class FakePlannerApi {
 }
 
 class FakeRouter {
-  readonly navigations: Array<{ queryParams: Record<string, string> }> = [];
+  readonly navigations: Array<{
+    commands?: unknown[];
+    queryParams: Record<string, string>;
+  }> = [];
 
   navigate(
-    _commands: unknown[],
+    commands: unknown[],
     options: { queryParams: Record<string, string> },
   ): Promise<boolean> {
-    this.navigations.push({ queryParams: options.queryParams });
+    this.navigations.push({ commands, queryParams: options.queryParams });
     return Promise.resolve(true);
   }
 
@@ -491,6 +889,61 @@ function emptyDay(localDate: string) {
     interruption_minutes: 0,
     unscheduled_deferred_count: 0,
     has_useful_free_time: false,
+  };
+}
+
+function task(id: string, title: string, estimatedMinutes: number): Task {
+  return {
+    id,
+    title,
+    estimated_minutes: estimatedMinutes,
+    priority: 2,
+    due_date: null,
+    earliest_start_at: null,
+    splitting_allowed: true,
+    min_segment_minutes: null,
+    status: "pending",
+    created_at: "2026-07-01T07:00:00+02:00",
+    updated_at: "2026-07-01T07:00:00+02:00",
+  };
+}
+
+function fixedEvent(
+  id: string,
+  planningDayId: string,
+  title: string,
+  startAt: string,
+  endAt: string,
+): FixedEvent {
+  return {
+    id,
+    planning_day_id: planningDayId,
+    title,
+    start_at: startAt,
+    end_at: endAt,
+    time_zone: "Europe/Brussels",
+    created_at: startAt,
+    updated_at: startAt,
+  };
+}
+
+function scheduleItem(
+  id: string,
+  kind: string,
+  taskId: string | null,
+  fixedEventId: string | null,
+  interruptionId: string | null,
+  startAt: string,
+  endAt: string,
+) {
+  return {
+    id,
+    kind,
+    task_id: taskId,
+    fixed_event_id: fixedEventId,
+    interruption_id: interruptionId,
+    start_at: startAt,
+    end_at: endAt,
   };
 }
 
@@ -571,6 +1024,68 @@ function overviewDayCell<T>(
   return (fixture.nativeElement as HTMLElement).querySelector(
     `[data-testid='overview-day-cell'][data-date='${date}']`,
   );
+}
+
+function weekDayColumn<T>(
+  fixture: ComponentFixture<T>,
+  date: string,
+): HTMLElement | null {
+  return (fixture.nativeElement as HTMLElement).querySelector(
+    `[data-testid='week-day-column'][data-date='${date}']`,
+  );
+}
+
+function weekBlock<T>(
+  fixture: ComponentFixture<T>,
+  itemId: string,
+): HTMLElement | null {
+  return (fixture.nativeElement as HTMLElement).querySelector(
+    `[data-testid='week-schedule-block'][data-item-id='${itemId}']`,
+  );
+}
+
+function weekTimeRuler<T>(fixture: ComponentFixture<T>): HTMLElement {
+  const element = (fixture.nativeElement as HTMLElement).querySelector(
+    "[data-testid='week-time-ruler']",
+  );
+  if (element === null) {
+    throw new Error("Could not find week time ruler");
+  }
+  return element as HTMLElement;
+}
+
+function weekGrid<T>(fixture: ComponentFixture<T>): HTMLElement {
+  const element = (fixture.nativeElement as HTMLElement).querySelector(
+    "[data-testid='week-time-grid']",
+  );
+  if (element === null) {
+    throw new Error("Could not find week time grid");
+  }
+  return element as HTMLElement;
+}
+
+function currentTimeIndicator<T>(
+  fixture: ComponentFixture<T>,
+): HTMLElement | null {
+  return (fixture.nativeElement as HTMLElement).querySelector(
+    "[data-testid='current-time-indicator']",
+  );
+}
+
+function clickButtonWithText<T>(
+  fixture: ComponentFixture<T>,
+  buttonText: string,
+): void {
+  const button = Array.from(
+    (fixture.nativeElement as HTMLElement).querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.includes(buttonText));
+
+  if (!button) {
+    throw new Error(`Could not find ${buttonText} button`);
+  }
+
+  (button as HTMLButtonElement).click();
+  fixture.detectChanges();
 }
 
 function overviewSummary<T>(fixture: ComponentFixture<T>): HTMLElement {
