@@ -397,6 +397,23 @@
                 [style.top.%]="tick.topPercent"
                 aria-hidden="true"
               ></span>
+              } @for (slot of weekSlotsForDay(day, week); track slot.id) {
+              <button
+                type="button"
+                class="absolute left-1 right-1 min-h-7 rounded-sm border border-dashed border-transparent bg-transparent px-1 text-left text-[0.625rem] font-medium text-transparent transition hover:border-meadow-600 hover:bg-meadow-50 hover:text-ink-700 focus-visible:z-10 focus-visible:border-meadow-700 focus-visible:bg-white focus-visible:text-ink-700 focus-visible:shadow-focus"
+                [style.top.%]="slot.topPercent"
+                [style.height.%]="slot.heightPercent"
+                [attr.data-testid]="'week-open-slot'"
+                [attr.data-date]="slot.localDate"
+                [attr.data-start]="slot.start"
+                [attr.data-top-minutes]="slot.topMinutes"
+                [attr.data-height-minutes]="slot.heightMinutes"
+                [attr.aria-label]="'Create planner item on ' + slot.label + ', choose fixed event or flexible task'"
+                (click)="openWeekSlot(slot)"
+              >
+                <span class="sr-only">Create planner item</span>
+                <span aria-hidden="true">Add {{ slot.start }}</span>
+              </button>
               } @for (block of weekBlocksForDay(day, week); track block.item.id)
               {
               <article
@@ -419,6 +436,11 @@
                 [attr.data-width-percent]="block.widthPercent"
                 [attr.aria-label]="weekBlockAriaLabel(block)"
                 data-testid="week-schedule-block"
+                role="button"
+                tabindex="0"
+                (click)="openWeekBlock(block)"
+                (keydown.enter)="openWeekBlock(block)"
+                (keydown.space)="$event.preventDefault(); openWeekBlock(block)"
               >
                 @if (block.isCompact) {
                 <p

@@ -1470,6 +1470,168 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.savedFixedEvents).toEqual([]);
   });
 
+  it("opens create choices from calendar slots and preloads fixed-event details", async () => {
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      fixedEvents: canonicalFixedEvents,
+      tasks: canonicalTasks,
+      snapshot: canonicalInitialSnapshot,
+    });
+    routeParams.next(convertToParamMap({ date: canonicalDate }));
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const slot = calendarSlot(fixture, `slot-${canonicalDate}-16:00`);
+
+    slot.focus();
+    slot.click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Create from calendar");
+    expect(text(fixture)).toContain("Fixed event");
+    expect(text(fixture)).toContain("Flexible task");
+    buttonByText(fixture, "Fixed event", "Calendar create").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Add fixed event");
+    expect(inputValue(fixture, "#fixed-event-start")).toBe(
+      `${canonicalDate}T16:00`,
+    );
+    expect(inputValue(fixture, "#fixed-event-end")).toBe(
+      `${canonicalDate}T16:30`,
+    );
+    expect(inputValue(fixture, "#fixed-event-time-zone")).toBe(
+      "Europe/Brussels",
+    );
+    buttonByText(fixture, "Cancel", "Fixed events").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(document.activeElement).toBe(slot);
+  });
+
+  it("preloads flexible-task details from a keyboard calendar slot", async () => {
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      fixedEvents: canonicalFixedEvents,
+      tasks: canonicalTasks,
+      snapshot: canonicalInitialSnapshot,
+    });
+    routeParams.next(convertToParamMap({ date: canonicalDate }));
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const slot = calendarSlot(fixture, `slot-${canonicalDate}-16:30`);
+
+    slot.focus();
+    slot.dispatchEvent(keyboardEvent("keydown", "Enter"));
+    slot.click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    buttonByText(fixture, "Flexible task", "Calendar create").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Add flexible task");
+    expect(inputValue(fixture, "#task-estimate")).toBe("30");
+    expect(inputValue(fixture, "#task-due-date")).toBe(canonicalDate);
+    expect(inputValue(fixture, "#task-earliest")).toBe(
+      `${canonicalDate}T16:30`,
+    );
+    expect(inputValue(fixture, "#task-earliest-zone")).toBe("Europe/Brussels");
+  });
+
+  it("uses the selected day for calendar slots when the snapshot has no items", async () => {
+    const emptySnapshot: ScheduleSnapshot = {
+      ...canonicalInitialSnapshot,
+      items: [],
+      decisions: [],
+    };
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      snapshot: emptySnapshot,
+    });
+    routeParams.next(convertToParamMap({ date: canonicalDate }));
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+    const slot = calendarSlot(fixture, `slot-${canonicalDate}-08:00`);
+
+    slot.click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    buttonByText(fixture, "Fixed event", "Calendar create").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#fixed-event-start")).toBe(
+      `${canonicalDate}T08:00`,
+    );
+    expect(inputValue(fixture, "#fixed-event-end")).toBe(
+      `${canonicalDate}T08:30`,
+    );
+  });
+
+  it("opens a prefilled calendar create choice from week route query intent", async () => {
+    plannerApi.result = workspaceData({
+      selectedDate: canonicalDate,
+      snapshot: null,
+    });
+    routeParams.next(
+      convertToParamMap({
+        date: canonicalDate,
+        create: "slot",
+        start: "11:00",
+      }),
+    );
+
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    expect(text(fixture)).toContain("Create from calendar");
+    buttonByText(fixture, "Flexible task", "Calendar create").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(inputValue(fixture, "#task-estimate")).toBe("30");
+    expect(inputValue(fixture, "#task-due-date")).toBe(canonicalDate);
+    expect(inputValue(fixture, "#task-earliest")).toBe(
+      `${canonicalDate}T11:00`,
+    );
+  });
+
+  it("opens existing task and fixed-event editors from timeline blocks", async () => {
+    plannerApi.result = workspaceData({
+      fixedEvents: [fixedEvent],
+      tasks: [task],
+      snapshot: canonicalSnapshot,
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    scheduleBlockById(fixture, "task-item").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Edit flexible task");
+    expect(inputValue(fixture, "#task-title")).toBe("Write report");
+    buttonByText(fixture, "Cancel", "Flexible tasks").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    scheduleBlockById(fixture, "fixed-item").click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Edit fixed event");
+    expect(inputValue(fixture, "#fixed-event-title")).toBe("Team meeting");
+  });
+
   it("returns focus to recreated planning controls after successful editor mutations", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -3867,9 +4029,27 @@ function regionIdForLabel(regionLabel: string): string {
       return "progress-title";
     case "Report interruption":
       return "interruption-title";
+    case "Calendar create":
+      return "calendar-create-title";
     default:
       throw new Error(`Unknown region label ${regionLabel}`);
   }
+}
+
+function calendarSlot<T>(
+  fixture: ComponentFixture<T>,
+  slotId: string,
+): HTMLButtonElement {
+  const slot = query(
+    fixture,
+    `[data-calendar-slot='${slotId}']`,
+  ) as HTMLButtonElement | null;
+
+  if (slot === null) {
+    throw new Error(`Could not find calendar slot ${slotId}`);
+  }
+
+  return slot;
 }
 
 function timelineBlocks<T>(fixture: ComponentFixture<T>): Array<{

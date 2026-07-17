@@ -107,6 +107,22 @@ type PendingMutationFocus = {
   readonly readySelector: string;
   readonly fallbackReadySelector: string;
 };
+type RouteEditorIntent =
+  | {
+      readonly kind: "create";
+      readonly selectedDate: string;
+      readonly start: string;
+    }
+  | {
+      readonly kind: "editTask";
+      readonly selectedDate: string;
+      readonly taskId: string;
+    }
+  | {
+      readonly kind: "editFixedEvent";
+      readonly selectedDate: string;
+      readonly fixedEventId: string;
+    };
 
 type GeneratePlanState =
   | { readonly status: "idle"; readonly message: string }
@@ -180,6 +196,28 @@ interface TimelineTick {
   readonly labelTopPercent: number | null;
   readonly labelClass: string;
   readonly minutesFromStart: number;
+}
+
+interface TimelineSlot {
+  readonly id: string;
+  readonly label: string;
+  readonly startLocal: string;
+  readonly endLocal: string;
+  readonly timeZone: string;
+  readonly topPercent: number;
+  readonly heightPercent: number;
+  readonly topMinutes: number;
+  readonly heightMinutes: number;
+}
+
+interface CalendarCreateSelection {
+  readonly sourceId: string;
+  readonly label: string;
+  readonly localDate: string;
+  readonly startLocal: string;
+  readonly endLocal: string;
+  readonly timeZone: string;
+  readonly durationMinutes: number;
 }
 
 interface ScheduleSummary {
@@ -266,6 +304,8 @@ export class PlannerWorkspacePage implements OnInit {
   });
   protected readonly busyAction = signal<string | null>(null);
   protected readonly selectedScheduleItemId = signal<string | null>(null);
+  protected readonly calendarCreateSelection =
+    signal<CalendarCreateSelection | null>(null);
   protected readonly announcement = computed(() => {
     const state = this.state();
     const interruptionState = this.interruptionState();
@@ -299,12 +339,22 @@ export class PlannerWorkspacePage implements OnInit {
   private readonly reloadRequests = new Subject<string>();
   private taskEditorReturnFocus: HTMLElement | null = null;
   private fixedEventEditorReturnFocus: HTMLElement | null = null;
+  private calendarCreateReturnFocus: HTMLElement | null = null;
   private pendingMutationFocus: PendingMutationFocus | null = null;
+  private pendingRouteEditorIntent: RouteEditorIntent | null = null;
+  private handledRouteEditorIntentKey: string | null = null;
   private taskSuggestionRequestVersion = 0;
 
   ngOnInit(): void {
     const routeDates = this.route.queryParamMap.pipe(
-      map((queryParamMap) => normalizeDateInput(queryParamMap.get("date"))),
+      map((queryParamMap) => {
+        const selectedDate = normalizeDateInput(queryParamMap.get("date"));
+        this.pendingRouteEditorIntent = routeEditorIntent(
+          queryParamMap,
+          selectedDate,
+        );
+        return selectedDate;
+      }),
       tap((date) => {
         this.selectedDate.set(date);
       }),
@@ -355,6 +405,7 @@ export class PlannerWorkspacePage implements OnInit {
           if (isBlankInterruptionForm(this.interruptionForm())) {
             this.interruptionForm.set(emptyInterruptionForm(timeZone));
           }
+          this.applyPendingRouteEditorIntent(state);
           this.restorePendingMutationFocus();
         }
       });
@@ -1176,6 +1227,14 @@ export class PlannerWorkspacePage implements OnInit {
     return formatTime(value, planningDayTimeZone ?? "UTC");
   }
 
+  protected timelineSlots(
+    snapshot: ScheduleSnapshot,
+    planningDayTimeZone: string | undefined,
+    selectedDate: string,
+  ): readonly TimelineSlot[] {
+    return timelineSlots(snapshot, planningDayTimeZone ?? "UTC", selectedDate);
+  }
+
   protected itemLabel(
     item: ScheduleItem,
     tasks: readonly Task[],
@@ -1236,6 +1295,126 @@ export class PlannerWorkspacePage implements OnInit {
 
   protected selectScheduleItem(itemId: string): void {
     this.selectedScheduleItemId.set(itemId);
+  }
+
+  protected activateTimelineBlock(
+    block: TimelineBlock,
+    tasks: readonly Task[],
+    fixedEvents: readonly FixedEvent[],
+    planningDayTimeZone: string | undefined,
+  ): void {
+    this.selectScheduleItem(block.item.id);
+    if (block.item.kind === "task" && block.item.task_id !== null) {
+      const task = tasks.find(
+        (candidate) => candidate.id === block.item.task_id,
+      );
+      if (task) {
+        this.editTask(task);
+      }
+      return;
+    }
+    if (
+      block.item.kind === "fixed_event" &&
+      block.item.fixed_event_id !== null
+    ) {
+      const event = fixedEvents.find(
+        (candidate) => candidate.id === block.item.fixed_event_id,
+      );
+      if (event) {
+        this.editFixedEvent(event);
+      }
+      return;
+    }
+    if (block.item.kind === "designated_free_time") {
+      this.openCalendarCreateChoice({
+        sourceId: `block-${block.item.id}`,
+        localDate: this.selectedDate(),
+        startLocal: toDateTimeLocalValue(
+          block.item.start_at,
+          planningDayTimeZone ?? "UTC",
+        ),
+        endLocal: toDateTimeLocalValue(
+          block.item.end_at,
+          planningDayTimeZone ?? "UTC",
+        ),
+        timeZone: planningDayTimeZone ?? "UTC",
+      });
+    }
+  }
+
+  protected openCalendarCreateChoice(slot: {
+    readonly sourceId: string;
+    readonly localDate: string;
+    readonly startLocal: string;
+    readonly endLocal: string;
+    readonly timeZone: string;
+  }): void {
+    const activeElement = document.activeElement;
+    this.calendarCreateReturnFocus =
+      activeElement instanceof HTMLElement ? activeElement : null;
+    const durationMinutes = Math.max(
+      30,
+      durationMinutesBetweenDateTimeLocal(slot.startLocal, slot.endLocal),
+    );
+    this.calendarCreateSelection.set({
+      ...slot,
+      durationMinutes,
+      label: `${formatDateLabel(slot.localDate)} at ${slot.startLocal.slice(11)}`,
+    });
+    this.focusSelector("#calendar-create-fixed-event");
+  }
+
+  protected closeCalendarCreateChoice(): void {
+    const target = this.calendarCreateReturnFocus;
+    this.calendarCreateReturnFocus = null;
+    this.calendarCreateSelection.set(null);
+    queueMicrotask(() => target?.focus());
+  }
+
+  protected createFixedEventFromCalendarSelection(): void {
+    const selection = this.calendarCreateSelection();
+    if (selection === null) {
+      return;
+    }
+    const returnFocus = this.calendarCreateReturnFocus;
+    this.calendarCreateReturnFocus = null;
+    this.calendarCreateSelection.set(null);
+    this.fixedEventEditorReturnFocus = returnFocus;
+    this.fixedEventForm.set({
+      id: null,
+      planningDayId: currentWorkspaceDay(this.state())?.id ?? null,
+      title: "",
+      startLocal: selection.startLocal,
+      endLocal: selection.endLocal,
+      timeZone: selection.timeZone,
+    });
+    this.fixedEventFormErrors.set({});
+    this.fixedEventFormMessage.set("");
+    this.fixedEventEditorOpen.set(true);
+    this.focusEditorControl("#fixed-event-title");
+  }
+
+  protected createTaskFromCalendarSelection(): void {
+    const selection = this.calendarCreateSelection();
+    if (selection === null) {
+      return;
+    }
+    const returnFocus = this.calendarCreateReturnFocus;
+    this.calendarCreateReturnFocus = null;
+    this.calendarCreateSelection.set(null);
+    this.taskEditorReturnFocus = returnFocus;
+    this.taskForm.set({
+      ...emptyTaskForm(),
+      estimatedMinutes: String(selection.durationMinutes),
+      dueDate: selection.localDate,
+      earliestStartLocal: selection.startLocal,
+      earliestStartTimeZone: selection.timeZone,
+    });
+    this.taskFormErrors.set({});
+    this.taskFormMessage.set("");
+    this.resetTaskSuggestion();
+    this.taskEditorOpen.set(true);
+    this.focusEditorControl("#task-title");
   }
 
   protected selectedTimelineBlock(
@@ -1703,6 +1882,50 @@ export class PlannerWorkspacePage implements OnInit {
 
   private focusEditorControl(selector: string): void {
     this.focusSelector(selector);
+  }
+
+  private applyPendingRouteEditorIntent(
+    state: Extract<WorkspaceLoadState, { status: "ready" }>,
+  ): void {
+    const intent = this.pendingRouteEditorIntent;
+    if (intent === null) {
+      return;
+    }
+    const key = routeEditorIntentKey(intent);
+    if (this.handledRouteEditorIntentKey === key) {
+      return;
+    }
+    this.handledRouteEditorIntentKey = key;
+
+    if (intent.kind === "create") {
+      const timeZone = state.data.day?.time_zone ?? guessTimeZone();
+      const startLocal = `${intent.selectedDate}T${intent.start}`;
+      this.openCalendarCreateChoice({
+        sourceId: `route-${intent.selectedDate}-${intent.start}`,
+        localDate: intent.selectedDate,
+        startLocal,
+        endLocal: addMinutesToDateTimeLocal(startLocal, 30),
+        timeZone,
+      });
+      return;
+    }
+
+    if (intent.kind === "editTask") {
+      const task = state.data.tasks.find(
+        (candidate) => candidate.id === intent.taskId,
+      );
+      if (task) {
+        this.editTask(task);
+      }
+      return;
+    }
+
+    const event = state.data.fixedEvents.find(
+      (candidate) => candidate.id === intent.fixedEventId,
+    );
+    if (event) {
+      this.editFixedEvent(event);
+    }
   }
 
   private focusSelector(selector: string, fallbackSelector?: string): void {
@@ -2189,6 +2412,150 @@ function toDateTimeLocalValue(value: string, timeZone: string): string {
 
 function currentDateTimeLocalValue(timeZone: string): string {
   return toDateTimeLocalValue(new Date().toISOString(), timeZone);
+}
+
+function addMinutesToDateTimeLocal(value: string, minutes: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (match === null) {
+    return value;
+  }
+
+  const date = new Date(
+    Date.UTC(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]) + minutes,
+    ),
+  );
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}T${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+function durationMinutesBetweenDateTimeLocal(
+  start: string,
+  end: string,
+): number {
+  const startMinutes = dateTimeLocalToUtcMinutes(start);
+  const endMinutes = dateTimeLocalToUtcMinutes(end);
+  if (startMinutes === null || endMinutes === null) {
+    return 30;
+  }
+
+  return Math.max(1, endMinutes - startMinutes);
+}
+
+function dateTimeLocalToUtcMinutes(value: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (match === null) {
+    return null;
+  }
+
+  return (
+    Date.UTC(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]),
+    ) / 60_000
+  );
+}
+
+function timelineSlots(
+  snapshot: ScheduleSnapshot,
+  timeZone: string,
+  localDate: string,
+): readonly TimelineSlot[] {
+  const bounds = timelineBounds(snapshot, timeZone);
+  const totalMinutes = Math.max(1, bounds.endMinutes - bounds.startMinutes);
+  const unavailable = snapshot.items
+    .filter((item) => item.kind !== "designated_free_time")
+    .map((item) => ({
+      startMinutes: minutesFromIsoInZone(item.start_at, timeZone),
+      endMinutes: minutesFromIsoInZone(item.end_at, timeZone),
+    }));
+  const slots: TimelineSlot[] = [];
+
+  for (
+    let startMinutes = bounds.startMinutes;
+    startMinutes < bounds.endMinutes;
+    startMinutes += 30
+  ) {
+    const endMinutes = Math.min(startMinutes + 30, bounds.endMinutes);
+    if (
+      unavailable.some(
+        (item) =>
+          startMinutes < item.endMinutes && endMinutes > item.startMinutes,
+      )
+    ) {
+      continue;
+    }
+
+    const topMinutes = startMinutes - bounds.startMinutes;
+    const startLocal = `${localDate}T${formatMinutesAsTime(startMinutes)}`;
+    const endLocal = `${localDate}T${formatMinutesAsTime(endMinutes)}`;
+    slots.push({
+      id: `slot-${localDate}-${formatMinutesAsTime(startMinutes)}`,
+      label: `${formatMinutesAsTime(startMinutes)} open slot`,
+      startLocal,
+      endLocal,
+      timeZone,
+      topPercent: (topMinutes / totalMinutes) * 100,
+      heightPercent: ((endMinutes - startMinutes) / totalMinutes) * 100,
+      topMinutes,
+      heightMinutes: endMinutes - startMinutes,
+    });
+  }
+
+  return slots;
+}
+
+function routeEditorIntent(
+  queryParamMap: { get(name: string): string | null },
+  selectedDate: string,
+): RouteEditorIntent | null {
+  const start = queryParamMap.get("start");
+  if (queryParamMap.get("create") === "slot" && isValidClockTime(start)) {
+    return { kind: "create", selectedDate, start };
+  }
+
+  const taskId = queryParamMap.get("editTask");
+  if (taskId !== null && taskId.trim() !== "") {
+    return { kind: "editTask", selectedDate, taskId };
+  }
+
+  const fixedEventId = queryParamMap.get("editFixedEvent");
+  if (fixedEventId !== null && fixedEventId.trim() !== "") {
+    return { kind: "editFixedEvent", selectedDate, fixedEventId };
+  }
+
+  return null;
+}
+
+function routeEditorIntentKey(intent: RouteEditorIntent): string {
+  switch (intent.kind) {
+    case "create":
+      return `${intent.kind}:${intent.selectedDate}:${intent.start}`;
+    case "editTask":
+      return `${intent.kind}:${intent.selectedDate}:${intent.taskId}`;
+    case "editFixedEvent":
+      return `${intent.kind}:${intent.selectedDate}:${intent.fixedEventId}`;
+  }
+}
+
+function isValidClockTime(value: string | null): value is string {
+  if (value === null) {
+    return false;
+  }
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  return (
+    match !== null &&
+    Number(match[1]) >= 0 &&
+    Number(match[1]) <= 23 &&
+    Number(match[2]) >= 0 &&
+    Number(match[2]) <= 59
+  );
 }
 
 function zonedLocalDateTimeToIso(

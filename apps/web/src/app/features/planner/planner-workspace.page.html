@@ -236,6 +236,28 @@
             [style.top.%]="tick.topPercent"
             aria-hidden="true"
           ></span>
+          } @for (slot of timelineSlots(snapshot, view.data.day?.time_zone,
+          view.selectedDate); track slot.id) {
+          <button
+            type="button"
+            class="absolute left-3 right-3 min-h-7 rounded-sm border border-dashed border-transparent bg-transparent px-2 text-left text-[0.6875rem] font-medium text-transparent transition hover:border-meadow-600 hover:bg-meadow-50 hover:text-ink-700 focus-visible:z-10 focus-visible:border-meadow-700 focus-visible:bg-white focus-visible:text-ink-700 focus-visible:shadow-focus sm:left-4 sm:right-4"
+            [style.top.%]="slot.topPercent"
+            [style.height.%]="slot.heightPercent"
+            [attr.data-calendar-slot]="slot.id"
+            [attr.data-top-minutes]="slot.topMinutes"
+            [attr.data-height-minutes]="slot.heightMinutes"
+            [attr.aria-label]="'Create planner item on ' + formatDateLabel(view.selectedDate) + ' at ' + slot.startLocal.slice(11) + ', choose fixed event or flexible task'"
+            (click)="openCalendarCreateChoice({
+              sourceId: slot.id,
+              localDate: view.selectedDate,
+              startLocal: slot.startLocal,
+              endLocal: slot.endLocal,
+              timeZone: slot.timeZone
+            })"
+          >
+            <span class="sr-only">Create planner item</span>
+            <span aria-hidden="true">Add {{ slot.startLocal.slice(11) }}</span>
+          </button>
           } @for (block of timelineBlocks( snapshot, view.data.tasks,
           view.data.fixedEvents, view.data.progress, view.data.day?.time_zone );
           track block.item.id) {
@@ -264,10 +286,10 @@
             role="button"
             [attr.aria-label]="scheduleBlockAriaLabel(block, view.data.day?.time_zone)"
             [attr.aria-pressed]="isSelectedScheduleItem(block.item.id)"
-            (click)="selectScheduleItem(block.item.id)"
+            (click)="activateTimelineBlock(block, view.data.tasks, view.data.fixedEvents, view.data.day?.time_zone)"
             (focus)="selectScheduleItem(block.item.id)"
-            (keydown.enter)="selectScheduleItem(block.item.id)"
-            (keydown.space)="$event.preventDefault(); selectScheduleItem(block.item.id)"
+            (keydown.enter)="activateTimelineBlock(block, view.data.tasks, view.data.fixedEvents, view.data.day?.time_zone)"
+            (keydown.space)="$event.preventDefault(); activateTimelineBlock(block, view.data.tasks, view.data.fixedEvents, view.data.day?.time_zone)"
           >
             @if (block.isCompact) {
             <div
@@ -595,7 +617,81 @@
           </ul>
         </div>
       </section>
-      } }
+      } } @if (calendarCreateSelection(); as selection) {
+      <div
+        class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/30 p-4 sm:p-6"
+        role="presentation"
+        (keydown.escape)="closeCalendarCreateChoice()"
+      >
+        <div
+          id="calendar-create-dialog"
+          class="w-full max-w-md rounded-lg border border-mist-200 bg-white p-4 shadow-lg sm:p-5"
+          role="dialog"
+          tabindex="-1"
+          aria-modal="true"
+          aria-labelledby="calendar-create-title"
+          (keydown)="trapEditorFocus($event, 'calendar-create-dialog')"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p
+                class="text-xs font-semibold uppercase tracking-normal text-ink-600"
+              >
+                Create from calendar
+              </p>
+              <h2
+                id="calendar-create-title"
+                class="mt-1 text-base font-semibold text-ink-950"
+              >
+                {{ selection.label }}
+              </h2>
+            </div>
+            <button
+              type="button"
+              class="inline-flex min-h-9 items-center rounded-md border border-mist-200 px-3 py-1.5 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+              (click)="closeCalendarCreateChoice()"
+              aria-label="Close calendar create choice"
+            >
+              Close
+            </button>
+          </div>
+          <p class="mt-3 text-sm leading-6 text-ink-600">
+            Choose whether this time is reserved or flexible. The saved input
+            will be scheduled by the API after you generate or refresh the plan.
+          </p>
+          <div class="mt-4 grid gap-2 sm:grid-cols-2">
+            <button
+              id="calendar-create-fixed-event"
+              type="button"
+              class="min-h-12 rounded-md border border-mist-200 px-3 py-2 text-left text-sm font-semibold text-ink-900 transition hover:border-meadow-600 hover:bg-mist-50 focus-visible:shadow-focus"
+              (click)="createFixedEventFromCalendarSelection()"
+            >
+              Fixed event
+              <span class="mt-1 block text-xs font-medium text-ink-600">
+                Reserves this time
+              </span>
+            </button>
+            <button
+              type="button"
+              class="min-h-12 rounded-md border border-mist-200 px-3 py-2 text-left text-sm font-semibold text-ink-900 transition hover:border-meadow-600 hover:bg-mist-50 focus-visible:shadow-focus"
+              (click)="createTaskFromCalendarSelection()"
+            >
+              Flexible task
+              <span class="mt-1 block text-xs font-medium text-ink-600">
+                Can move around fixed time
+              </span>
+            </button>
+          </div>
+          <button
+            type="button"
+            class="mt-3 inline-flex min-h-10 items-center rounded-md border border-mist-200 px-4 py-2 text-sm font-medium text-ink-800 transition hover:border-meadow-600 hover:text-meadow-700 focus-visible:shadow-focus"
+            (click)="closeCalendarCreateChoice()"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+      }
 
       <section
         aria-labelledby="progress-title"
