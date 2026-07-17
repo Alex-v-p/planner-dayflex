@@ -1770,9 +1770,7 @@ describe("rendered planner workspace", () => {
         },
       },
     ]);
-    expect(text(fixture)).toContain(
-      "Revised schedule snapshot v2 is now shown.",
-    );
+    expect(text(fixture)).toContain("Your revised plan is now shown.");
   });
 
   it("uses the selected day for calendar slots when the snapshot has no items", async () => {
@@ -2492,6 +2490,57 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.reportedInterruptions).toEqual([]);
   });
 
+  it("ignores stale interruption suggestions after prefilled block details", async () => {
+    plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
+    const staleSuggestionResponse = new Subject<unknown>();
+    plannerApi.interruptionSuggestionResponse = staleSuggestionResponse;
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#interruption-ai-text", "appointment from 13 to 14");
+    buttonByText(fixture, "Suggest details", "Report interruption").click();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("Looking for editable unavailable time.");
+
+    buttonsByText(
+      query(fixture, "[data-testid='selected-block-detail']"),
+      "Report interruption",
+    )[0].click();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    staleSuggestionResponse.next({
+      status: "suggested",
+      confidence: 0.7,
+      proposed_fields: {
+        start_at: "2026-07-04T13:00:00+02:00",
+        end_at: "2026-07-04T14:00:00+02:00",
+        time_zone: "Europe/Brussels",
+        reported_at: "2026-07-04T13:00:00+02:00",
+      },
+      fallback_reason: null,
+      error_code: null,
+    });
+    staleSuggestionResponse.complete();
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "Unavailable time is ready from Team meeting.",
+    );
+    expect(text(fixture)).not.toContain("Suggestion ready");
+    expect(inputValue(fixture, "#interruption-start")).toBe("2026-07-04T09:00");
+    expect(inputValue(fixture, "#interruption-end")).toBe("2026-07-04T10:00");
+    expect(
+      buttonsByText(
+        query(fixture, "[aria-labelledby='interruption-title']"),
+        "Apply to form",
+      ),
+    ).toEqual([]);
+  });
+
   it("saves the user's edited interruption proposal after explicit confirmation", async () => {
     plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
     plannerApi.interruptionResponse = of(revisedStudySnapshot);
@@ -2533,9 +2582,7 @@ describe("rendered planner workspace", () => {
         },
       },
     ]);
-    expect(text(fixture)).toContain(
-      "Revised schedule snapshot v3 is now shown.",
-    );
+    expect(text(fixture)).toContain("Your revised plan is now shown.");
   });
 
   it("shows interruption fallback without changing editable fields", async () => {
@@ -2603,12 +2650,8 @@ describe("rendered planner workspace", () => {
         },
       },
     ]);
-    expect(text(fixture)).toContain(
-      "Revised schedule snapshot v3 is now shown.",
-    );
-    expect(announcement(fixture)).toContain(
-      "Revised schedule snapshot v3 is now shown.",
-    );
+    expect(text(fixture)).toContain("Your revised plan is now shown.");
+    expect(announcement(fixture)).toContain("Your revised plan is now shown.");
   });
 
   it("focuses the manual interruption form from the daily recovery action area", async () => {
@@ -2684,9 +2727,7 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain(
       "Study notes was moved after reported unavailable time.",
     );
-    expect(text(fixture)).toContain(
-      "Revised schedule snapshot v3 is now shown.",
-    );
+    expect(text(fixture)).toContain("Your revised plan is now shown.");
     expect(text(fixture)).toContain("v3");
     expect(
       query(fixture, "[data-testid='daily-timeline']")?.textContent,
@@ -2732,9 +2773,7 @@ describe("rendered planner workspace", () => {
       "interruption",
       "task",
     ]);
-    expect(announcement(fixture)).toContain(
-      "Revised schedule snapshot v3 is now shown.",
-    );
+    expect(announcement(fixture)).toContain("Your revised plan is now shown.");
   });
 
   it("keeps progress details available for retry when saving progress fails", async () => {
@@ -2851,12 +2890,8 @@ describe("rendered planner workspace", () => {
         },
       },
     ]);
-    expect(text(fixture)).toContain(
-      "Revised schedule snapshot v3 is now shown.",
-    );
-    expect(announcement(fixture)).toContain(
-      "Revised schedule snapshot v3 is now shown.",
-    );
+    expect(text(fixture)).toContain("Your revised plan is now shown.");
+    expect(announcement(fixture)).toContain("Your revised plan is now shown.");
   });
 
   it("marks unfinished work complete and removes it from progress choices", async () => {

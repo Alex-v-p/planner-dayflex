@@ -1010,26 +1010,18 @@
               </span>
               }
             </div>
-            @if (interruptionSuggestion().result; as suggestion) {
+            @if (interruptionSuggestion().result; as suggestion) { @if
+            (suggestion.status === "suggested") {
             <div class="mt-2 rounded-md border border-mist-200 bg-white p-3">
-              <p class="text-sm text-ink-700">
-                Confidence {{ suggestion.confidence }}
-              </p>
-              @if (suggestion.status === "suggested") {
               <button
                 type="button"
-                class="mt-2 inline-flex min-h-9 items-center rounded-md bg-meadow-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
+                class="inline-flex min-h-9 items-center rounded-md bg-meadow-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-meadow-600 focus-visible:shadow-focus"
                 (click)="applyInterruptionSuggestion(suggestion)"
               >
                 Apply to form
               </button>
-              } @else {
-              <p class="mt-1 text-sm text-ink-600">
-                {{ suggestion.fallback_reason }}
-              </p>
-              }
             </div>
-            }
+            } }
           </div>
           <div class="grid gap-3 sm:grid-cols-2">
             <div>

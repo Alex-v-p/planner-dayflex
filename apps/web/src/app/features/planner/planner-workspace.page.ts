@@ -358,6 +358,7 @@ export class PlannerWorkspacePage implements OnInit {
   private pendingRouteEditorIntent: RouteEditorIntent | null = null;
   private handledRouteEditorIntentKey: string | null = null;
   private taskSuggestionRequestVersion = 0;
+  private interruptionSuggestionRequestVersion = 0;
 
   ngOnInit(): void {
     const routeDates = this.route.queryParamMap.pipe(
@@ -1061,7 +1062,7 @@ export class PlannerWorkspacePage implements OnInit {
             this.interruptionForm.set(emptyInterruptionForm(day.time_zone));
             this.interruptionState.set({
               status: "success",
-              message: `Revised schedule snapshot v${snapshot.version} is now shown.`,
+              message: "Your revised plan is now shown.",
             });
           }
         },
@@ -1076,6 +1077,7 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected suggestInterruption(): void {
+    const requestVersion = ++this.interruptionSuggestionRequestVersion;
     const text = this.interruptionAiText().trim();
     if (text === "") {
       this.interruptionSuggestion.set({
@@ -1104,6 +1106,9 @@ export class PlannerWorkspacePage implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
+          if (requestVersion !== this.interruptionSuggestionRequestVersion) {
+            return;
+          }
           this.interruptionSuggestion.set({
             status: result.status === "suggested" ? "ready" : "fallback",
             message: suggestionMessage(result),
@@ -1111,6 +1116,9 @@ export class PlannerWorkspacePage implements OnInit {
           });
         },
         error: () => {
+          if (requestVersion !== this.interruptionSuggestionRequestVersion) {
+            return;
+          }
           this.interruptionSuggestion.set({
             status: "fallback",
             message: fallbackMessage("service_unavailable"),
@@ -2161,6 +2169,7 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   private resetInterruptionSuggestion(): void {
+    this.interruptionSuggestionRequestVersion += 1;
     this.interruptionSuggestion.set({
       status: "idle",
       message: "",
