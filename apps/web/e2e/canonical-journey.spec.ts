@@ -199,7 +199,7 @@ test("canonical recovery journey works with a stubbed API", async ({
   await expect(
     page
       .locator("[aria-labelledby='recovery-title']")
-      .getByText("Generated schedule snapshot v1."),
+      .getByText("Plan ready. Your day is up to date."),
   ).toBeVisible();
   await expect(page.getByTestId("daily-timeline")).toContainText("Free");
 
@@ -232,7 +232,7 @@ test("canonical recovery journey works with a stubbed API", async ({
     page.getByRole("heading", { name: "Week calendar" }),
   ).toBeVisible();
   await expect(page.getByTestId("week-calendar-surface")).toContainText(
-    "Plan v2",
+    "Plan ready",
   );
 
   await page.getByRole("link", { name: "Open planner month overview" }).click();
@@ -249,10 +249,10 @@ test("canonical recovery journey works with a stubbed API", async ({
     "1 useful window",
   );
   await expect(
-    page.getByTestId("free-time-results").getByText("Source: Snapshot v2"),
+    page.getByTestId("free-time-results").getByText("Plan: Current plan"),
   ).toBeVisible();
   await expect(page.getByText("2 hr")).toBeVisible();
-  await expect(page.getByText("Snapshot v2")).toBeVisible();
+  await expect(page.getByText("Current plan").first()).toBeVisible();
 });
 
 class StubbedPlannerApi {

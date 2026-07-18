@@ -19,8 +19,7 @@
         Free-time finder
       </h1>
       <p class="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
-        Find useful free-time windows that already exist in saved daily schedule
-        snapshots.
+        Find useful free-time windows that already exist in saved daily plans.
       </p>
     </div>
 
@@ -116,7 +115,7 @@
   >
     <p class="text-sm font-medium text-ink-950">Loading free-time windows</p>
     <p class="mt-2 text-sm leading-6 text-ink-600">
-      Reading current saved snapshots for the selected date range.
+      Reading current saved plans for the selected date range.
     </p>
   </section>
   } @else if (view.status === "permission") {
@@ -179,7 +178,7 @@
         </h2>
         <p class="mt-1 text-sm leading-6 text-ink-600">
           Minimum window: {{ formatDuration(result.minimum_minutes) }}. Results
-          are grouped by saved daily snapshots.
+          are grouped by saved daily plans.
         </p>
       </div>
       <pdf-status-chip
@@ -245,7 +244,7 @@
                     formatTime(window.end_at, window.time_zone) }}
                   </p>
                   <p class="mt-1 text-xs leading-5 text-ink-600">
-                    Source: {{ formatSource(window) }}
+                    Plan: {{ formatSource(window) }}
                   </p>
                 </div>
                 <pdf-status-chip
@@ -260,8 +259,8 @@
           <p
             class="mt-4 rounded-md border border-dashed border-mist-300 p-3 text-sm leading-6 text-ink-600"
           >
-            Source: {{ formatSource(day) }}. No useful free-time window meets
-            this search.
+            Plan: {{ formatSource(day) }}. No useful free-time window meets this
+            search.
           </p>
           } @else if (isEmptyDay(day)) {
           <p

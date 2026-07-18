@@ -115,9 +115,9 @@ test.describe("responsive visual QA @visual", () => {
       "Useful free time",
     );
     await expect(page.getByTestId("week-calendar-surface")).toContainText(
-      "Plan v2",
+      "Plan ready",
     );
-    await assertStatusCueHasAccessibleText(page, "Plan v2");
+    await assertStatusCueHasAccessibleText(page, "Plan ready");
     await assertFocusVisible(
       page,
       page

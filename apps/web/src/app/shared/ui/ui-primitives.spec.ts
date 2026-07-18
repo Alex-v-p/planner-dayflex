@@ -130,7 +130,7 @@ describe("shared UI primitives", () => {
     expect(text(chip)).toContain("S");
     expect(text(chip)).toContain("Split");
     expect(element(chip, "span")?.getAttribute("aria-label")).toBe(
-      "Split: Split across available windows",
+      "Split: Split around available time",
     );
   });
 
