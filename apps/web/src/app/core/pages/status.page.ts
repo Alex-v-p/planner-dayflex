@@ -6,6 +6,6 @@ import { Component } from "@angular/core";
   templateUrl: "./status.page.html",
 })
 export class StatusPage {
-  protected readonly plannerStatus = "Ready";
-  protected readonly connectionStatus = "Ready to load saved days";
+  protected readonly plannerPageStatus = "Page available";
+  protected readonly savedDaysStatus = "Checked when you open the planner";
 }

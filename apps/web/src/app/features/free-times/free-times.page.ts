@@ -268,7 +268,7 @@ export class FreeTimesPage implements OnInit {
       case "has_free_time":
         return this.freeWindowCountLabel(day.windows.length);
       case "no_generated_plan":
-        return "No generated plan";
+        return "No current plan";
       case "no_useful_free_time":
         return "No useful free time";
     }

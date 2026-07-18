@@ -324,7 +324,7 @@ describe("rendered planner overviews", () => {
     expect(text(fixture)).toContain("Saved daily plans only.");
     expect(text(fixture)).toContain("Timed week grid");
     expect(text(fixture)).toContain("Europe/Brussels");
-    expect(text(fixture)).toContain("Day bounds 08:00-12:00");
+    expect(text(fixture)).toContain("Planning hours 08:00-12:00");
     expect(text(fixture)).toContain("Selected day");
     expect(text(fixture)).toContain("Selected date");
     expect(text(fixture)).toContain("Week totals");

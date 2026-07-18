@@ -300,7 +300,7 @@ export class PlannerOverviewPage implements OnInit {
   }
 
   protected weekMetaLabel(week: PlanningWeekDetail): string {
-    return `${this.weekTimeZoneLabel(week)} - Day bounds ${this.weekBoundsLabel(week)}`;
+    return `${this.weekTimeZoneLabel(week)} - Planning hours ${this.weekBoundsLabel(week)}`;
   }
 
   protected fallbackRangeLabel(anchorDate: string): string {

@@ -1019,7 +1019,7 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
     expect(text(fixture)).toContain("Day planner");
     expect(text(fixture)).toContain("Day timeline");
-    expect(text(fixture)).toContain("Day bounds 08:00-18:00");
+    expect(text(fixture)).toContain("Planning hours 08:00-18:00");
     expect(text(fixture)).toContain("Write report");
     expect(text(fixture)).toContain("Team meeting");
     expect(text(fixture)).toContain("Buffer");
@@ -1100,7 +1100,7 @@ describe("rendered planner workspace", () => {
     expect(dayHeaderText(fixture)).toContain("June 22, 2026");
     expect(
       query(fixture, "[aria-labelledby='timeline-title']")?.textContent,
-    ).toContain("Day bounds 08:00-18:00");
+    ).toContain("Planning hours 08:00-18:00");
     expect(dayHeaderSummaryText(fixture)).toContain("Plan");
     expect(dayHeaderSummaryText(fixture)).toContain("Plan ready");
     expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");

@@ -137,7 +137,7 @@ test.describe("responsive visual QA @visual", () => {
       "1 useful window",
     );
     await expect(page.getByTestId("free-time-results")).toContainText(
-      "No generated plan",
+      "No current plan",
     );
     await expect(page.getByTestId("free-time-results")).toContainText(
       "No useful free time",

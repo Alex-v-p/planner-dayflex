@@ -127,9 +127,9 @@ describe("rendered free-time finder", () => {
     expect(text(fixture)).not.toContain("Day day-1");
     expect(text(fixture)).not.toContain("Snapshot snapshot-1");
     expect(text(fixture)).not.toContain("Item item-1");
-    expect(text(fixture)).toContain("No generated plan");
+    expect(text(fixture)).toContain("No current plan");
     expect(text(fixture)).toContain(
-      "No generated plan is available for comparison on this date.",
+      "No current plan is available for comparison on this date.",
     );
     expect(text(fixture)).toContain("Jul 3, 2026");
     expect(text(fixture)).toContain("No saved day");
@@ -267,10 +267,10 @@ describe("rendered free-time finder", () => {
     );
 
     expect(text(fixture)).toContain(
-      "No designated free-time windows meet this minimum",
+      "No useful free-time windows meet this minimum",
     );
     expect(text(fixture)).toContain("No useful free time");
-    expect(text(fixture)).not.toContain("No generated plan");
+    expect(text(fixture)).not.toContain("No current plan");
   });
 
   it("submits filters through query parameters", async () => {
