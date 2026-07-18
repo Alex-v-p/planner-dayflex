@@ -713,6 +713,93 @@ def test_auto_refresh_scheduler_failure_rolls_back_mutation(
         assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
 
 
+def test_fixed_event_update_auto_refresh_scheduler_failure_rolls_back_mutation(
+    client: TestClient, database: Database
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = create_day(client)
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        free_time_result("2026-07-01", "08:00:00", "18:00:00")
+    )
+    created = client.post(
+        f"/planning/days/{day['id']}/fixed-events",
+        json=fixed_event_payload("Focus", "2026-07-01T09:00:00+02:00", "10:00:00"),
+    )
+    first_snapshot = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    event_id = created.json()["fixed_event"]["id"]
+    client.app.state.scheduler_client = FailingSchedulerClient(
+        SchedulerUnavailableError("down")
+    )
+
+    failed = client.put(
+        f"/planning/days/{day['id']}/fixed-events/{event_id}",
+        json=fixed_event_payload(
+            "Focus moved", "2026-07-01T10:00:00+02:00", "11:00:00"
+        ),
+    )
+    listed = client.get(f"/planning/days/{day['id']}/fixed-events")
+
+    assert failed.status_code == 503
+    assert failed.json() == {
+        "detail": "The scheduler is unavailable. Please try again shortly."
+    }
+    assert listed.status_code == 200
+    assert listed.json() == [
+        {
+            **created.json()["fixed_event"],
+            "created_at": listed.json()[0]["created_at"],
+            "updated_at": listed.json()[0]["updated_at"],
+        }
+    ]
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, day["id"])
+        fixed_event = session.get(FixedEvent, event_id)
+        assert planning_day is not None
+        assert fixed_event is not None
+        assert planning_day.current_snapshot_id == first_snapshot["id"]
+        assert fixed_event.title == "Focus"
+        assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
+
+
+def test_fixed_event_delete_auto_refresh_scheduler_failure_rolls_back_mutation(
+    client: TestClient, database: Database
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = create_day(client)
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        free_time_result("2026-07-01", "08:00:00", "18:00:00")
+    )
+    created = client.post(
+        f"/planning/days/{day['id']}/fixed-events",
+        json=fixed_event_payload("Focus", "2026-07-01T09:00:00+02:00", "10:00:00"),
+    )
+    first_snapshot = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    event_id = created.json()["fixed_event"]["id"]
+    client.app.state.scheduler_client = FailingSchedulerClient(
+        SchedulerUnavailableError("down")
+    )
+
+    failed = client.delete(f"/planning/days/{day['id']}/fixed-events/{event_id}")
+    listed = client.get(f"/planning/days/{day['id']}/fixed-events")
+
+    assert failed.status_code == 503
+    assert failed.json() == {
+        "detail": "The scheduler is unavailable. Please try again shortly."
+    }
+    assert listed.status_code == 200
+    assert [event["title"] for event in listed.json()] == ["Focus"]
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, day["id"])
+        fixed_event = session.get(FixedEvent, event_id)
+        assert planning_day is not None
+        assert fixed_event is not None
+        assert planning_day.current_snapshot_id == first_snapshot["id"]
+        assert fixed_event.title == "Focus"
+        assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
+
+
 @pytest.mark.parametrize(
     ("scheduler_error,status_code"),
     [
@@ -752,6 +839,107 @@ def test_task_auto_refresh_scheduler_failures_roll_back_mutation(
         assert planning_day is not None
         assert planning_day.current_snapshot_id == first_snapshot["id"]
         assert session.scalars(select(Task)).all() == []
+        assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
+
+
+def test_task_update_auto_refresh_scheduler_failure_rolls_back_mutation(
+    client: TestClient, database: Database
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = create_day(client)
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Write report",
+            "estimated_minutes": 90,
+            "priority": 5,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        free_time_result("2026-07-01", "08:00:00", "18:00:00")
+    )
+    first_snapshot = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    client.app.state.scheduler_client = FailingSchedulerClient(
+        SchedulerUnavailableError("down")
+    )
+
+    failed = client.put(
+        f"/planning/tasks/{task['id']}?refresh_planning_day_id={day['id']}",
+        json={
+            "title": "Write shorter report",
+            "estimated_minutes": 60,
+            "priority": 4,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    )
+    listed = client.get("/planning/tasks")
+
+    assert failed.status_code == 503
+    assert failed.json() == {
+        "detail": "The scheduler is unavailable. Please try again shortly."
+    }
+    assert listed.status_code == 200
+    assert [task["title"] for task in listed.json()] == ["Write report"]
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, day["id"])
+        persisted_task = session.get(Task, task["id"])
+        assert planning_day is not None
+        assert persisted_task is not None
+        assert planning_day.current_snapshot_id == first_snapshot["id"]
+        assert persisted_task.title == "Write report"
+        assert persisted_task.estimated_minutes == 90
+        assert persisted_task.priority == 5
+        assert persisted_task.status == "active"
+        assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
+
+
+def test_task_delete_auto_refresh_scheduler_failure_rolls_back_mutation(
+    client: TestClient, database: Database
+) -> None:
+    register(client, "alice")
+    save_canonical_inputs(client)
+    day = create_day(client)
+    task = client.post(
+        "/planning/tasks",
+        json={
+            "title": "Write report",
+            "estimated_minutes": 90,
+            "priority": 5,
+            "splitting_allowed": False,
+            "min_segment_minutes": None,
+        },
+    ).json()
+    client.app.state.scheduler_client = StaticResultSchedulerClient(
+        free_time_result("2026-07-01", "08:00:00", "18:00:00")
+    )
+    first_snapshot = client.post(f"/planning/days/{day['id']}/generate-plan").json()
+    client.app.state.scheduler_client = FailingSchedulerClient(
+        SchedulerUnavailableError("down")
+    )
+
+    failed = client.delete(
+        f"/planning/tasks/{task['id']}?refresh_planning_day_id={day['id']}"
+    )
+    listed = client.get("/planning/tasks")
+
+    assert failed.status_code == 503
+    assert failed.json() == {
+        "detail": "The scheduler is unavailable. Please try again shortly."
+    }
+    assert listed.status_code == 200
+    assert [task["title"] for task in listed.json()] == ["Write report"]
+    with next(database.session()) as session:
+        planning_day = session.get(PlanningDay, day["id"])
+        persisted_task = session.get(Task, task["id"])
+        assert planning_day is not None
+        assert persisted_task is not None
+        assert planning_day.current_snapshot_id == first_snapshot["id"]
+        assert persisted_task.title == "Write report"
+        assert persisted_task.status == "active"
         assert len(session.scalars(select(ScheduleSnapshot)).all()) == 1
 
 
