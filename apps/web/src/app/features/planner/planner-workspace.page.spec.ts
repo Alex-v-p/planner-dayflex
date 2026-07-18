@@ -1561,6 +1561,12 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain("Create from calendar");
+    expect(text(fixture)).toContain(
+      "After you save it, the visible plan normally refreshes automatically.",
+    );
+    expect(text(fixture)).toContain(
+      "Generate plan is still available when there is no current plan or scheduling fails.",
+    );
     expect(text(fixture)).toContain("Fixed event");
     expect(text(fixture)).toContain("Flexible task");
     buttonByText(fixture, "Fixed event", "Calendar create").click();
@@ -2865,10 +2871,10 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
-      "We could not save progress. Your details are still here; try again when the API is available.",
+      "The scheduler is unavailable right now, so progress was not saved or refreshed. Your details are still here; try again when scheduling is available.",
     );
     expect(announcement(fixture)).toContain(
-      "We could not save progress. Your details are still here; try again when the API is available.",
+      "The scheduler is unavailable right now, so progress was not saved or refreshed. Your details are still here; try again when scheduling is available.",
     );
     expect((query(fixture, "#progress-task") as HTMLSelectElement).value).toBe(
       "task-study",
@@ -2901,8 +2907,33 @@ describe("rendered planner workspace", () => {
         },
       },
     ]);
-    expect(text(fixture)).toContain("Progress saved.");
-    expect(announcement(fixture)).toContain("Progress saved.");
+    expect(text(fixture)).toContain("Progress saved");
+    expect(announcement(fixture)).toContain("Progress saved");
+  });
+
+  it("explains rolled-back progress validation failures without implying saved progress changed", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [task, studyTask],
+      snapshot: canonicalSnapshot,
+    });
+    plannerApi.progressError = new HttpErrorResponse({ status: 422 });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#progress-minutes", "60");
+    setInput(fixture, "#progress-recorded", "2026-07-04T14:00");
+    setInput(fixture, "#progress-time-zone", "Europe/Brussels");
+    const progressTask = query(fixture, "#progress-task") as HTMLSelectElement;
+    progressTask.value = "task-study";
+    progressTask.dispatchEvent(new Event("change", { bubbles: true }));
+    formByLabel(fixture, "Record task progress").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "Progress was not saved or refreshed. Review the minutes and recorded time, then try again.",
+    );
+    expect(inputValue(fixture, "#progress-minutes")).toBe("60");
   });
 
   it("keeps interruption details available for retry when rescheduling fails", async () => {
@@ -4039,6 +4070,103 @@ describe("rendered planner workspace", () => {
     confirm.mockRestore();
   });
 
+  it("does not apply a stale fixed-event response after the user changes days", async () => {
+    const staleFixedEventResponse = new Subject<FixedEventMutationResult>();
+    const julyFiveEvent: FixedEvent = {
+      ...fixedEvent,
+      id: "event-july-5",
+      title: "July 5 planning",
+      start_at: "2026-07-05T09:00:00+02:00",
+      end_at: "2026-07-05T10:00:00+02:00",
+    };
+    plannerApi.result = workspaceData({ snapshot });
+    plannerApi.fixedEventMutationResponse = staleFixedEventResponse;
+    plannerApi.responses.set(
+      "2026-07-05",
+      of(
+        workspaceData({
+          selectedDate: "2026-07-05",
+          fixedEvents: [julyFiveEvent],
+          snapshot: null,
+        }),
+      ),
+    );
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openExistingFixedEventEditor(fixture);
+    setInput(fixture, "#fixed-event-title", "Stale July 4 event");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    routeParams.next(convertToParamMap({ date: "2026-07-05" }));
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    staleFixedEventResponse.next({
+      ...fixedEventMutationResult,
+      fixed_event: {
+        ...fixedEvent,
+        title: "Stale July 4 event",
+      },
+    });
+    staleFixedEventResponse.complete();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("July 5, 2026");
+    expect(text(fixture)).toContain("July 5 planning");
+    expect(text(fixture)).not.toContain("Stale July 4 event");
+    expect(text(fixture)).not.toContain("Input saved and the visible plan");
+  });
+
+  it("keeps an unsaved task edit open when auto-refresh cannot build a schedule", async () => {
+    plannerApi.result = workspaceData({ snapshot });
+    plannerApi.taskMutationError = new HttpErrorResponse({
+      status: 422,
+      statusText: "Unprocessable Entity",
+      error: { detail: "no valid schedule" },
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openExistingTaskEditor(fixture);
+    setInput(fixture, "#task-title", "Unsaved task edit");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "The change was not saved or refreshed. Your details are still here; adjust them and try Save or Add again.",
+    );
+    expect(text(fixture)).not.toContain("retry Generate plan");
+    expect(inputValue(fixture, "#task-title")).toBe("Unsaved task edit");
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
+  });
+
+  it("keeps an unsaved fixed-event edit open when scheduling is unavailable", async () => {
+    plannerApi.result = workspaceData({ snapshot });
+    plannerApi.fixedEventMutationError = new HttpErrorResponse({
+      status: 503,
+      statusText: "Service Unavailable",
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openExistingFixedEventEditor(fixture);
+    setInput(fixture, "#fixed-event-title", "Unsaved event edit");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "The scheduler is unavailable right now, so the change was not saved or refreshed. Your details are still here; try Save or Add again when scheduling is available.",
+    );
+    expect(text(fixture)).not.toContain("retry when scheduling is available");
+    expect(inputValue(fixture, "#fixed-event-title")).toBe(
+      "Unsaved event edit",
+    );
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
+  });
+
   it("surfaces fixed-event API conflicts inline without reloading", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     plannerApi.fixedEventMutationError = new HttpErrorResponse({
@@ -4206,6 +4334,8 @@ class FakePlannerApi {
   readonly explainedDecisions: unknown[] = [];
   taskMutationError: unknown = null;
   fixedEventMutationError: unknown = null;
+  fixedEventMutationResponse: Observable<FixedEventMutationResult> | null =
+    null;
   generateError: unknown = null;
   generateResponse: Observable<ScheduleSnapshot> | null = null;
   progressError: unknown = null;
@@ -4284,6 +4414,9 @@ class FakePlannerApi {
     if (this.fixedEventMutationError !== null) {
       return throwError(() => this.fixedEventMutationError);
     }
+    if (this.fixedEventMutationResponse !== null) {
+      return this.fixedEventMutationResponse;
+    }
     return of(
       fixedEventMutationResultFor(this.result, {
         ...fixedEvent,
@@ -4300,6 +4433,9 @@ class FakePlannerApi {
     this.updatedFixedEvents.push({ planningDayId, fixedEventId, request });
     if (this.fixedEventMutationError !== null) {
       return throwError(() => this.fixedEventMutationError);
+    }
+    if (this.fixedEventMutationResponse !== null) {
+      return this.fixedEventMutationResponse;
     }
     return of(
       fixedEventMutationResultFor(this.result, {

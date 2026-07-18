@@ -139,6 +139,7 @@ type GeneratePlanState =
   | { readonly status: "error"; readonly message: string };
 
 type RecoveryMutationState = GeneratePlanState;
+type MutationApplyResult = "applied" | "reload" | "stale";
 type TimelineRecoveryState = "moved" | "split";
 
 type SuggestionState<T> =
@@ -982,12 +983,13 @@ export class PlannerWorkspacePage implements OnInit {
       .subscribe({
         next: (result) => {
           this.busyAction.set(null);
-          this.applyProgressMutationResult(result);
-          this.progressForm.set(emptyProgressForm(day.time_zone));
-          this.progressState.set({
-            status: "success",
-            message: mutationSuccessMessage(result),
-          });
+          if (this.applyProgressMutationResult(result)) {
+            this.progressForm.set(emptyProgressForm(day.time_zone));
+            this.progressState.set({
+              status: "success",
+              message: mutationSuccessMessage(result),
+            });
+          }
         },
         error: (error: unknown) => {
           this.busyAction.set(null);
@@ -1916,28 +1918,44 @@ export class PlannerWorkspacePage implements OnInit {
 
   private applyProgressMutationResult(
     result: TaskProgressMutationResult,
-  ): void {
+  ): boolean {
+    const planApplied = this.applyRefreshedPlan(
+      result.planning_day,
+      result.snapshot,
+    );
+    if (!planApplied) {
+      return false;
+    }
     this.applyProgress(result.progress);
-    this.applyRefreshedPlan(result.planning_day, result.snapshot);
+    return true;
   }
 
-  private applyMutationResult(action: string, result: unknown): boolean {
+  private applyMutationResult(
+    action: string,
+    result: unknown,
+  ): MutationApplyResult {
     if (isTaskMutationResult(result)) {
-      this.applyTaskMutationResult(action, result);
-      return true;
+      return this.applyTaskMutationResult(action, result) ? "applied" : "stale";
     }
     if (isFixedEventMutationResult(result)) {
-      this.applyFixedEventMutationResult(action, result);
-      return true;
+      return this.applyFixedEventMutationResult(action, result)
+        ? "applied"
+        : "stale";
     }
-    return false;
+    return "reload";
   }
 
   private applyTaskMutationResult(
     action: string,
     result: TaskMutationResult,
-  ): void {
-    this.applyRefreshedPlan(result.planning_day, result.snapshot);
+  ): boolean {
+    const planApplied = this.applyRefreshedPlan(
+      result.planning_day,
+      result.snapshot,
+    );
+    if (!planApplied) {
+      return false;
+    }
     this.state.update((current) => {
       if (current.status !== "ready") {
         return current;
@@ -1957,13 +1975,20 @@ export class PlannerWorkspacePage implements OnInit {
         },
       };
     });
+    return true;
   }
 
   private applyFixedEventMutationResult(
     action: string,
     result: FixedEventMutationResult,
-  ): void {
-    this.applyRefreshedPlan(result.planning_day, result.snapshot);
+  ): boolean {
+    const planApplied = this.applyRefreshedPlan(
+      result.planning_day,
+      result.snapshot,
+    );
+    if (!planApplied) {
+      return false;
+    }
     this.state.update((current) => {
       if (current.status !== "ready") {
         return current;
@@ -1985,20 +2010,25 @@ export class PlannerWorkspacePage implements OnInit {
         },
       };
     });
+    return true;
   }
 
   private applyRefreshedPlan(
     planningDay: PlannerWorkspaceData["day"],
     snapshot: ScheduleSnapshot | null,
-  ): void {
+  ): boolean {
     if (planningDay === null) {
-      return;
+      return false;
+    }
+    const current = this.state();
+    if (
+      current.status !== "ready" ||
+      current.selectedDate !== planningDay.local_date
+    ) {
+      return false;
     }
     this.state.update((current) => {
-      if (
-        current.status !== "ready" ||
-        current.selectedDate !== planningDay.local_date
-      ) {
+      if (current.status !== "ready") {
         return current;
       }
       return {
@@ -2012,6 +2042,7 @@ export class PlannerWorkspacePage implements OnInit {
       };
     });
     this.selectedScheduleItemId.set(snapshot?.items[0]?.id ?? null);
+    return true;
   }
 
   private setExplanationState(
@@ -2086,7 +2117,7 @@ export class PlannerWorkspacePage implements OnInit {
       next: (result) => {
         this.busyAction.set(null);
         this.pendingMutationFocus = mutationFocusTarget(action, formKind);
-        const applied = this.applyMutationResult(action, result);
+        const applyResult = this.applyMutationResult(action, result);
         if (formKind === "task") {
           this.resetTaskForm();
           this.closeTaskEditor({ restoreFocus: false });
@@ -2094,13 +2125,13 @@ export class PlannerWorkspacePage implements OnInit {
           this.resetFixedEventForm();
           this.closeFixedEventEditor({ restoreFocus: false });
         }
-        if (applied) {
+        if (applyResult === "applied") {
           this.inputMutationState.set({
             status: "success",
             message: mutationSuccessMessage(result),
           });
           this.restorePendingMutationFocus();
-        } else {
+        } else if (applyResult === "reload") {
           this.focusSelector(this.pendingMutationFocus.loadingSelector);
           this.reload();
         }
@@ -3035,10 +3066,10 @@ function mutationErrorMessage(error: unknown): string {
       if (validationDetails(error.error).length > 0) {
         return "The API could not accept those details. Review the form and try again.";
       }
-      return "The change could not produce a schedule. Saved inputs are unchanged; review the day or retry Generate plan.";
+      return "The change was not saved or refreshed. Your details are still here; adjust them and try Save or Add again.";
     }
     if (error.status === 503) {
-      return "The scheduler is unavailable right now. Saved inputs are unchanged; retry when scheduling is available.";
+      return "The scheduler is unavailable right now, so the change was not saved or refreshed. Your details are still here; try Save or Add again when scheduling is available.";
     }
     if (error.status === 401 || error.status === 403) {
       return "Your session cannot save this change. Sign in again before continuing.";
@@ -3122,7 +3153,10 @@ function progressErrorMessage(error: unknown): string {
       return "That progress would exceed the task estimate. Refresh the workspace if another update was saved.";
     }
     if (error.status === 422) {
-      return "The API could not accept that progress. Review the minutes and recorded time.";
+      return "Progress was not saved or refreshed. Review the minutes and recorded time, then try again.";
+    }
+    if (error.status === 503) {
+      return "The scheduler is unavailable right now, so progress was not saved or refreshed. Your details are still here; try again when scheduling is available.";
     }
     if (error.status === 401 || error.status === 403) {
       return "Your session cannot save progress. Sign in again before continuing.";
