@@ -55,7 +55,7 @@ export const PLANNER_STATUS_TREATMENTS: Readonly<
   designated_free_time: {
     label: "Free",
     cue: "O",
-    description: "Designated free time",
+    description: "Useful free time",
     chipClass: "border-sky-500 bg-sky-50 text-sky-800",
     markerClass: "border-sky-500 bg-sky-50 text-sky-800",
   },
