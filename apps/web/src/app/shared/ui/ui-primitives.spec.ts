@@ -116,8 +116,8 @@ describe("shared UI primitives", () => {
     );
     expect(text(marker)).toContain("O");
     expect(text(marker)).toContain("Free");
-    expect(element(marker, "span")?.getAttribute("aria-label")).toContain(
-      "Designated free time",
+    expect(element(marker, "span")?.getAttribute("aria-label")).toBe(
+      "Free: Useful free time",
     );
   });
 
@@ -130,7 +130,7 @@ describe("shared UI primitives", () => {
     expect(text(chip)).toContain("S");
     expect(text(chip)).toContain("Split");
     expect(element(chip, "span")?.getAttribute("aria-label")).toBe(
-      "Split: Split across available windows",
+      "Split: Split around available time",
     );
   });
 

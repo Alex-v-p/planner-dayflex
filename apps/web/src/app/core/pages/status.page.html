@@ -1,17 +1,15 @@
 <section class="rounded-lg border border-mist-200 bg-white p-6 shadow-sm">
   <h1 class="text-2xl font-semibold tracking-normal text-ink-950">
-    Application status
+    Planner status
   </h1>
   <dl class="mt-6 grid gap-4 sm:grid-cols-2">
     <div>
-      <dt class="text-sm font-medium text-ink-600">API base URL</dt>
-      <dd class="mt-1 break-words font-mono text-sm text-ink-950">
-        {{ apiBaseUrl }}
-      </dd>
+      <dt class="text-sm font-medium text-ink-600">Planner page</dt>
+      <dd class="mt-1 text-sm text-ink-950">{{ plannerPageStatus }}</dd>
     </div>
     <div>
-      <dt class="text-sm font-medium text-ink-600">Connection</dt>
-      <dd class="mt-1 text-sm text-ink-950">Application API</dd>
+      <dt class="text-sm font-medium text-ink-600">Saved days</dt>
+      <dd class="mt-1 text-sm text-ink-950">{{ savedDaysStatus }}</dd>
     </div>
   </dl>
 </section>

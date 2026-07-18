@@ -23,7 +23,7 @@ export const routes: Routes = [
   {
     path: "status",
     component: StatusPage,
-    title: "Application status",
+    title: "Planner status",
   },
   {
     path: "sign-in",

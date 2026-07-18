@@ -97,7 +97,7 @@ describe("free-times API contract", () => {
 });
 
 describe("rendered free-time finder", () => {
-  it("renders windows, source snapshot metadata, status groups, and day links", async () => {
+  it("renders windows, plan source metadata, status groups, and day links", async () => {
     const routeParams = new BehaviorSubject(
       convertToParamMap({
         start_date: "2026-07-01",
@@ -118,20 +118,18 @@ describe("rendered free-time finder", () => {
       },
     ]);
     expect(text(fixture)).toContain("Free-time finder");
-    expect(text(fixture)).toContain(
-      "Results are grouped by saved daily snapshots",
-    );
+    expect(text(fixture)).toContain("Results are grouped by saved daily plans");
     expect(text(fixture)).toContain("1 useful window");
     expect(text(fixture)).not.toContain("1 useful windows");
     expect(text(fixture)).toContain("45 min");
-    expect(text(fixture)).toContain("Snapshot v2");
-    expect(text(fixture)).toContain("Source:");
+    expect(text(fixture)).toContain("Current plan");
+    expect(text(fixture)).toContain("Plan:");
     expect(text(fixture)).not.toContain("Day day-1");
     expect(text(fixture)).not.toContain("Snapshot snapshot-1");
     expect(text(fixture)).not.toContain("Item item-1");
-    expect(text(fixture)).toContain("No generated plan");
+    expect(text(fixture)).toContain("No current plan");
     expect(text(fixture)).toContain(
-      "No generated plan is available for comparison on this date.",
+      "No current plan is available for comparison on this date.",
     );
     expect(text(fixture)).toContain("Jul 3, 2026");
     expect(text(fixture)).toContain("No saved day");
@@ -151,7 +149,7 @@ describe("rendered free-time finder", () => {
     expect(
       elementByAriaLabel(
         fixture,
-        "No useful free time: Current snapshot without a useful free-time window",
+        "No useful free time: Current plan without a useful free-time window",
       ),
     ).not.toBeNull();
     expect(
@@ -226,12 +224,12 @@ describe("rendered free-time finder", () => {
     expect(firstDay?.textContent).toContain("Jul 1, 2026");
     expect(firstDay?.textContent).toContain("45 min");
     expect(firstDay?.textContent).toContain("1 hr");
-    expect(firstDay?.textContent).toContain("Snapshot v2");
+    expect(firstDay?.textContent).toContain("Current plan");
     expect(firstDay?.textContent).not.toContain("item-1");
     expect(firstDay?.textContent).not.toContain("item-2");
     expect(secondDay?.textContent).toContain("Jul 2, 2026");
     expect(secondDay?.textContent).toContain("30 min");
-    expect(secondDay?.textContent).toContain("Snapshot v4");
+    expect(secondDay?.textContent).toContain("Current plan");
     expect(secondDay?.textContent).not.toContain("day-2");
     expect(secondDay?.textContent).not.toContain("snapshot-2");
     expect(
@@ -269,10 +267,10 @@ describe("rendered free-time finder", () => {
     );
 
     expect(text(fixture)).toContain(
-      "No designated free-time windows meet this minimum",
+      "No useful free-time windows meet this minimum",
     );
     expect(text(fixture)).toContain("No useful free time");
-    expect(text(fixture)).not.toContain("No generated plan");
+    expect(text(fixture)).not.toContain("No current plan");
   });
 
   it("submits filters through query parameters", async () => {

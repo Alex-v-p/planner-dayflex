@@ -968,7 +968,7 @@ describe("planner workspace API contract", () => {
         explanation:
           "Write report moved because the interruption changed the available windows.",
         deterministic_reason:
-          "Write report was moved after reported unavailable time.",
+          "Write report moved later after unavailable time was added.",
         reason_code: "moved_after_interruption",
         fallback_reason: null,
         error_code: null,
@@ -1019,7 +1019,7 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
     expect(text(fixture)).toContain("Day planner");
     expect(text(fixture)).toContain("Day timeline");
-    expect(text(fixture)).toContain("Day bounds 08:00-18:00");
+    expect(text(fixture)).toContain("Planning hours 08:00-18:00");
     expect(text(fixture)).toContain("Write report");
     expect(text(fixture)).toContain("Team meeting");
     expect(text(fixture)).toContain("Buffer");
@@ -1029,17 +1029,17 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("Free");
     expect(text(fixture)).toContain("Designated Free Time");
     expect(text(fixture)).toContain("Planning inputs");
-    expect(text(fixture)).toContain("Snapshot");
-    expect(text(fixture)).toContain("v2");
+    expect(text(fixture)).toContain("Plan");
+    expect(text(fixture)).not.toContain("v2");
     expect(text(fixture)).toContain("Scheduled work");
     expect(text(fixture)).toContain("1 hr 30 min");
     expect(text(fixture)).toContain("Free time");
     expect(text(fixture)).toContain("2 hr");
-    expect(text(fixture)).toContain("Generate schedule");
+    expect(text(fixture)).toContain("Update plan");
     expect(dayHeaderText(fixture)).toContain("Generate plan");
-    expect(dayHeaderSummaryText(fixture)).toContain("Snapshot");
-    expect(dayHeaderSummaryText(fixture)).toContain("Revised plan v2");
-    expect(dayHeaderSummaryText(fixture)).toContain("v2");
+    expect(dayHeaderSummaryText(fixture)).toContain("Plan");
+    expect(dayHeaderSummaryText(fixture)).toContain("Revised plan");
+    expect(dayHeaderSummaryText(fixture)).not.toContain("v2");
     expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
     expect(dayHeaderSummaryText(fixture)).toContain("1 hr 30 min");
     expect(dayHeaderSummaryText(fixture)).toContain("Free time");
@@ -1055,12 +1055,10 @@ describe("rendered planner workspace", () => {
       ),
     ).toEqual([]);
     expect(text(fixture)).toContain(
-      "Write report was placed in the earliest valid window.",
+      "Write report fits in the first available time.",
     );
-    expect(text(fixture)).toContain("placed_in_earliest_valid_window");
-    expect(text(fixture)).toContain(
-      "A remaining useful window was kept as free time.",
-    );
+    expect(text(fixture)).toContain("Placed");
+    expect(text(fixture)).toContain("Useful free time remains in the plan.");
     expect(timeRulerText(fixture)).toContain("08:00");
     expect(timeRulerText(fixture)).toContain("09:00");
     expect(timeRulerText(fixture)).toContain("18:00");
@@ -1074,15 +1072,15 @@ describe("rendered planner workspace", () => {
     expect(announcement(fixture)).toContain("Planner workspace loaded");
   });
 
-  it("labels later generated snapshots without recovery evidence as generated plans", async () => {
+  it("labels later generated plans without recovery evidence as ready plans", async () => {
     plannerApi.result = workspaceData({ snapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    expect(dayHeaderSummaryText(fixture)).toContain("Generated plan v2");
+    expect(dayHeaderSummaryText(fixture)).toContain("Plan ready");
     expect(dayHeaderSummaryText(fixture)).not.toContain("Revised plan");
     expect(
       query(fixture, "[aria-labelledby='timeline-title']")?.textContent,
-    ).toContain("Generated plan v2 - 2 blocks");
+    ).toContain("Plan ready - 2 blocks");
   });
 
   it("renders the documented canonical initial day with accurate times and summary values", async () => {
@@ -1102,9 +1100,9 @@ describe("rendered planner workspace", () => {
     expect(dayHeaderText(fixture)).toContain("June 22, 2026");
     expect(
       query(fixture, "[aria-labelledby='timeline-title']")?.textContent,
-    ).toContain("Day bounds 08:00-18:00");
-    expect(dayHeaderSummaryText(fixture)).toContain("Snapshot");
-    expect(dayHeaderSummaryText(fixture)).toContain("Initial plan v1");
+    ).toContain("Planning hours 08:00-18:00");
+    expect(dayHeaderSummaryText(fixture)).toContain("Plan");
+    expect(dayHeaderSummaryText(fixture)).toContain("Plan ready");
     expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
     expect(dayHeaderSummaryText(fixture)).toContain("4 hr 15 min");
     expect(dayHeaderSummaryText(fixture)).toContain("Free time");
@@ -1131,9 +1129,7 @@ describe("rendered planner workspace", () => {
     ]);
     expect(blocks.every((block) => block.laneCount === 1)).toBe(true);
     expect(text(fixture)).toContain("Designated Free Time");
-    expect(text(fixture)).toContain(
-      "A remaining useful window was kept as free time.",
-    );
+    expect(text(fixture)).toContain("Useful free time remains in the plan.");
 
     scheduleBlockById(fixture, "canonical-free-item").dispatchEvent(
       new FocusEvent("focus", { bubbles: true }),
@@ -1150,7 +1146,7 @@ describe("rendered planner workspace", () => {
       ),
     );
     expect(selectedBlockDetailText(fixture)).toContain(
-      "A remaining useful window was kept as free time.",
+      "Useful free time remains in the plan.",
     );
   });
 
@@ -1177,7 +1173,7 @@ describe("rendered planner workspace", () => {
     const blocks = timelineBlocks(fixture);
 
     expect(dayHeaderText(fixture)).toContain("June 22, 2026");
-    expect(dayHeaderText(fixture)).toContain("Revised plan v2");
+    expect(dayHeaderText(fixture)).toContain("Revised plan");
     expect(dayHeaderSummaryText(fixture)).toContain("Scheduled work");
     expect(dayHeaderSummaryText(fixture)).toContain("2 hr");
     expect(dayHeaderSummaryText(fixture)).toContain("Free time");
@@ -1198,10 +1194,10 @@ describe("rendered planner workspace", () => {
     ]);
     expect(text(fixture)).toContain("Moved work");
     expect(text(fixture)).toContain(
-      "Study notes was moved after reported unavailable time.",
+      "Study notes moved later after unavailable time was added.",
     );
     expect(text(fixture)).toContain(
-      "Buy groceries was moved after reported unavailable time.",
+      "Buy groceries moved later after unavailable time was added.",
     );
     expect(text(fixture)).toContain("Completed history");
     expect(text(fixture)).toContain("Study notes - 1 hr recorded at");
@@ -1259,10 +1255,10 @@ describe("rendered planner workspace", () => {
     expect(selectedBlockDetailText(fixture)).toContain("Study notes");
     expect(selectedBlockDetailText(fixture)).toContain("Done");
     expect(selectedBlockDetailText(fixture)).toContain(
-      "Scheduled from the persisted snapshot.",
+      "This work is included in the current plan.",
     );
     expect(selectedBlockDetailText(fixture)).not.toContain(
-      "Study notes was moved after reported unavailable time.",
+      "Study notes moved later after unavailable time was added.",
     );
 
     scheduleBlockById(fixture, "canonical-groceries-moved-item").dispatchEvent(
@@ -1282,7 +1278,7 @@ describe("rendered planner workspace", () => {
       ),
     );
     expect(selectedBlockDetailText(fixture)).toContain(
-      "Buy groceries was moved after reported unavailable time.",
+      "Buy groceries moved later after unavailable time was added.",
     );
 
     scheduleBlockById(fixture, "canonical-revised-free-item").dispatchEvent(
@@ -1293,11 +1289,11 @@ describe("rendered planner workspace", () => {
     expect(selectedBlockDetailText(fixture)).toContain("Designated Free Time");
     expect(selectedBlockDetailText(fixture)).toContain("40 min");
     expect(selectedBlockDetailText(fixture)).toContain(
-      "A remaining useful window was kept as free time.",
+      "Useful free time remains in the plan.",
     );
   });
 
-  it("shows split task state from scheduler decisions without relying on color alone", async () => {
+  it("shows split task state from planning decisions without relying on color alone", async () => {
     const splitSnapshot: ScheduleSnapshot = {
       ...snapshot,
       id: "split-snapshot",
@@ -1347,13 +1343,13 @@ describe("rendered planner workspace", () => {
     expect(
       query(
         fixture,
-        "pdf-status-chip span[aria-label='Split: Split across available windows']",
+        "pdf-status-chip span[aria-label='Split: Split around available time']",
       ),
     ).not.toBeNull();
     expect(
       query(
         fixture,
-        "pdf-status-chip span[aria-label='Split: Moved after interruption']",
+        "pdf-status-chip span[aria-label='Split: Moved later after unavailable time']",
       ),
     ).toBeNull();
     expect(
@@ -1367,11 +1363,11 @@ describe("rendered planner workspace", () => {
 
     expect(selectedBlockDetailText(fixture)).toContain("Split");
     expect(selectedBlockDetailText(fixture)).toContain(
-      "Study notes was split across available windows.",
+      "Study notes was split around available time.",
     );
   });
 
-  it("shows read-only details and scheduler reasons for the focused schedule block", async () => {
+  it("shows read-only details and planner notes for the focused schedule block", async () => {
     plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
@@ -1393,7 +1389,7 @@ describe("rendered planner workspace", () => {
     expect(selectedBlockDetailText(fixture)).toContain("Task");
     expect(selectedBlockDetailText(fixture)).toContain("1 hr 30 min");
     expect(selectedBlockDetailText(fixture)).toContain(
-      "Write report was placed in the earliest valid window.",
+      "Write report fits in the first available time.",
     );
     expect(
       scheduleBlockByKind(fixture, "task").getAttribute("aria-pressed"),
@@ -1417,21 +1413,21 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("No active flexible tasks are saved yet.");
   });
 
-  it("renders saved inputs clearly when a planning day has no schedule snapshot", async () => {
+  it("renders saved inputs clearly when a planning day has no current plan", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
     expect(dayHeaderText(fixture)).toContain("July 4, 2026");
     expect(dayHeaderText(fixture)).toContain("Today");
     expect(inputValue(fixture, "#planner-date")).toBe(selectedDate);
-    expect(text(fixture)).toContain("No schedule snapshot yet.");
+    expect(text(fixture)).toContain("No plan yet.");
     expect(text(fixture)).toContain(
       "Saved inputs are still shown below so the day remains easy to review.",
     );
     expect(text(fixture)).toContain("Team meeting");
     expect(text(fixture)).toContain("Write report");
-    expect(text(fixture)).toContain("Snapshot");
-    expect(text(fixture)).toContain("None");
+    expect(text(fixture)).toContain("Plan");
+    expect(text(fixture)).toContain("No plan yet");
     expect(announcement(fixture)).toContain("Planner workspace loaded");
   });
 
@@ -1804,7 +1800,7 @@ describe("rendered planner workspace", () => {
     );
   });
 
-  it("offers day-grid create slots without a schedule snapshot and excludes saved fixed events", async () => {
+  it("offers day-grid create slots without a current plan and excludes saved fixed events", async () => {
     plannerApi.result = workspaceData({
       fixedEvents: [fixedEvent],
       snapshot: null,
@@ -1819,7 +1815,7 @@ describe("rendered planner workspace", () => {
       query(fixture, `[data-calendar-slot='slot-${selectedDate}-09:30']`),
     ).toBeNull();
     expect(calendarSlot(fixture, `slot-${selectedDate}-10:00`)).not.toBeNull();
-    expect(text(fixture)).toContain("No schedule snapshot yet.");
+    expect(text(fixture)).toContain("No plan yet.");
   });
 
   it("opens fixed-event creation from a no-saved-day calendar slot", async () => {
@@ -2658,7 +2654,7 @@ describe("rendered planner workspace", () => {
     plannerApi.result = workspaceData({ snapshot: canonicalSnapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Report interruption", "Generate schedule").click();
+    buttonByText(fixture, "Report interruption", "Update plan").click();
     fixture.detectChanges();
     await nextMicrotask();
     fixture.detectChanges();
@@ -2725,10 +2721,10 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.loadedDates).toEqual([selectedDate]);
     expect(text(fixture)).toContain("Moved work");
     expect(text(fixture)).toContain(
-      "Study notes was moved after reported unavailable time.",
+      "Study notes moved later after unavailable time was added.",
     );
     expect(text(fixture)).toContain("Your revised plan is now shown.");
-    expect(text(fixture)).toContain("v3");
+    expect(text(fixture)).not.toContain("v3");
     expect(
       query(fixture, "[data-testid='daily-timeline']")?.textContent,
     ).toContain("Done");
@@ -2763,10 +2759,10 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
     expect(selectedBlockDetailText(fixture)).toContain("Done");
     expect(selectedBlockDetailText(fixture)).toContain(
-      "Scheduled from the persisted snapshot.",
+      "This work is included in the current plan.",
     );
     expect(selectedBlockDetailText(fixture)).not.toContain(
-      "Study notes was moved after reported unavailable time.",
+      "Study notes moved later after unavailable time was added.",
     );
     expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
       "task",
@@ -2796,10 +2792,10 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
-      "We could not save progress. Your details are still here; try again when the API is available.",
+      "We could not save progress. Your details are still here; try again in a moment.",
     );
     expect(announcement(fixture)).toContain(
-      "We could not save progress. Your details are still here; try again when the API is available.",
+      "We could not save progress. Your details are still here; try again in a moment.",
     );
     expect((query(fixture, "#progress-task") as HTMLSelectElement).value).toBe(
       "task-study",
@@ -2851,10 +2847,10 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
-      "The scheduler is unavailable right now. Saved progress is unchanged; try again when scheduling is available.",
+      "Planning is unavailable right now. Saved progress is unchanged; try again in a moment.",
     );
     expect(announcement(fixture)).toContain(
-      "The scheduler is unavailable right now. Saved progress is unchanged; try again when scheduling is available.",
+      "Planning is unavailable right now. Saved progress is unchanged; try again in a moment.",
     );
     expect(inputValue(fixture, "#interruption-start")).toBe("2026-07-04T14:00");
     expect(inputValue(fixture, "#interruption-end")).toBe("2026-07-04T15:15");
@@ -3207,7 +3203,7 @@ describe("rendered planner workspace", () => {
     );
   });
 
-  it("generates a plan, shows pending state, and displays the returned snapshot", async () => {
+  it("generates a plan, shows pending state, and displays the returned plan", async () => {
     plannerApi.result = workspaceData({ snapshot: null });
     const generated = {
       ...canonicalSnapshot,
@@ -3218,7 +3214,7 @@ describe("rendered planner workspace", () => {
     plannerApi.generateResponse = generateResponse;
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    buttonByText(fixture, "Generate plan", "Update plan").click();
     fixture.detectChanges();
 
     expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
@@ -3233,12 +3229,12 @@ describe("rendered planner workspace", () => {
     generateResponse.complete();
     fixture.detectChanges();
 
-    expect(text(fixture)).toContain("Generated schedule snapshot v4.");
+    expect(text(fixture)).toContain("Revised plan. Your day is up to date.");
     expect(text(fixture)).toContain("Write report");
-    expect(text(fixture)).toContain("v4");
+    expect(text(fixture)).not.toContain("v4");
   });
 
-  it("replaces an older displayed snapshot with the generated latest snapshot", async () => {
+  it("replaces an older displayed plan with the generated latest plan", async () => {
     plannerApi.result = workspaceData({ snapshot });
     const generated = {
       ...canonicalSnapshot,
@@ -3248,20 +3244,20 @@ describe("rendered planner workspace", () => {
     plannerApi.generateResponse = of(generated);
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    expect(text(fixture)).toContain("v2");
+    expect(text(fixture)).toContain("Plan ready");
     expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
       "task",
       "designated_free_time",
     ]);
 
-    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    buttonByText(fixture, "Generate plan", "Update plan").click();
     fixture.detectChanges();
     await nextMicrotask();
     fixture.detectChanges();
 
     expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
-    expect(text(fixture)).toContain("Generated schedule snapshot v4.");
-    expect(text(fixture)).toContain("v4");
+    expect(text(fixture)).toContain("Revised plan. Your day is up to date.");
+    expect(text(fixture)).not.toContain("v4");
     expect(timelineBlocks(fixture).map((block) => block.kind)).toEqual([
       "fixed_event",
       "task",
@@ -3308,7 +3304,7 @@ describe("rendered planner workspace", () => {
     );
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    buttonByText(fixture, "Generate plan", "Update plan").click();
     fixture.detectChanges();
     routeParams.next(convertToParamMap({ date: "2026-07-05" }));
     fixture.detectChanges();
@@ -3320,9 +3316,9 @@ describe("rendered planner workspace", () => {
 
     expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
     expect(text(fixture)).toContain("July 5, 2026");
-    expect(text(fixture)).not.toContain("Generated schedule snapshot v4.");
+    expect(text(fixture)).not.toContain("Your day is up to date.");
     expect(query(fixture, "[data-testid='daily-timeline']")).not.toBeNull();
-    expect(text(fixture)).toContain("No schedule snapshot yet.");
+    expect(text(fixture)).toContain("No plan yet.");
   });
 
   it("does not show a generate-plan error after the user changes days", async () => {
@@ -3357,7 +3353,7 @@ describe("rendered planner workspace", () => {
     );
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    buttonByText(fixture, "Generate plan", "Update plan").click();
     fixture.detectChanges();
     routeParams.next(convertToParamMap({ date: "2026-07-05" }));
     fixture.detectChanges();
@@ -3368,7 +3364,7 @@ describe("rendered planner workspace", () => {
 
     expect(plannerApi.generatedPlanningDayIds).toEqual(["day-1"]);
     expect(text(fixture)).toContain("July 5, 2026");
-    expect(text(fixture)).not.toContain("scheduler is unavailable");
+    expect(text(fixture)).not.toContain("Planning is unavailable");
     expect(text(fixture)).not.toContain("We could not generate the schedule");
   });
 
@@ -3397,17 +3393,17 @@ describe("rendered planner workspace", () => {
     ],
     [
       503,
-      "The scheduler is unavailable right now. Saved inputs are unchanged; try again when scheduling is available.",
+      "Planning is unavailable right now. Saved inputs are unchanged; try again in a moment.",
     ],
     [403, "Your session cannot generate this schedule."],
     [404, "That planning day is no longer available."],
-    [500, "We could not generate the schedule."],
+    [500, "We could not update the plan."],
   ])("shows generate-plan error state for HTTP %s", async (status, message) => {
     plannerApi.result = workspaceData({ snapshot: null });
     plannerApi.generateError = new HttpErrorResponse({ status });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Generate plan", "Generate schedule").click();
+    buttonByText(fixture, "Generate plan", "Update plan").click();
     fixture.detectChanges();
     await nextMicrotask();
     fixture.detectChanges();
@@ -3415,7 +3411,7 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain(message);
   });
 
-  it("presents no-fit decisions as deferred work with scheduler-code wording", async () => {
+  it("presents no-fit decisions as deferred work with planner wording", async () => {
     plannerApi.result = workspaceData({
       tasks: [task, taskThatDoesNotFit],
       snapshot: noFitSnapshot,
@@ -3426,14 +3422,14 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("1");
     expect(text(fixture)).toContain("Deferred or unscheduled work");
     expect(text(fixture)).toContain("Prepare workshop");
+    expect(text(fixture)).toContain("Prepare workshop has no room left today.");
+    expect(text(fixture)).toContain("No room left today");
     expect(text(fixture)).toContain(
-      "Prepare workshop was not scheduled because there is not enough remaining time in the day.",
+      "This saved planning result has an explanation available.",
     );
-    expect(text(fixture)).toContain("insufficient_remaining_day_time");
-    expect(text(fixture)).toContain("Scheduler reason out_of_contract_reason.");
   });
 
-  it("shows optional AI explanation without replacing scheduler wording", async () => {
+  it("shows optional AI explanation without replacing planner wording", async () => {
     plannerApi.result = workspaceData({
       tasks: [task, studyTask],
       snapshot: revisedStudySnapshot,
@@ -3444,14 +3440,14 @@ describe("rendered planner workspace", () => {
       explanation:
         "Study notes moved because the reported interruption reserved the earlier window.",
       deterministic_reason:
-        "Study notes was moved after reported unavailable time.",
+        "Study notes moved later after unavailable time was added.",
       reason_code: "moved_after_interruption",
       fallback_reason: null,
       error_code: null,
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Explain with AI", "Schedule reasons").click();
+    buttonByText(fixture, "Explain with AI", "Planner notes").click();
     fixture.detectChanges();
     await nextMicrotask();
     fixture.detectChanges();
@@ -3460,9 +3456,9 @@ describe("rendered planner workspace", () => {
       { planningDayId: "day-1", decisionId: "decision-moved-study" },
     ]);
     expect(text(fixture)).toContain(
-      "Study notes was moved after reported unavailable time.",
+      "Study notes moved later after unavailable time was added.",
     );
-    expect(text(fixture)).toContain("moved_after_interruption");
+    expect(text(fixture)).toContain("Moved later");
     expect(text(fixture)).toContain("Optional AI explanation");
     expect(text(fixture)).toContain("Optional AI explanation ready.");
     expect(text(fixture)).toContain(
@@ -3470,7 +3466,7 @@ describe("rendered planner workspace", () => {
     );
   });
 
-  it("keeps scheduler wording visible when AI explanation falls back", async () => {
+  it("keeps planner wording visible when AI explanation falls back", async () => {
     plannerApi.result = workspaceData({
       tasks: [task, studyTask],
       snapshot: revisedStudySnapshot,
@@ -3480,27 +3476,29 @@ describe("rendered planner workspace", () => {
       confidence: 0,
       explanation: null,
       deterministic_reason:
-        "Study notes was moved after reported unavailable time.",
+        "Study notes moved later after unavailable time was added.",
       reason_code: "moved_after_interruption",
       fallback_reason: "timeout",
       error_code: "ai_service_timeout",
     });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Explain with AI", "Schedule reasons").click();
+    buttonByText(fixture, "Explain with AI", "Planner notes").click();
     fixture.detectChanges();
     await nextMicrotask();
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
-      "Study notes was moved after reported unavailable time.",
+      "Study notes moved later after unavailable time was added.",
     );
-    expect(text(fixture)).toContain("moved_after_interruption");
-    expect(text(fixture)).toContain("Optional AI explanation took too long.");
-    expect(text(fixture)).toContain("timeout");
+    expect(text(fixture)).toContain("Moved later");
+    expect(text(fixture)).toContain(
+      "Optional AI explanation took too long. The planner note remains available.",
+    );
+    expect(text(fixture)).not.toContain("timeout");
   });
 
-  it("keeps scheduler wording visible when AI explanation request errors", async () => {
+  it("keeps planner wording visible when AI explanation request errors", async () => {
     plannerApi.result = workspaceData({
       tasks: [task, studyTask],
       snapshot: revisedStudySnapshot,
@@ -3508,18 +3506,18 @@ describe("rendered planner workspace", () => {
     plannerApi.explanationError = new HttpErrorResponse({ status: 503 });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
-    buttonByText(fixture, "Explain with AI", "Schedule reasons").click();
+    buttonByText(fixture, "Explain with AI", "Planner notes").click();
     fixture.detectChanges();
     await nextMicrotask();
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
-      "Study notes was moved after reported unavailable time.",
+      "Study notes moved later after unavailable time was added.",
     );
     expect(text(fixture)).toContain(
-      "Optional AI explanation is unavailable. The scheduler reason remains available.",
+      "Optional AI explanation is unavailable. The planner note remains available.",
     );
-    expect(text(fixture)).toContain("service_unavailable");
+    expect(text(fixture)).not.toContain("service_unavailable");
   });
 
   it("preserves selected-date context when the API fails", async () => {
@@ -3753,7 +3751,7 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
-      "The API could not accept those details. Review the form and try again.",
+      "Those details need a quick review before saving.",
     );
     expect(text(fixture)).toContain("Use 200 characters or fewer.");
     expect(text(fixture)).toContain("Use a date without a time.");
@@ -4012,7 +4010,7 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
-      "The API could not accept those details. Review the form and try again.",
+      "Those details need a quick review before saving.",
     );
     expect(text(fixture)).toContain("Use 64 characters or fewer.");
     expect(text(fixture)).toContain("End time must be after start time.");
@@ -4294,7 +4292,7 @@ class FakePlannerApi {
         status: "fallback",
         confidence: 0,
         explanation: null,
-        deterministic_reason: "Scheduler reason remains available.",
+        deterministic_reason: "The planner note remains available.",
         reason_code: "placed_in_earliest_valid_window",
         fallback_reason: "ai_disabled",
         error_code: "ai_disabled",
@@ -4632,9 +4630,9 @@ function regionIdForLabel(regionLabel: string): string {
       return "tasks-title";
     case "Fixed events":
       return "fixed-events-title";
-    case "Generate schedule":
+    case "Update plan":
       return "recovery-title";
-    case "Schedule reasons":
+    case "Planner notes":
       return "decisions-title";
     case "Work progress":
       return "progress-title";
