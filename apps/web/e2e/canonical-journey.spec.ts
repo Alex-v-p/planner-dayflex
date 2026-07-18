@@ -85,10 +85,50 @@ const generatedSnapshot = {
   ],
 };
 
-const revisedSnapshot = {
+const progressSnapshot = {
   ...generatedSnapshot,
   id: "snapshot-2",
   version: 2,
+  items: [
+    scheduleItem(
+      "fixed-item",
+      "fixed_event",
+      "2026-07-04T09:00:00+02:00",
+      "2026-07-04T10:00:00+02:00",
+      {
+        fixed_event_id: "event-1",
+      },
+    ),
+    scheduleItem(
+      "progressed-task-item",
+      "task",
+      "2026-07-04T10:00:00+02:00",
+      "2026-07-04T10:45:00+02:00",
+      {
+        task_id: "task-1",
+      },
+    ),
+    scheduleItem(
+      "revised-free-item",
+      "designated_free_time",
+      "2026-07-04T16:00:00+02:00",
+      "2026-07-04T18:00:00+02:00",
+    ),
+  ],
+  decisions: [
+    {
+      id: "decision-2",
+      task_id: "task-1",
+      reason_code: "progress_recorded",
+      details: {},
+    },
+  ],
+};
+
+const revisedSnapshot = {
+  ...progressSnapshot,
+  id: "snapshot-3",
+  version: 3,
   items: [
     scheduleItem(
       "fixed-item",
@@ -126,7 +166,7 @@ const revisedSnapshot = {
   ],
   decisions: [
     {
-      id: "decision-2",
+      id: "decision-3",
       task_id: "task-1",
       reason_code: "moved_after_interruption",
       details: {},
@@ -211,7 +251,7 @@ test("canonical recovery journey works with a stubbed API", async ({
   await expect(
     page
       .locator("[aria-labelledby='progress-title']")
-      .getByText("Progress saved."),
+      .getByText("Progress saved and the visible plan updated."),
   ).toBeVisible();
   await expect(page.getByText("45 min completed")).toBeVisible();
 
@@ -262,6 +302,7 @@ class StubbedPlannerApi {
   private fixedEvents: unknown[] = [];
   private currentSnapshot:
     | typeof generatedSnapshot
+    | typeof progressSnapshot
     | typeof revisedSnapshot
     | null = null;
   private progressRecords: unknown[] = [];
@@ -339,7 +380,15 @@ class StubbedPlannerApi {
     if (method === "POST" && path === "/planning/days/day-1/task-progress") {
       this.progressRecords = [progress];
       this.tasks = [{ ...task, completed_minutes: 45, remaining_minutes: 45 }];
-      await this.respond(route, progress);
+      this.currentSnapshot = progressSnapshot;
+      this.days = [
+        { ...planningDay, current_snapshot_id: progressSnapshot.id },
+      ];
+      await this.respond(route, {
+        progress,
+        planning_day: this.days[0],
+        snapshot: progressSnapshot,
+      });
       return;
     }
     if (method === "POST" && path === "/planning/days/day-1/interruptions") {
@@ -408,8 +457,8 @@ function overviewSummary(startDate: string, endDate: string) {
           planning_day_id: "day-1",
           time_zone: "Europe/Brussels",
           status: "planned",
-          snapshot_id: "snapshot-2",
-          snapshot_version: 2,
+          snapshot_id: "snapshot-3",
+          snapshot_version: 3,
           planned_minutes: 45,
           fixed_event_count: 1,
           interruption_minutes: 30,
@@ -479,16 +528,16 @@ function freeTimesSummary() {
         planning_day_id: "day-1",
         time_zone: "Europe/Brussels",
         status: "has_free_time",
-        snapshot_id: "snapshot-2",
-        snapshot_version: 2,
+        snapshot_id: "snapshot-3",
+        snapshot_version: 3,
         snapshot_created_at: "2026-07-04T08:05:00Z",
         windows: [
           {
             local_date: "2026-07-04",
             planning_day_id: "day-1",
             time_zone: "Europe/Brussels",
-            snapshot_id: "snapshot-2",
-            snapshot_version: 2,
+            snapshot_id: "snapshot-3",
+            snapshot_version: 3,
             snapshot_created_at: "2026-07-04T08:05:00Z",
             schedule_item_id: "revised-free-item",
             start_at: "2026-07-04T16:00:00+02:00",

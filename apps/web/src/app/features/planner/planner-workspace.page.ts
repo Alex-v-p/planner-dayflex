@@ -31,6 +31,7 @@ import { StatusChipComponent } from "../../shared/ui/status-chip/status-chip.com
 import { SummaryValueComponent } from "../../shared/ui/summary-value/summary-value.component";
 import {
   FixedEvent,
+  FixedEventMutationResult,
   FixedEventInputRequest,
   PlannerApiService,
   PlannerWorkspaceData,
@@ -40,8 +41,10 @@ import {
   ScheduleSnapshot,
   Task,
   TaskInputRequest,
+  TaskMutationResult,
   TaskProgress,
   TaskProgressCreateRequest,
+  TaskProgressMutationResult,
   InterruptionCreateRequest,
   ParseInterruptionResponse,
   ParseTaskResponse,
@@ -142,6 +145,7 @@ type GeneratePlanState =
   | { readonly status: "error"; readonly message: string };
 
 type RecoveryMutationState = GeneratePlanState;
+type MutationApplyResult = "applied" | "reload" | "stale";
 type TimelineRecoveryState = "moved" | "split";
 
 type SuggestionState<T> =
@@ -309,6 +313,10 @@ export class PlannerWorkspacePage implements OnInit {
     status: "idle",
     message: "",
   });
+  protected readonly inputMutationState = signal<RecoveryMutationState>({
+    status: "idle",
+    message: "",
+  });
   protected readonly generatePlanState = signal<GeneratePlanState>({
     status: "idle",
     message: "",
@@ -321,6 +329,7 @@ export class PlannerWorkspacePage implements OnInit {
     const state = this.state();
     const interruptionState = this.interruptionState();
     const progressState = this.progressState();
+    const inputMutationState = this.inputMutationState();
     const generatePlanState = this.generatePlanState();
 
     if (state.status === "loading") {
@@ -333,6 +342,9 @@ export class PlannerWorkspacePage implements OnInit {
       }
       if (progressState.message) {
         return progressState.message;
+      }
+      if (inputMutationState.message) {
+        return inputMutationState.message;
       }
       if (generatePlanState.message) {
         return generatePlanState.message;
@@ -365,6 +377,7 @@ export class PlannerWorkspacePage implements OnInit {
   private handledRouteEditorIntentKey: string | null = null;
   private taskSuggestionRequestVersion = 0;
   private interruptionSuggestionRequestVersion = 0;
+  private inputMutationRequestVersion = 0;
 
   ngOnInit(): void {
     const routeDates = this.route.queryParamMap.pipe(
@@ -388,6 +401,7 @@ export class PlannerWorkspacePage implements OnInit {
           this.generatePlanState.set({ status: "idle", message: "" });
           this.progressState.set({ status: "idle", message: "" });
           this.interruptionState.set({ status: "idle", message: "" });
+          this.inputMutationState.set({ status: "idle", message: "" });
           this.explanationStates.set({});
           this.selectedScheduleItemId.set(null);
         }),
@@ -600,10 +614,17 @@ export class PlannerWorkspacePage implements OnInit {
     }
 
     const action = form.id === null ? "task:create" : `task:update:${form.id}`;
+    const state = this.state();
+    const refreshPlanningDayId =
+      state.status === "ready" ? (state.data.day?.id ?? null) : null;
     const request$ =
       form.id === null
-        ? this.plannerApi.createTask(result.request)
-        : this.plannerApi.updateTask(form.id, result.request);
+        ? this.plannerApi.createTask(result.request, refreshPlanningDayId)
+        : this.plannerApi.updateTask(
+            form.id,
+            result.request,
+            refreshPlanningDayId,
+          );
 
     this.runMutation(action, request$, "task");
   }
@@ -747,7 +768,10 @@ export class PlannerWorkspacePage implements OnInit {
 
     this.runMutation(
       `task:delete:${task.id}`,
-      this.plannerApi.deleteTask(task.id),
+      this.plannerApi.deleteTask(
+        task.id,
+        currentWorkspaceDay(this.state())?.id ?? null,
+      ),
       "task",
     );
   }
@@ -964,14 +988,15 @@ export class PlannerWorkspacePage implements OnInit {
       .recordTaskProgress(day.id, result.request)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (progress) => {
+        next: (result) => {
           this.busyAction.set(null);
-          this.applyProgress(progress);
-          this.progressForm.set(emptyProgressForm(day.time_zone));
-          this.progressState.set({
-            status: "success",
-            message: "Progress saved. Completed work stays in history.",
-          });
+          if (this.applyProgressMutationResult(result)) {
+            this.progressForm.set(emptyProgressForm(day.time_zone));
+            this.progressState.set({
+              status: "success",
+              message: mutationSuccessMessage(result),
+            });
+          }
         },
         error: (error: unknown) => {
           this.busyAction.set(null);
@@ -1869,6 +1894,135 @@ export class PlannerWorkspacePage implements OnInit {
     });
   }
 
+  private applyProgressMutationResult(
+    result: TaskProgressMutationResult,
+  ): boolean {
+    const planApplied = this.applyRefreshedPlan(
+      result.planning_day,
+      result.snapshot,
+    );
+    if (!planApplied) {
+      return false;
+    }
+    this.applyProgress(result.progress);
+    return true;
+  }
+
+  private applyMutationResult(
+    action: string,
+    result: unknown,
+  ): MutationApplyResult {
+    if (isTaskMutationResult(result)) {
+      return this.applyTaskMutationResult(action, result) ? "applied" : "stale";
+    }
+    if (isFixedEventMutationResult(result)) {
+      return this.applyFixedEventMutationResult(action, result)
+        ? "applied"
+        : "stale";
+    }
+    return "reload";
+  }
+
+  private applyTaskMutationResult(
+    action: string,
+    result: TaskMutationResult,
+  ): boolean {
+    const planApplied = this.applyRefreshedPlan(
+      result.planning_day,
+      result.snapshot,
+    );
+    if (!planApplied) {
+      return false;
+    }
+    this.state.update((current) => {
+      if (current.status !== "ready") {
+        return current;
+      }
+      const deletedTaskId = action.startsWith("task:delete:")
+        ? action.replace("task:delete:", "")
+        : null;
+      const nextTasks =
+        deletedTaskId !== null
+          ? current.data.tasks.filter((task) => task.id !== deletedTaskId)
+          : upsertById(current.data.tasks, result.task);
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          tasks: nextTasks,
+        },
+      };
+    });
+    return true;
+  }
+
+  private applyFixedEventMutationResult(
+    action: string,
+    result: FixedEventMutationResult,
+  ): boolean {
+    const planApplied = this.applyRefreshedPlan(
+      result.planning_day,
+      result.snapshot,
+    );
+    if (!planApplied) {
+      return false;
+    }
+    this.state.update((current) => {
+      if (current.status !== "ready") {
+        return current;
+      }
+      const deletedFixedEventId = action.startsWith("event:delete:")
+        ? action.replace("event:delete:", "")
+        : null;
+      const nextFixedEvents =
+        deletedFixedEventId !== null
+          ? current.data.fixedEvents.filter(
+              (event) => event.id !== deletedFixedEventId,
+            )
+          : upsertById(current.data.fixedEvents, result.fixed_event);
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          fixedEvents: nextFixedEvents,
+        },
+      };
+    });
+    return true;
+  }
+
+  private applyRefreshedPlan(
+    planningDay: PlannerWorkspaceData["day"],
+    snapshot: ScheduleSnapshot | null,
+  ): boolean {
+    if (planningDay === null) {
+      return false;
+    }
+    const current = this.state();
+    if (
+      current.status !== "ready" ||
+      current.selectedDate !== planningDay.local_date
+    ) {
+      return false;
+    }
+    this.state.update((current) => {
+      if (current.status !== "ready") {
+        return current;
+      }
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          planningDays: upsertById(current.data.planningDays, planningDay),
+          day: planningDay,
+          snapshot,
+        },
+      };
+    });
+    this.selectedScheduleItemId.set(snapshot?.items[0]?.id ?? null);
+    return true;
+  }
+
   private setExplanationState(
     decisionId: string,
     state: ExplanationState,
@@ -1932,23 +2086,56 @@ export class PlannerWorkspacePage implements OnInit {
     request$: Observable<T>,
     formKind: "task" | "fixedEvent",
   ): void {
+    const requestVersion = ++this.inputMutationRequestVersion;
     this.busyAction.set(action);
+    this.inputMutationState.set({
+      status: "pending",
+      message: "Saving input and refreshing the visible plan.",
+    });
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: () => {
-        this.busyAction.set(null);
-        this.pendingMutationFocus = mutationFocusTarget(action, formKind);
-        if (formKind === "task") {
-          this.resetTaskForm();
-          this.closeTaskEditor({ restoreFocus: false });
-        } else {
-          this.resetFixedEventForm();
-          this.closeFixedEventEditor({ restoreFocus: false });
+      next: (result) => {
+        if (this.inputMutationRequestVersion === requestVersion) {
+          this.busyAction.set(null);
         }
-        this.focusSelector(this.pendingMutationFocus.loadingSelector);
-        this.reload();
+        const applyResult = this.applyMutationResult(action, result);
+        if (applyResult === "stale") {
+          return;
+        }
+
+        this.pendingMutationFocus = mutationFocusTarget(action, formKind);
+        if (applyResult === "applied") {
+          if (formKind === "task") {
+            this.resetTaskForm();
+            this.closeTaskEditor({ restoreFocus: false });
+          } else {
+            this.resetFixedEventForm();
+            this.closeFixedEventEditor({ restoreFocus: false });
+          }
+          this.inputMutationState.set({
+            status: "success",
+            message: mutationSuccessMessage(result),
+          });
+          this.restorePendingMutationFocus();
+        } else {
+          if (formKind === "task") {
+            this.resetTaskForm();
+            this.closeTaskEditor({ restoreFocus: false });
+          } else {
+            this.resetFixedEventForm();
+            this.closeFixedEventEditor({ restoreFocus: false });
+          }
+          this.focusSelector(this.pendingMutationFocus.loadingSelector);
+          this.reload();
+        }
       },
       error: (error: unknown) => {
-        this.busyAction.set(null);
+        if (this.inputMutationRequestVersion === requestVersion) {
+          this.busyAction.set(null);
+        }
+        this.inputMutationState.set({
+          status: "error",
+          message: mutationErrorMessage(error),
+        });
         const message = mutationErrorMessage(error);
         const validationErrors = validationErrorsFor(error, formKind);
         if (formKind === "task") {
@@ -2870,7 +3057,13 @@ function mutationErrorMessage(error: unknown): string {
       return "That change conflicts with another saved event for the day.";
     }
     if (error.status === 422) {
-      return "Those details need a quick review before saving.";
+      if (validationDetails(error.error).length > 0) {
+        return "Those details need a quick review before saving.";
+      }
+      return "The change was not saved, so the plan stayed as it was. Your details are still here; adjust them and try Save or Add again.";
+    }
+    if (error.status === 503) {
+      return "Planning is unavailable right now, so the change was not saved and the plan stayed as it was. Your details are still here; try Save or Add again in a moment.";
     }
     if (error.status === 401 || error.status === 403) {
       return "Your session cannot save this change. Sign in again before continuing.";
@@ -2934,13 +3127,30 @@ function generatePlanErrorMessage(error: unknown): string {
   return "We could not update the plan. Saved inputs are unchanged; try again in a moment.";
 }
 
+function mutationSuccessMessage(result: unknown): string {
+  if (isTaskProgressMutationResult(result)) {
+    return result.snapshot === null
+      ? "Progress saved. Generate plan remains available when you are ready."
+      : "Progress saved and the visible plan updated.";
+  }
+  if (isTaskMutationResult(result) || isFixedEventMutationResult(result)) {
+    return result.snapshot === null
+      ? "Input saved. Generate plan remains available when you are ready."
+      : "Input saved and the visible plan updated.";
+  }
+  return "Input saved. Refreshing the workspace.";
+}
+
 function progressErrorMessage(error: unknown): string {
   if (error instanceof HttpErrorResponse) {
     if (error.status === 409) {
       return "That progress would exceed the task estimate. Refresh the workspace if another update was saved.";
     }
     if (error.status === 422) {
-      return "Review the minutes and recorded time before saving progress.";
+      return "Progress was not saved. Review the minutes and recorded time, then try again.";
+    }
+    if (error.status === 503) {
+      return "Planning is unavailable right now, so progress was not saved and the plan stayed as it was. Your details are still here; try again in a moment.";
     }
     if (error.status === 401 || error.status === 403) {
       return "Your session cannot save progress. Sign in again before continuing.";
@@ -2970,6 +3180,55 @@ function interruptionErrorMessage(error: unknown): string {
   }
 
   return "We could not revise the plan. Your interruption details are still here; try again in a moment.";
+}
+
+function isTaskMutationResult(value: unknown): value is TaskMutationResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "planning_day" in value &&
+    "snapshot" in value &&
+    "task" in value
+  );
+}
+
+function isFixedEventMutationResult(
+  value: unknown,
+): value is FixedEventMutationResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "planning_day" in value &&
+    "snapshot" in value &&
+    "fixed_event" in value
+  );
+}
+
+function isTaskProgressMutationResult(
+  value: unknown,
+): value is TaskProgressMutationResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "planning_day" in value &&
+    "snapshot" in value &&
+    "progress" in value
+  );
+}
+
+function upsertById<T extends { readonly id: string }>(
+  records: readonly T[],
+  record: T | null,
+): readonly T[] {
+  if (record === null) {
+    return records;
+  }
+  if (records.some((candidate) => candidate.id === record.id)) {
+    return records.map((candidate) =>
+      candidate.id === record.id ? record : candidate,
+    );
+  }
+  return [...records, record];
 }
 
 function suggestionMessage(

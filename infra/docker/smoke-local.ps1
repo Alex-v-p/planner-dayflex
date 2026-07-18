@@ -212,17 +212,23 @@ try {
     Assert-Contains $firstPlan.decisions.reason_code "designated_free_time" `
         "Initial schedule did not expose free time."
 
+    $latestPlanVersion = [int]$firstPlan.version
     foreach ($progress in @(
         @{ task_id = $tasks["Reply to inbox"]; completed_minutes = 45; recorded_at = "2026-06-22T08:45:00+02:00" },
         @{ task_id = $tasks["Write report"]; completed_minutes = 90; recorded_at = "2026-06-22T11:30:00+02:00" },
         @{ task_id = $tasks["Study notes"]; completed_minutes = 60; recorded_at = "2026-06-22T14:00:00+02:00" }
     )) {
-        Invoke-ApiJson `
+        $progressResult = Invoke-ApiJson `
             -Method POST `
             -Path "/planning/days/$($day.id)/task-progress" `
             -Session $ApiSession `
             -Headers @{"X-Request-ID" = $requestId} `
-            -Body $progress | Out-Null
+            -Body $progress
+        Assert-Equal `
+            ([int]$progressResult.snapshot.version) `
+            ($latestPlanVersion + 1) `
+            "Progress auto-refresh version mismatch."
+        $latestPlanVersion = [int]$progressResult.snapshot.version
     }
 
     $revised = Invoke-ApiJson `
@@ -237,7 +243,7 @@ try {
             reported_at = "2026-06-22T14:00:00+02:00"
         }
 
-    Assert-Equal $revised.version 2 "Revised schedule version mismatch."
+    Assert-Equal $revised.version ($latestPlanVersion + 1) "Revised schedule version mismatch."
     Assert-Contains $revised.decisions.reason_code "moved_after_interruption" `
         "Revised schedule did not include a moved-after-interruption decision."
     Assert-Contains $revised.decisions.reason_code "designated_free_time" `

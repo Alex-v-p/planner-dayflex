@@ -9,11 +9,14 @@ import { AuthUser } from "../../core/auth/auth-contracts";
 import { AuthSessionService } from "../../core/auth/auth-session.service";
 import {
   FixedEvent,
+  FixedEventMutationResult,
   PlannerApiService,
   PlannerWorkspaceData,
   ScheduleSnapshot,
   Task,
+  TaskMutationResult,
   TaskProgress,
+  TaskProgressMutationResult,
 } from "./planner-api.service";
 import { PlannerWorkspacePage } from "./planner-workspace.page";
 
@@ -88,6 +91,30 @@ const snapshot: ScheduleSnapshot = {
     },
   ],
   decisions: [],
+};
+
+const fixedEventMutationResult: FixedEventMutationResult = {
+  fixed_event: fixedEvent,
+  planning_day: {
+    id: "day-1",
+    local_date: selectedDate,
+    time_zone: "Europe/Brussels",
+    current_snapshot_id: "snapshot-1",
+    created_at: "2026-07-03T08:00:00Z",
+  },
+  snapshot,
+};
+
+const taskMutationResult: TaskMutationResult = {
+  task,
+  planning_day: fixedEventMutationResult.planning_day,
+  snapshot,
+};
+
+const taskProgressMutationResult: TaskProgressMutationResult = {
+  progress: progressRecord,
+  planning_day: fixedEventMutationResult.planning_day,
+  snapshot,
 };
 
 const canonicalSnapshot: ScheduleSnapshot = {
@@ -734,7 +761,11 @@ describe("planner workspace API contract", () => {
       created_at: "2026-07-03T08:00:00Z",
     };
     api.responses.set("/planning/days", createdDay);
-    api.responses.set("/planning/days/day-new/fixed-events", fixedEvent);
+    api.responses.set("/planning/days/day-new/fixed-events", {
+      fixed_event: fixedEvent,
+      planning_day: createdDay,
+      snapshot: null,
+    } satisfies FixedEventMutationResult);
     await TestBed.configureTestingModule({
       providers: [
         PlannerApiService,
@@ -742,7 +773,7 @@ describe("planner workspace API contract", () => {
       ],
     }).compileComponents();
 
-    const event = await firstValue(
+    const result = await firstValue(
       TestBed.inject(PlannerApiService).saveFixedEventForDate(
         selectedDate,
         null,
@@ -755,7 +786,8 @@ describe("planner workspace API contract", () => {
       ),
     );
 
-    expect(event).toEqual(fixedEvent);
+    expect(result.fixed_event).toEqual(fixedEvent);
+    expect(result.snapshot).toBeNull();
     expect(api.posts).toEqual([
       {
         path: "/planning/days",
@@ -777,8 +809,19 @@ describe("planner workspace API contract", () => {
   it("uses authenticated owner-scoped mutation endpoint shapes", async () => {
     const api = new FakeApiClient();
     api.responses.set("/planning/tasks/task-1", task);
-    api.responses.set("/planning/days/day-1/fixed-events/event-1", fixedEvent);
+    api.responses.set(
+      "/planning/tasks/task-1?refresh_planning_day_id=day-1",
+      taskMutationResult,
+    );
+    api.responses.set(
+      "/planning/days/day-1/fixed-events/event-1",
+      fixedEventMutationResult,
+    );
     api.responses.set("DELETE /planning/tasks/task-1", undefined);
+    api.responses.set(
+      "DELETE /planning/tasks/task-1?refresh_planning_day_id=day-1",
+      { ...taskMutationResult, task: null } satisfies TaskMutationResult,
+    );
     api.responses.set(
       "DELETE /planning/days/day-1/fixed-events/event-1",
       undefined,
@@ -792,15 +835,34 @@ describe("planner workspace API contract", () => {
     const service = TestBed.inject(PlannerApiService);
 
     await firstValue(
-      service.updateTask("task-1", {
-        title: "Write report",
-        estimated_minutes: 90,
-        priority: 5,
-        due_date: null,
-        earliest_start_at: null,
-        splitting_allowed: false,
-        min_segment_minutes: null,
-      }),
+      service.updateTask(
+        "task-1",
+        {
+          title: "Write report",
+          estimated_minutes: 90,
+          priority: 5,
+          due_date: null,
+          earliest_start_at: null,
+          splitting_allowed: false,
+          min_segment_minutes: null,
+        },
+        null,
+      ),
+    );
+    await firstValue(
+      service.updateTask(
+        "task-1",
+        {
+          title: "Write report",
+          estimated_minutes: 90,
+          priority: 5,
+          due_date: null,
+          earliest_start_at: null,
+          splitting_allowed: false,
+          min_segment_minutes: null,
+        },
+        "day-1",
+      ),
     );
     await firstValue(
       service.updateFixedEvent("day-1", "event-1", {
@@ -810,15 +872,18 @@ describe("planner workspace API contract", () => {
         time_zone: "Europe/Brussels",
       }),
     );
-    await firstValue(service.deleteTask("task-1"));
+    await firstValue(service.deleteTask("task-1", null));
+    await firstValue(service.deleteTask("task-1", "day-1"));
     await firstValue(service.deleteFixedEvent("day-1", "event-1"));
 
     expect(api.puts.map((call) => call.path)).toEqual([
       "/planning/tasks/task-1",
+      "/planning/tasks/task-1?refresh_planning_day_id=day-1",
       "/planning/days/day-1/fixed-events/event-1",
     ]);
     expect(api.deletes).toEqual([
       "/planning/tasks/task-1",
+      "/planning/tasks/task-1?refresh_planning_day_id=day-1",
       "/planning/days/day-1/fixed-events/event-1",
     ]);
     expect(
@@ -849,7 +914,10 @@ describe("planner workspace API contract", () => {
 
   it("records task progress and reports interruptions through day-scoped endpoints", async () => {
     const api = new FakeApiClient();
-    api.responses.set("/planning/days/day-1/task-progress", progressRecord);
+    api.responses.set(
+      "/planning/days/day-1/task-progress",
+      taskProgressMutationResult,
+    );
     api.responses.set("/planning/days/day-1/interruptions", canonicalSnapshot);
     await TestBed.configureTestingModule({
       providers: [
@@ -875,7 +943,8 @@ describe("planner workspace API contract", () => {
       }),
     );
 
-    expect(progress).toEqual(progressRecord);
+    expect(progress.progress).toEqual(progressRecord);
+    expect(progress.snapshot).toEqual(snapshot);
     expect(revised).toEqual(canonicalSnapshot);
     expect(api.posts).toEqual([
       {
@@ -1488,6 +1557,12 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain("Create from calendar");
+    expect(text(fixture)).toContain(
+      "After you save it, the visible plan normally updates automatically.",
+    );
+    expect(text(fixture)).toContain(
+      "Generate plan stays available when there is no current plan or planning needs a retry.",
+    );
     expect(text(fixture)).toContain("Fixed event");
     expect(text(fixture)).toContain("Flexible task");
     buttonByText(fixture, "Fixed event", "Calendar create").click();
@@ -1591,7 +1666,7 @@ describe("rendered planner workspace", () => {
         "end_at",
       ),
     ).toBe(false);
-    expect(plannerApi.loadedDates).toEqual([canonicalDate, canonicalDate]);
+    expect(plannerApi.loadedDates).toEqual([canonicalDate]);
   });
 
   it("keeps calendar-prefilled flexible-task details after validation errors", async () => {
@@ -2792,10 +2867,10 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
 
     expect(text(fixture)).toContain(
-      "We could not save progress. Your details are still here; try again in a moment.",
+      "Planning is unavailable right now, so progress was not saved and the plan stayed as it was. Your details are still here; try again in a moment.",
     );
     expect(announcement(fixture)).toContain(
-      "We could not save progress. Your details are still here; try again in a moment.",
+      "Planning is unavailable right now, so progress was not saved and the plan stayed as it was. Your details are still here; try again in a moment.",
     );
     expect((query(fixture, "#progress-task") as HTMLSelectElement).value).toBe(
       "task-study",
@@ -2828,8 +2903,33 @@ describe("rendered planner workspace", () => {
         },
       },
     ]);
-    expect(text(fixture)).toContain("Progress saved.");
-    expect(announcement(fixture)).toContain("Progress saved.");
+    expect(text(fixture)).toContain("Progress saved");
+    expect(announcement(fixture)).toContain("Progress saved");
+  });
+
+  it("explains rolled-back progress validation failures without implying saved progress changed", async () => {
+    plannerApi.result = workspaceData({
+      tasks: [task, studyTask],
+      snapshot: canonicalSnapshot,
+    });
+    plannerApi.progressError = new HttpErrorResponse({ status: 422 });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    setInput(fixture, "#progress-minutes", "60");
+    setInput(fixture, "#progress-recorded", "2026-07-04T14:00");
+    setInput(fixture, "#progress-time-zone", "Europe/Brussels");
+    const progressTask = query(fixture, "#progress-task") as HTMLSelectElement;
+    progressTask.value = "task-study";
+    progressTask.dispatchEvent(new Event("change", { bubbles: true }));
+    formByLabel(fixture, "Record task progress").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "Progress was not saved. Review the minutes and recorded time, then try again.",
+    );
+    expect(inputValue(fixture, "#progress-minutes")).toBe("60");
   });
 
   it("keeps interruption details available for retry when rescheduling fails", async () => {
@@ -3854,8 +3954,8 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.savedFixedEvents).toEqual([]);
   });
 
-  it("edits a task, refreshes the workspace, and keeps user IDs out of payloads", async () => {
-    plannerApi.result = workspaceData({ snapshot: null });
+  it("edits a task, applies the auto-refresh result, and keeps user IDs out of payloads", async () => {
+    plannerApi.result = workspaceData({ snapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
     await openExistingTaskEditor(fixture);
@@ -3877,14 +3977,19 @@ describe("rendered planner workspace", () => {
           splitting_allowed: false,
           min_segment_minutes: null,
         },
+        refreshPlanningDayId: "day-1",
       },
     ]);
     expect(JSON.stringify(plannerApi.updatedTasks)).not.toContain("user-1");
-    expect(plannerApi.loadedDates).toEqual([selectedDate, selectedDate]);
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
+    expect(text(fixture)).toContain(
+      "Input saved and the visible plan updated.",
+    );
+    expect(text(fixture)).toContain("Write final report");
   });
 
-  it("edits a fixed event, refreshes the workspace, and keeps user IDs out of payloads", async () => {
-    plannerApi.result = workspaceData({ snapshot: null });
+  it("edits a fixed event, applies the auto-refresh result, and keeps user IDs out of payloads", async () => {
+    plannerApi.result = workspaceData({ snapshot });
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
     await openExistingFixedEventEditor(fixture);
@@ -3909,7 +4014,11 @@ describe("rendered planner workspace", () => {
     expect(JSON.stringify(plannerApi.updatedFixedEvents)).not.toContain(
       "user-1",
     );
-    expect(plannerApi.loadedDates).toEqual([selectedDate, selectedDate]);
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
+    expect(text(fixture)).toContain(
+      "Input saved and the visible plan updated.",
+    );
+    expect(text(fixture)).toContain("Planning review");
   });
 
   it("confirms deletion before removing a task and refreshing", async () => {
@@ -3924,8 +4033,10 @@ describe("rendered planner workspace", () => {
     expect(confirm).toHaveBeenCalledWith(
       'Delete "Write report" from active flexible tasks?',
     );
-    expect(plannerApi.deletedTasks).toEqual(["task-1"]);
-    expect(plannerApi.loadedDates).toEqual([selectedDate, selectedDate]);
+    expect(plannerApi.deletedTasks).toEqual([
+      { id: "task-1", refreshPlanningDayId: "day-1" },
+    ]);
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
     confirm.mockRestore();
   });
 
@@ -3942,8 +4053,8 @@ describe("rendered planner workspace", () => {
     confirm.mockRestore();
   });
 
-  it("confirms deletion before removing a fixed event and refreshing", async () => {
-    plannerApi.result = workspaceData({ snapshot: null });
+  it("confirms deletion before removing a fixed event and applying the returned plan", async () => {
+    plannerApi.result = workspaceData({ snapshot });
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const fixture = await renderWorkspace(routeParams, plannerApi, router);
 
@@ -3957,8 +4068,159 @@ describe("rendered planner workspace", () => {
     expect(plannerApi.deletedFixedEvents).toEqual([
       { planningDayId: "day-1", fixedEventId: "event-1" },
     ]);
-    expect(plannerApi.loadedDates).toEqual([selectedDate, selectedDate]);
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
     confirm.mockRestore();
+  });
+
+  it("does not apply a stale fixed-event response after the user changes days", async () => {
+    const staleFixedEventResponse = new Subject<FixedEventMutationResult>();
+    const julyFiveEvent: FixedEvent = {
+      ...fixedEvent,
+      id: "event-july-5",
+      title: "July 5 planning",
+      start_at: "2026-07-05T09:00:00+02:00",
+      end_at: "2026-07-05T10:00:00+02:00",
+    };
+    plannerApi.result = workspaceData({ snapshot });
+    plannerApi.fixedEventMutationResponse = staleFixedEventResponse;
+    plannerApi.responses.set(
+      "2026-07-05",
+      of(
+        workspaceData({
+          selectedDate: "2026-07-05",
+          fixedEvents: [julyFiveEvent],
+          snapshot: null,
+        }),
+      ),
+    );
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openExistingFixedEventEditor(fixture);
+    setInput(fixture, "#fixed-event-title", "Stale July 4 event");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    routeParams.next(convertToParamMap({ date: "2026-07-05" }));
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    await openNewFixedEventEditor(fixture);
+    setInput(fixture, "#fixed-event-title", "July 5 unsaved event");
+
+    staleFixedEventResponse.next({
+      ...fixedEventMutationResult,
+      fixed_event: {
+        ...fixedEvent,
+        title: "Stale July 4 event",
+      },
+    });
+    staleFixedEventResponse.complete();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("July 5, 2026");
+    expect(text(fixture)).toContain("July 5 planning");
+    expect(text(fixture)).not.toContain("Stale July 4 event");
+    expect(text(fixture)).not.toContain("Input saved and the visible plan");
+    expect(inputValue(fixture, "#fixed-event-title")).toBe(
+      "July 5 unsaved event",
+    );
+  });
+
+  it("does not close a new day's task editor when a stale task response resolves", async () => {
+    const staleTaskResponse = new Subject<TaskMutationResult>();
+    const julyFiveTask: Task = {
+      ...task,
+      id: "task-july-5",
+      title: "July 5 task",
+    };
+    plannerApi.result = workspaceData({ snapshot });
+    plannerApi.taskMutationResponse = staleTaskResponse;
+    plannerApi.responses.set(
+      "2026-07-05",
+      of(
+        workspaceData({
+          selectedDate: "2026-07-05",
+          tasks: [julyFiveTask],
+          snapshot: null,
+        }),
+      ),
+    );
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openExistingTaskEditor(fixture);
+    setInput(fixture, "#task-title", "Stale July 4 task");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    routeParams.next(convertToParamMap({ date: "2026-07-05" }));
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    await openNewTaskEditor(fixture);
+    setInput(fixture, "#task-title", "July 5 unsaved task");
+
+    staleTaskResponse.next({
+      ...taskMutationResult,
+      task: {
+        ...task,
+        title: "Stale July 4 task",
+      },
+    });
+    staleTaskResponse.complete();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("July 5, 2026");
+    expect(text(fixture)).toContain("July 5 task");
+    expect(text(fixture)).not.toContain("Stale July 4 task");
+    expect(text(fixture)).not.toContain("Input saved and the visible plan");
+    expect(inputValue(fixture, "#task-title")).toBe("July 5 unsaved task");
+  });
+
+  it("keeps an unsaved task edit open when auto-refresh cannot build a schedule", async () => {
+    plannerApi.result = workspaceData({ snapshot });
+    plannerApi.taskMutationError = new HttpErrorResponse({
+      status: 422,
+      statusText: "Unprocessable Entity",
+      error: { detail: "no valid schedule" },
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openExistingTaskEditor(fixture);
+    setInput(fixture, "#task-title", "Unsaved task edit");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "The change was not saved, so the plan stayed as it was. Your details are still here; adjust them and try Save or Add again.",
+    );
+    expect(text(fixture)).not.toContain("retry Generate plan");
+    expect(inputValue(fixture, "#task-title")).toBe("Unsaved task edit");
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
+  });
+
+  it("keeps an unsaved fixed-event edit open when scheduling is unavailable", async () => {
+    plannerApi.result = workspaceData({ snapshot });
+    plannerApi.fixedEventMutationError = new HttpErrorResponse({
+      status: 503,
+      statusText: "Service Unavailable",
+    });
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openExistingFixedEventEditor(fixture);
+    setInput(fixture, "#fixed-event-title", "Unsaved event edit");
+    formByLabel(fixture, "Fixed event details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain(
+      "Planning is unavailable right now, so the change was not saved and the plan stayed as it was. Your details are still here; try Save or Add again in a moment.",
+    );
+    expect(text(fixture)).not.toContain("retry when scheduling is available");
+    expect(inputValue(fixture, "#fixed-event-title")).toBe(
+      "Unsaved event edit",
+    );
+    expect(plannerApi.loadedDates).toEqual([selectedDate]);
   });
 
   it("surfaces fixed-event API conflicts inline without reloading", async () => {
@@ -4093,6 +4355,17 @@ class FakeApiClient {
 
     return of(this.responses.get(key) as void);
   }
+
+  deleteJson<TResponse>(path: string): Observable<TResponse> {
+    this.deletes.push(path);
+    const key = `DELETE ${path}`;
+
+    if (!this.responses.has(key)) {
+      throw new Error(`Unexpected DELETE ${path}`);
+    }
+
+    return of(this.responses.get(key) as TResponse);
+  }
 }
 
 class FakePlannerApi {
@@ -4102,7 +4375,10 @@ class FakePlannerApi {
   readonly loadedDates: string[] = [];
   readonly createdTasks: unknown[] = [];
   readonly updatedTasks: unknown[] = [];
-  readonly deletedTasks: string[] = [];
+  readonly deletedTasks: Array<{
+    readonly id: string;
+    readonly refreshPlanningDayId: string | null;
+  }> = [];
   readonly savedFixedEvents: unknown[] = [];
   readonly updatedFixedEvents: unknown[] = [];
   readonly deletedFixedEvents: unknown[] = [];
@@ -4113,7 +4389,10 @@ class FakePlannerApi {
   readonly parsedInterruptions: unknown[] = [];
   readonly explainedDecisions: unknown[] = [];
   taskMutationError: unknown = null;
+  taskMutationResponse: Observable<TaskMutationResult> | null = null;
   fixedEventMutationError: unknown = null;
+  fixedEventMutationResponse: Observable<FixedEventMutationResult> | null =
+    null;
   generateError: unknown = null;
   generateResponse: Observable<ScheduleSnapshot> | null = null;
   progressError: unknown = null;
@@ -4139,61 +4418,109 @@ class FakePlannerApi {
     return of({ ...this.result, selectedDate: date });
   }
 
-  createTask(request: unknown): Observable<Task> {
+  createTask(
+    request: unknown,
+    refreshPlanningDayId: string | null,
+  ): Observable<Task | TaskMutationResult> {
     this.createdTasks.push(request);
     if (this.taskMutationError !== null) {
       return throwError(() => this.taskMutationError);
     }
-    return of({ ...task, ...(request as Partial<Task>) });
+    if (this.taskMutationResponse !== null) {
+      return this.taskMutationResponse;
+    }
+    const nextTask = { ...task, ...(request as Partial<Task>) };
+    return of(
+      refreshPlanningDayId === null
+        ? nextTask
+        : taskMutationResultFor(this.result, nextTask),
+    );
   }
 
-  updateTask(id: string, request: unknown): Observable<Task> {
-    this.updatedTasks.push({ id, request });
+  updateTask(
+    id: string,
+    request: unknown,
+    refreshPlanningDayId: string | null,
+  ): Observable<Task | TaskMutationResult> {
+    this.updatedTasks.push({ id, request, refreshPlanningDayId });
     if (this.taskMutationError !== null) {
       return throwError(() => this.taskMutationError);
     }
-    return of({ ...task, id, ...(request as Partial<Task>) });
+    if (this.taskMutationResponse !== null) {
+      return this.taskMutationResponse;
+    }
+    const nextTask = { ...task, id, ...(request as Partial<Task>) };
+    return of(
+      refreshPlanningDayId === null
+        ? nextTask
+        : taskMutationResultFor(this.result, nextTask),
+    );
   }
 
-  deleteTask(id: string): Observable<void> {
-    this.deletedTasks.push(id);
-    return of(undefined);
+  deleteTask(
+    id: string,
+    refreshPlanningDayId: string | null,
+  ): Observable<void | TaskMutationResult> {
+    this.deletedTasks.push({ id, refreshPlanningDayId });
+    if (refreshPlanningDayId === null) {
+      return of(undefined);
+    }
+    if (this.taskMutationResponse !== null) {
+      return this.taskMutationResponse;
+    }
+    return of({ ...taskMutationResultFor(this.result, null), task: null });
   }
 
   saveFixedEventForDate(
     selectedDateValue: string,
     existingDay: unknown,
     request: unknown,
-  ): Observable<FixedEvent> {
+  ): Observable<FixedEventMutationResult> {
     this.savedFixedEvents.push({ selectedDateValue, existingDay, request });
     if (this.fixedEventMutationError !== null) {
       return throwError(() => this.fixedEventMutationError);
     }
-    return of({ ...fixedEvent, ...(request as Partial<FixedEvent>) });
+    if (this.fixedEventMutationResponse !== null) {
+      return this.fixedEventMutationResponse;
+    }
+    return of(
+      fixedEventMutationResultFor(this.result, {
+        ...fixedEvent,
+        ...(request as Partial<FixedEvent>),
+      }),
+    );
   }
 
   updateFixedEvent(
     planningDayId: string,
     fixedEventId: string,
     request: unknown,
-  ): Observable<FixedEvent> {
+  ): Observable<FixedEventMutationResult> {
     this.updatedFixedEvents.push({ planningDayId, fixedEventId, request });
     if (this.fixedEventMutationError !== null) {
       return throwError(() => this.fixedEventMutationError);
     }
-    return of({
-      ...fixedEvent,
-      id: fixedEventId,
-      ...(request as Partial<FixedEvent>),
-    });
+    if (this.fixedEventMutationResponse !== null) {
+      return this.fixedEventMutationResponse;
+    }
+    return of(
+      fixedEventMutationResultFor(this.result, {
+        ...fixedEvent,
+        id: fixedEventId,
+        ...(request as Partial<FixedEvent>),
+      }),
+    );
   }
 
   deleteFixedEvent(
     planningDayId: string,
     fixedEventId: string,
-  ): Observable<void> {
+  ): Observable<FixedEventMutationResult> {
     this.deletedFixedEvents.push({ planningDayId, fixedEventId });
-    return of(undefined);
+    return of({
+      ...fixedEventMutationResultFor(this.result, null),
+      fixed_event: null,
+    });
   }
 
   generatePlan(planningDayId: string): Observable<ScheduleSnapshot> {
@@ -4210,16 +4537,20 @@ class FakePlannerApi {
   recordTaskProgress(
     planningDayId: string,
     request: unknown,
-  ): Observable<TaskProgress> {
+  ): Observable<TaskProgressMutationResult> {
     this.recordedProgress.push({ planningDayId, request });
     if (this.progressError !== null) {
       return throwError(() => this.progressError);
     }
     return of({
-      ...progressRecord,
-      id: `progress-${this.recordedProgress.length}`,
-      planning_day_id: planningDayId,
-      ...(request as Partial<TaskProgress>),
+      planning_day: this.result.day ?? fixedEventMutationResult.planning_day,
+      snapshot: this.result.snapshot,
+      progress: {
+        ...progressRecord,
+        id: `progress-${this.recordedProgress.length}`,
+        planning_day_id: planningDayId,
+        ...(request as Partial<TaskProgress>),
+      },
     });
   }
 
@@ -4382,6 +4713,28 @@ function workspaceData(
     progress: [],
     snapshot: null,
     ...overrides,
+  };
+}
+
+function taskMutationResultFor(
+  data: PlannerWorkspaceData,
+  changedTask: Task | null,
+): TaskMutationResult {
+  return {
+    task: changedTask,
+    planning_day: data.day ?? fixedEventMutationResult.planning_day,
+    snapshot: data.snapshot,
+  };
+}
+
+function fixedEventMutationResultFor(
+  data: PlannerWorkspaceData,
+  changedEvent: FixedEvent | null,
+): FixedEventMutationResult {
+  return {
+    fixed_event: changedEvent,
+    planning_day: data.day ?? fixedEventMutationResult.planning_day,
+    snapshot: data.snapshot,
   };
 }
 

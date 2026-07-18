@@ -457,6 +457,30 @@ class ScheduleSnapshotResponse(BaseModel):
     decisions: list[ScheduleDecisionResponse]
 
 
+class FixedEventMutationResultResponse(BaseModel):
+    """Fixed-event mutation result with any refreshed visible plan."""
+
+    fixed_event: FixedEventResponse | None
+    planning_day: PlanningDayResponse
+    snapshot: ScheduleSnapshotResponse | None
+
+
+class TaskMutationResultResponse(BaseModel):
+    """Task mutation result with any refreshed visible plan."""
+
+    task: TaskResponse | None
+    planning_day: PlanningDayResponse
+    snapshot: ScheduleSnapshotResponse | None
+
+
+class TaskProgressMutationResultResponse(BaseModel):
+    """Task-progress mutation result with any refreshed visible plan."""
+
+    progress: TaskProgressResponse
+    planning_day: PlanningDayResponse
+    snapshot: ScheduleSnapshotResponse | None
+
+
 class ScheduleSnapshotSummaryResponse(BaseModel):
     """Small historical snapshot listing shape."""
 
