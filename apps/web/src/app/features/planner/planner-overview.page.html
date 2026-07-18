@@ -87,7 +87,7 @@
       Loading {{ title().toLowerCase() }}
     </p>
     <p class="mt-2 text-sm leading-6 text-ink-600">
-      Reading saved daily snapshots and inputs for the selected range.
+      Reading saved daily plans and inputs for the selected range.
     </p>
     <p class="mt-2 text-sm font-medium text-ink-800">
       {{ fallbackRangeLabel(view.anchorDate) }} - {{ fallbackTimeZoneLabel() }}
@@ -595,7 +595,7 @@
                 </dd>
               </div>
               <div class="min-w-0">
-                <dt class="text-ink-600">Lost time</dt>
+                <dt class="text-ink-600">Unavailable time</dt>
                 <dd class="font-semibold text-ink-950">
                   {{ formatDuration(cell.day.interruption_minutes) }}
                 </dd>
@@ -620,7 +620,7 @@
             <p
               class="mt-3 rounded-md border border-dashed border-mist-300 p-2 text-xs leading-5 text-ink-600"
             >
-              No saved inputs or current snapshot indicators.
+              No saved inputs or current plan indicators.
             </p>
             }
           </article>
@@ -710,7 +710,7 @@
             </dd>
           </div>
           <div class="flex items-center justify-between gap-3">
-            <dt class="text-ink-600">Generated snapshots</dt>
+            <dt class="text-ink-600">Current plans</dt>
             <dd class="font-semibold text-ink-950">
               {{ total.generatedPlanDays }}
             </dd>

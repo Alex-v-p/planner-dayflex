@@ -1,6 +1,4 @@
-import { Component, inject } from "@angular/core";
-
-import { AppConfigService } from "../config/app-config.service";
+import { Component } from "@angular/core";
 
 @Component({
   selector: "pdf-status",
@@ -8,9 +6,6 @@ import { AppConfigService } from "../config/app-config.service";
   templateUrl: "./status.page.html",
 })
 export class StatusPage {
-  private readonly config = inject(AppConfigService);
-
-  protected get apiBaseUrl(): string {
-    return this.config.apiBaseUrl;
-  }
+  protected readonly plannerPageStatus = "Page available";
+  protected readonly savedDaysStatus = "Checked when you open the planner";
 }

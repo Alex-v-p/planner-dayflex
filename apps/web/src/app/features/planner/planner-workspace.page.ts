@@ -49,6 +49,12 @@ import {
   ParseInterruptionResponse,
   ParseTaskResponse,
 } from "./planner-api.service";
+import {
+  decisionReasonLabel,
+  decisionReasonText,
+  planStateLabel,
+  scheduleKindFallbackReason,
+} from "./planner-copy";
 
 type WorkspaceLoadState =
   | { readonly status: "loading"; readonly selectedDate: string }
@@ -724,7 +730,7 @@ export class PlannerWorkspacePage implements OnInit {
       return;
     }
 
-    const deterministicReason = this.decisionText(decision, state.data.tasks);
+    const plannerReason = this.decisionText(decision, state.data.tasks);
     this.setExplanationState(decision.id, {
       status: "pending",
       message: "Optional explanation is loading.",
@@ -748,7 +754,7 @@ export class PlannerWorkspacePage implements OnInit {
             result: explanationFallbackResult(
               decision,
               "service_unavailable",
-              deterministicReason,
+              plannerReason,
             ),
           });
         },
@@ -929,7 +935,7 @@ export class PlannerWorkspacePage implements OnInit {
             this.selectedScheduleItemId.set(snapshot.items[0]?.id ?? null);
             this.generatePlanState.set({
               status: "success",
-              message: `Generated schedule snapshot v${snapshot.version}.`,
+              message: `${this.snapshotStateLabel(snapshot)}. Your day is up to date.`,
             });
           }
         },
@@ -1419,15 +1425,7 @@ export class PlannerWorkspacePage implements OnInit {
   }
 
   protected snapshotStateLabel(snapshot: ScheduleSnapshot | null): string {
-    if (snapshot === null) {
-      return "No plan";
-    }
-
-    return snapshot.version > 1
-      ? snapshotHasRecoveryEvidence(snapshot)
-        ? `Revised plan v${snapshot.version}`
-        : `Generated plan v${snapshot.version}`
-      : `Initial plan v${snapshot.version}`;
+    return planStateLabel(snapshot);
   }
 
   protected selectScheduleItem(itemId: string): void {
@@ -1625,7 +1623,7 @@ export class PlannerWorkspacePage implements OnInit {
 
       return placementReasons.length > 0
         ? placementReasons
-        : [fallbackScheduleReason(block.item.kind)];
+        : [scheduleKindFallbackReason(block.item.kind)];
     }
 
     const kindReason = snapshot.decisions.find(
@@ -1638,7 +1636,7 @@ export class PlannerWorkspacePage implements OnInit {
       return [this.decisionText(kindReason, tasks)];
     }
 
-    return [fallbackScheduleReason(block.item.kind)];
+    return [scheduleKindFallbackReason(block.item.kind)];
   }
 
   protected isSelectedScheduleItem(itemId: string): boolean {
@@ -1838,39 +1836,12 @@ export class PlannerWorkspacePage implements OnInit {
       decision.task_id === null
         ? null
         : (tasks.find((task) => task.id === decision.task_id)?.title ?? "Task");
-    const subject = taskTitle === null ? "The schedule" : taskTitle;
-
-    switch (decision.reason_code) {
-      case "placed_in_earliest_valid_window":
-        return `${subject} was placed in the earliest valid window.`;
-      case "moved_after_interruption":
-        return `${subject} was moved after reported unavailable time.`;
-      case "split_across_available_windows":
-        return `${subject} was split across available windows.`;
-      case "blocked_by_fixed_event":
-        return `${subject} was not scheduled because fixed events reserve the available time.`;
-      case "blocked_by_interruption":
-        return `${subject} was not scheduled because reported unavailable time reserves the available time.`;
-      case "missed_before_current_time":
-        return `${subject} was not scheduled because its previous time is already past.`;
-      case "insufficient_time_before_deadline":
-        return `${subject} was not scheduled because there is not enough time before its due date.`;
-      case "insufficient_remaining_day_time":
-        return `${subject} was not scheduled because there is not enough remaining time in the day.`;
-      case "designated_free_time":
-        return "A remaining useful window was kept as free time.";
-      case "locked_time_overlap_merged":
-        return "Overlapping unavailable time was counted once.";
-      default:
-        if (decision.reason_code.startsWith("warning:")) {
-          return `Schedule warning ${decision.reason_code}.`;
-        }
-        return `Scheduler reason ${decision.reason_code}.`;
-    }
+    const subject = taskTitle === null ? "This plan" : taskTitle;
+    return decisionReasonText(decision.reason_code, subject);
   }
 
   protected decisionCode(decision: ScheduleDecision): string {
-    return decision.reason_code;
+    return decisionReasonLabel(decision.reason_code);
   }
 
   protected decisionExplanationState(decisionId: string): ExplanationState {
@@ -1881,6 +1852,12 @@ export class PlannerWorkspacePage implements OnInit {
         result: null,
       }
     );
+  }
+
+  protected fallbackReasonLabel(
+    reason: ParseTaskResponse["fallback_reason"],
+  ): string {
+    return fallbackMessage(reason);
   }
 
   protected formatDuration(minutes: number): string {
@@ -2403,7 +2380,7 @@ function errorState(selectedDate: string, error: unknown): WorkspaceLoadState {
     status: "error",
     selectedDate,
     message:
-      "We could not load this planning day. Your selected date is still here; try again when the API is available.",
+      "We could not load this planning day. Your selected date is still here; try again in a moment.",
   };
 }
 
@@ -3081,12 +3058,12 @@ function mutationErrorMessage(error: unknown): string {
     }
     if (error.status === 422) {
       if (validationDetails(error.error).length > 0) {
-        return "The API could not accept those details. Review the form and try again.";
+        return "Those details need a quick review before saving.";
       }
-      return "The change was not saved or refreshed. Your details are still here; adjust them and try Save or Add again.";
+      return "The change was not saved, so the plan stayed as it was. Your details are still here; adjust them and try Save or Add again.";
     }
     if (error.status === 503) {
-      return "The scheduler is unavailable right now, so the change was not saved or refreshed. Your details are still here; try Save or Add again when scheduling is available.";
+      return "Planning is unavailable right now, so the change was not saved and the plan stayed as it was. Your details are still here; try Save or Add again in a moment.";
     }
     if (error.status === 401 || error.status === 403) {
       return "Your session cannot save this change. Sign in again before continuing.";
@@ -3096,7 +3073,7 @@ function mutationErrorMessage(error: unknown): string {
     }
   }
 
-  return "We could not save that change. Try again when the API is available.";
+  return "We could not save that change. Try again in a moment.";
 }
 
 function mutationFocusTarget(
@@ -3137,7 +3114,7 @@ function generatePlanErrorMessage(error: unknown): string {
       return "The saved planning inputs could not produce a schedule. Review fixed events and task constraints, then try again.";
     }
     if (error.status === 503) {
-      return "The scheduler is unavailable right now. Saved inputs are unchanged; try again when scheduling is available.";
+      return "Planning is unavailable right now. Saved inputs are unchanged; try again in a moment.";
     }
     if (error.status === 401 || error.status === 403) {
       return "Your session cannot generate this schedule. Sign in again before continuing.";
@@ -3147,19 +3124,19 @@ function generatePlanErrorMessage(error: unknown): string {
     }
   }
 
-  return "We could not generate the schedule. Saved inputs are unchanged; try again when the API is available.";
+  return "We could not update the plan. Saved inputs are unchanged; try again in a moment.";
 }
 
 function mutationSuccessMessage(result: unknown): string {
   if (isTaskProgressMutationResult(result)) {
     return result.snapshot === null
       ? "Progress saved. Generate plan remains available when you are ready."
-      : `Progress saved and the visible plan refreshed to snapshot v${result.snapshot.version}.`;
+      : "Progress saved and the visible plan updated.";
   }
   if (isTaskMutationResult(result) || isFixedEventMutationResult(result)) {
     return result.snapshot === null
       ? "Input saved. Generate plan remains available when you are ready."
-      : `Input saved and the visible plan refreshed to snapshot v${result.snapshot.version}.`;
+      : "Input saved and the visible plan updated.";
   }
   return "Input saved. Refreshing the workspace.";
 }
@@ -3170,10 +3147,10 @@ function progressErrorMessage(error: unknown): string {
       return "That progress would exceed the task estimate. Refresh the workspace if another update was saved.";
     }
     if (error.status === 422) {
-      return "Progress was not saved or refreshed. Review the minutes and recorded time, then try again.";
+      return "Progress was not saved. Review the minutes and recorded time, then try again.";
     }
     if (error.status === 503) {
-      return "The scheduler is unavailable right now, so progress was not saved or refreshed. Your details are still here; try again when scheduling is available.";
+      return "Planning is unavailable right now, so progress was not saved and the plan stayed as it was. Your details are still here; try again in a moment.";
     }
     if (error.status === 401 || error.status === 403) {
       return "Your session cannot save progress. Sign in again before continuing.";
@@ -3183,16 +3160,16 @@ function progressErrorMessage(error: unknown): string {
     }
   }
 
-  return "We could not save progress. Your details are still here; try again when the API is available.";
+  return "We could not save progress. Your details are still here; try again in a moment.";
 }
 
 function interruptionErrorMessage(error: unknown): string {
   if (error instanceof HttpErrorResponse) {
     if (error.status === 422) {
-      return "The API could not accept that interruption. Review the start, end, and time zone.";
+      return "Review the start, end, and time zone before saving unavailable time.";
     }
     if (error.status === 503) {
-      return "The scheduler is unavailable right now. Saved progress is unchanged; try again when scheduling is available.";
+      return "Planning is unavailable right now. Saved progress is unchanged; try again in a moment.";
     }
     if (error.status === 401 || error.status === 403) {
       return "Your session cannot revise this schedule. Sign in again before continuing.";
@@ -3202,7 +3179,7 @@ function interruptionErrorMessage(error: unknown): string {
     }
   }
 
-  return "We could not revise the schedule. Your interruption details are still here; try again when the API is available.";
+  return "We could not revise the plan. Your interruption details are still here; try again in a moment.";
 }
 
 function isTaskMutationResult(value: unknown): value is TaskMutationResult {
@@ -3294,30 +3271,30 @@ function explanationFallbackMessage(
 ): string {
   switch (reason) {
     case "ai_disabled":
-      return "Optional AI explanations are off. The scheduler reason remains available.";
+      return "Optional AI explanations are off. The planner note remains available.";
     case "timeout":
-      return "Optional AI explanation took too long. The scheduler reason remains available.";
+      return "Optional AI explanation took too long. The planner note remains available.";
     case "provider_error":
     case "invalid_response":
     case "service_unavailable":
-      return "Optional AI explanation is unavailable. The scheduler reason remains available.";
+      return "Optional AI explanation is unavailable. The planner note remains available.";
     case "unable_to_parse":
-      return "Optional AI explanation is unavailable for this reason. The scheduler reason remains available.";
+      return "Optional AI explanation is unavailable for this note. The planner note remains available.";
     default:
-      return "Optional AI explanation is unavailable. The scheduler reason remains available.";
+      return "Optional AI explanation is unavailable. The planner note remains available.";
   }
 }
 
 function explanationFallbackResult(
   decision: ScheduleDecision,
   reason: ParseTaskResponse["fallback_reason"],
-  deterministicReason: string,
+  plannerReason: string,
 ): ScheduleExplanationResponse {
   return {
     status: "fallback",
     confidence: 0,
     explanation: null,
-    deterministic_reason: deterministicReason,
+    deterministic_reason: plannerReason,
     reason_code: decision.reason_code,
     fallback_reason: reason,
     error_code: reason,
@@ -3388,23 +3365,6 @@ function reasonCodeForScheduleKind(kind: string): string {
       return "blocked_by_fixed_event";
     default:
       return "";
-  }
-}
-
-function fallbackScheduleReason(kind: string): string {
-  switch (kind) {
-    case "task":
-      return "Scheduled from the persisted snapshot.";
-    case "fixed_event":
-      return "Fixed events reserve this time.";
-    case "interruption":
-      return "Reported unavailable time reserves this time.";
-    case "buffer":
-      return "Buffer time was preserved between scheduled blocks.";
-    case "designated_free_time":
-      return "A remaining useful window was kept as free time.";
-    default:
-      return "This block comes from the persisted schedule snapshot.";
   }
 }
 
@@ -3691,22 +3651,6 @@ function isBlockReasonForTimelineBlock(
 
   return (
     isBlockSafeTaskReasonCode(reasonCode) ||
-    reasonCode === "moved_after_interruption"
-  );
-}
-
-function snapshotHasRecoveryEvidence(snapshot: ScheduleSnapshot): boolean {
-  return (
-    snapshot.items.some((item) => item.kind === "interruption") ||
-    snapshot.decisions.some((decision) =>
-      isRecoveryReasonCode(decision.reason_code),
-    )
-  );
-}
-
-function isRecoveryReasonCode(reasonCode: string): boolean {
-  return (
-    reasonCode === "blocked_by_interruption" ||
     reasonCode === "moved_after_interruption"
   );
 }

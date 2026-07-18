@@ -24,6 +24,7 @@ import {
   FreeTimeWindow,
   FreeTimesApiService,
 } from "./free-times-api.service";
+import { planSourceLabel } from "../planner/planner-copy";
 
 type FreeTimesState =
   | {
@@ -233,22 +234,13 @@ export class FreeTimesPage implements OnInit {
     }).format(new Date(value));
   }
 
-  protected formatSnapshot(value: FreeTimeWindow | FreeTimeDay): string {
-    if (value.snapshot_id === null || value.snapshot_version === null) {
-      return "No current snapshot";
-    }
-    return `Snapshot v${value.snapshot_version}`;
-  }
-
   protected formatSource(value: FreeTimeWindow | FreeTimeDay): string {
-    const snapshotLabel = this.formatSnapshot(value);
-    const createdAt = this.formatSnapshotCreatedAt(value.snapshot_created_at);
-    return createdAt === ""
-      ? snapshotLabel
-      : `${snapshotLabel}, saved ${createdAt}`;
+    return planSourceLabel(value, (createdAt) =>
+      this.formatPlanCreatedAt(createdAt),
+    );
   }
 
-  protected formatSnapshotCreatedAt(value: string | null): string {
+  protected formatPlanCreatedAt(value: string | null): string {
     if (value === null) {
       return "";
     }
@@ -276,7 +268,7 @@ export class FreeTimesPage implements OnInit {
       case "has_free_time":
         return this.freeWindowCountLabel(day.windows.length);
       case "no_generated_plan":
-        return "No generated plan";
+        return "No current plan";
       case "no_useful_free_time":
         return "No useful free time";
     }
@@ -304,11 +296,11 @@ export class FreeTimesPage implements OnInit {
 
     switch (day.status) {
       case "has_free_time":
-        return "Useful windows from the current saved snapshot.";
+        return "Useful windows from the current plan.";
       case "no_generated_plan":
-        return "Saved inputs may exist, but no current schedule snapshot is available.";
+        return "Saved inputs may exist, but no current plan is available.";
       case "no_useful_free_time":
-        return "A current snapshot exists, but no designated free-time window meets the selected minimum.";
+        return "A current plan exists, but no useful free-time window meets the selected minimum.";
     }
   }
 
@@ -342,8 +334,7 @@ function freeTimesErrorState(
   return {
     status: "error",
     filters,
-    message:
-      "Free-time results did not load. Try again when the API is available.",
+    message: "Free-time results did not load. Try again in a moment.",
   };
 }
 

@@ -40,6 +40,7 @@ import {
   Task,
   TaskProgress,
 } from "./planner-api.service";
+import { compactPlanStateLabel } from "./planner-copy";
 
 type OverviewMode = "week" | "month";
 type TimelineRecoveryState = "moved" | "split";
@@ -294,12 +295,12 @@ export class PlannerOverviewPage implements OnInit {
 
   protected overviewDescription(): string {
     return this.mode() === "week"
-      ? "Timed week grid from persisted daily snapshots. Each date opens the day workspace."
-      : "Monday-first calendar summary of saved daily inputs and current snapshots. Each date opens the day workspace.";
+      ? "Timed week grid from saved daily plans. Each date opens the day workspace."
+      : "Monday-first calendar summary of saved daily inputs and current plans. Each date opens the day workspace.";
   }
 
   protected weekMetaLabel(week: PlanningWeekDetail): string {
-    return `${this.weekTimeZoneLabel(week)} - Day bounds ${this.weekBoundsLabel(week)}`;
+    return `${this.weekTimeZoneLabel(week)} - Planning hours ${this.weekBoundsLabel(week)}`;
   }
 
   protected fallbackRangeLabel(anchorDate: string): string {
@@ -403,7 +404,7 @@ export class PlannerOverviewPage implements OnInit {
   protected statusLabel(day: PlanningDaySummary): string {
     switch (day.status) {
       case "planned":
-        return `Generated snapshot v${day.snapshot_version ?? "?"}`;
+        return compactPlanStateLabel(day);
       case "incomplete":
         return "Saved inputs only";
       case "empty":
@@ -414,7 +415,7 @@ export class PlannerOverviewPage implements OnInit {
   protected compactStatusLabel(day: PlanningDaySummary): string {
     switch (day.status) {
       case "planned":
-        return `Plan v${day.snapshot_version ?? "?"}`;
+        return "Plan ready";
       case "incomplete":
         return "Inputs";
       case "empty":
@@ -462,7 +463,7 @@ export class PlannerOverviewPage implements OnInit {
       indicators.push("Inputs saved");
     }
     if (day.status === "planned") {
-      indicators.push(`Snapshot v${day.snapshot_version ?? "?"}`);
+      indicators.push("Plan ready");
     }
     if (day.fixed_event_count > 0) {
       indicators.push(`${day.fixed_event_count} fixed`);
@@ -483,12 +484,12 @@ export class PlannerOverviewPage implements OnInit {
 
   protected selectedDaySummary(day: PlanningDaySummary): string {
     if (day.status === "empty") {
-      return "No saved inputs or current schedule snapshot for this date.";
+      return "No saved inputs or current plan for this date.";
     }
     if (day.status === "incomplete") {
-      return "Saved inputs exist, but no generated schedule snapshot is current.";
+      return "Saved inputs exist, but no current plan is available.";
     }
-    return "Current generated snapshot summarizes this day only.";
+    return "Current plan summarizes this day only.";
   }
 
   protected freeTimePresenceLabel(count: number): string {
@@ -874,8 +875,7 @@ function overviewErrorState(anchorDate: string, error: unknown): OverviewState {
   return {
     status: "error",
     anchorDate,
-    message:
-      "Planner overview data did not load. Try again when the API is available.",
+    message: "Planner overview data did not load. Try again in a moment.",
   };
 }
 

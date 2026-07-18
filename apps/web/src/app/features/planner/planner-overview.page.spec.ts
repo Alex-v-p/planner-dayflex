@@ -324,11 +324,11 @@ describe("rendered planner overviews", () => {
     expect(text(fixture)).toContain("Saved daily plans only.");
     expect(text(fixture)).toContain("Timed week grid");
     expect(text(fixture)).toContain("Europe/Brussels");
-    expect(text(fixture)).toContain("Day bounds 08:00-12:00");
+    expect(text(fixture)).toContain("Planning hours 08:00-12:00");
     expect(text(fixture)).toContain("Selected day");
     expect(text(fixture)).toContain("Selected date");
     expect(text(fixture)).toContain("Week totals");
-    expect(text(fixture)).toContain("Plan v2");
+    expect(text(fixture)).toContain("Plan ready");
     expect(text(fixture)).toContain("1 hr 30 min");
     expect(text(fixture)).toContain("Fixed events");
     expect(text(fixture)).toContain("2");
@@ -363,13 +363,13 @@ describe("rendered planner overviews", () => {
     expect(
       linkByAriaLabel(
         fixture,
-        "Open planner workspace for Jul 1, 2026, Generated snapshot v2, 1 deferred",
+        "Open planner workspace for Jul 1, 2026, Plan ready, 1 deferred",
       )?.getAttribute("href"),
     ).toBe("/planner?date=2026-07-01");
     expect(
       linkByAriaLabel(
         fixture,
-        "Open planner workspace for Jul 1, 2026, Generated snapshot v2, 1 deferred",
+        "Open planner workspace for Jul 1, 2026, Plan ready, 1 deferred",
       )?.textContent,
     ).toContain("1 deferred");
     expect(announcement(fixture)).toContain("Week calendar loaded");
@@ -681,7 +681,7 @@ describe("rendered planner overviews", () => {
     const selectedCell = overviewDayCell(fixture, "2026-07-15");
     const incompleteCell = overviewDayCell(fixture, "2026-07-16");
 
-    expect(selectedCell?.textContent).toContain("Plan v3");
+    expect(selectedCell?.textContent).toContain("Plan ready");
     expect(selectedCell?.textContent).toContain("2 hr 15 min");
     expect(selectedCell?.textContent).toContain("30 min");
     expect(selectedCell?.textContent).toContain("4 deferred");
@@ -689,15 +689,13 @@ describe("rendered planner overviews", () => {
     expect(selectedCell?.getAttribute("aria-current")).toBe("date");
     expect(incompleteCell?.textContent).toContain("Inputs");
     expect(incompleteCell?.textContent).toContain("Inputs saved");
-    expect(text(fixture)).toContain(
-      "Current generated snapshot summarizes this day only.",
-    );
-    expect(text(fixture)).toContain("Generated snapshots");
+    expect(text(fixture)).toContain("Current plan summarizes this day only.");
+    expect(text(fixture)).toContain("Current plans");
     expect(text(fixture)).toContain("1 day with useful free time");
     expect(
       linkByAriaLabel(
         fixture,
-        "Open planner workspace for Jul 15, 2026, Generated snapshot v3",
+        "Open planner workspace for Jul 15, 2026, Plan ready",
       )?.getAttribute("href"),
     ).toBe("/planner?date=2026-07-15");
   });
@@ -738,10 +736,10 @@ describe("rendered planner overviews", () => {
     );
 
     expect(text(incompleteFixture)).toContain(
-      "Saved inputs exist, but no generated schedule snapshot is current.",
+      "Saved inputs exist, but no current plan is available.",
     );
     expect(text(incompleteFixture)).not.toContain(
-      "No saved inputs or current schedule snapshot for this date.",
+      "No saved inputs or current plan for this date.",
     );
 
     TestBed.resetTestingModule();
@@ -756,10 +754,10 @@ describe("rendered planner overviews", () => {
     );
 
     expect(text(emptyFixture)).toContain(
-      "No saved inputs or current schedule snapshot for this date.",
+      "No saved inputs or current plan for this date.",
     );
     expect(text(emptyFixture)).not.toContain(
-      "Saved inputs exist, but no generated schedule snapshot is current.",
+      "Saved inputs exist, but no current plan is available.",
     );
   });
 
