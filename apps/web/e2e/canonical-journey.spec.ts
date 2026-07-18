@@ -223,7 +223,7 @@ test("canonical recovery journey works with a stubbed API", async ({
   await expect(
     page
       .locator("[aria-labelledby='interruption-title']")
-      .getByText("Revised schedule snapshot v2 is now shown."),
+      .getByText("Your revised plan is now shown."),
   ).toBeVisible();
   await expect(page.getByTestId("daily-timeline")).toContainText("Unavailable");
 
