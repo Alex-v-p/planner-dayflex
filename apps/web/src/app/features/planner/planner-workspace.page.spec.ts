@@ -4101,6 +4101,8 @@ describe("rendered planner workspace", () => {
     fixture.detectChanges();
     await nextMicrotask();
     fixture.detectChanges();
+    await openNewFixedEventEditor(fixture);
+    setInput(fixture, "#fixed-event-title", "July 5 unsaved event");
 
     staleFixedEventResponse.next({
       ...fixedEventMutationResult,
@@ -4116,6 +4118,58 @@ describe("rendered planner workspace", () => {
     expect(text(fixture)).toContain("July 5 planning");
     expect(text(fixture)).not.toContain("Stale July 4 event");
     expect(text(fixture)).not.toContain("Input saved and the visible plan");
+    expect(inputValue(fixture, "#fixed-event-title")).toBe(
+      "July 5 unsaved event",
+    );
+  });
+
+  it("does not close a new day's task editor when a stale task response resolves", async () => {
+    const staleTaskResponse = new Subject<TaskMutationResult>();
+    const julyFiveTask: Task = {
+      ...task,
+      id: "task-july-5",
+      title: "July 5 task",
+    };
+    plannerApi.result = workspaceData({ snapshot });
+    plannerApi.taskMutationResponse = staleTaskResponse;
+    plannerApi.responses.set(
+      "2026-07-05",
+      of(
+        workspaceData({
+          selectedDate: "2026-07-05",
+          tasks: [julyFiveTask],
+          snapshot: null,
+        }),
+      ),
+    );
+    const fixture = await renderWorkspace(routeParams, plannerApi, router);
+
+    await openExistingTaskEditor(fixture);
+    setInput(fixture, "#task-title", "Stale July 4 task");
+    formByLabel(fixture, "Flexible task details").dispatchEvent(submitEvent());
+    fixture.detectChanges();
+    routeParams.next(convertToParamMap({ date: "2026-07-05" }));
+    fixture.detectChanges();
+    await nextMicrotask();
+    fixture.detectChanges();
+    await openNewTaskEditor(fixture);
+    setInput(fixture, "#task-title", "July 5 unsaved task");
+
+    staleTaskResponse.next({
+      ...taskMutationResult,
+      task: {
+        ...task,
+        title: "Stale July 4 task",
+      },
+    });
+    staleTaskResponse.complete();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain("July 5, 2026");
+    expect(text(fixture)).toContain("July 5 task");
+    expect(text(fixture)).not.toContain("Stale July 4 task");
+    expect(text(fixture)).not.toContain("Input saved and the visible plan");
+    expect(inputValue(fixture, "#task-title")).toBe("July 5 unsaved task");
   });
 
   it("keeps an unsaved task edit open when auto-refresh cannot build a schedule", async () => {
@@ -4333,6 +4387,7 @@ class FakePlannerApi {
   readonly parsedInterruptions: unknown[] = [];
   readonly explainedDecisions: unknown[] = [];
   taskMutationError: unknown = null;
+  taskMutationResponse: Observable<TaskMutationResult> | null = null;
   fixedEventMutationError: unknown = null;
   fixedEventMutationResponse: Observable<FixedEventMutationResult> | null =
     null;
@@ -4369,6 +4424,9 @@ class FakePlannerApi {
     if (this.taskMutationError !== null) {
       return throwError(() => this.taskMutationError);
     }
+    if (this.taskMutationResponse !== null) {
+      return this.taskMutationResponse;
+    }
     const nextTask = { ...task, ...(request as Partial<Task>) };
     return of(
       refreshPlanningDayId === null
@@ -4386,6 +4444,9 @@ class FakePlannerApi {
     if (this.taskMutationError !== null) {
       return throwError(() => this.taskMutationError);
     }
+    if (this.taskMutationResponse !== null) {
+      return this.taskMutationResponse;
+    }
     const nextTask = { ...task, id, ...(request as Partial<Task>) };
     return of(
       refreshPlanningDayId === null
@@ -4401,6 +4462,9 @@ class FakePlannerApi {
     this.deletedTasks.push({ id, refreshPlanningDayId });
     if (refreshPlanningDayId === null) {
       return of(undefined);
+    }
+    if (this.taskMutationResponse !== null) {
+      return this.taskMutationResponse;
     }
     return of({ ...taskMutationResultFor(this.result, null), task: null });
   }

@@ -371,6 +371,7 @@ export class PlannerWorkspacePage implements OnInit {
   private handledRouteEditorIntentKey: string | null = null;
   private taskSuggestionRequestVersion = 0;
   private interruptionSuggestionRequestVersion = 0;
+  private inputMutationRequestVersion = 0;
 
   ngOnInit(): void {
     const routeDates = this.route.queryParamMap.pipe(
@@ -2108,6 +2109,7 @@ export class PlannerWorkspacePage implements OnInit {
     request$: Observable<T>,
     formKind: "task" | "fixedEvent",
   ): void {
+    const requestVersion = ++this.inputMutationRequestVersion;
     this.busyAction.set(action);
     this.inputMutationState.set({
       status: "pending",
@@ -2115,29 +2117,44 @@ export class PlannerWorkspacePage implements OnInit {
     });
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
-        this.busyAction.set(null);
-        this.pendingMutationFocus = mutationFocusTarget(action, formKind);
-        const applyResult = this.applyMutationResult(action, result);
-        if (formKind === "task") {
-          this.resetTaskForm();
-          this.closeTaskEditor({ restoreFocus: false });
-        } else {
-          this.resetFixedEventForm();
-          this.closeFixedEventEditor({ restoreFocus: false });
+        if (this.inputMutationRequestVersion === requestVersion) {
+          this.busyAction.set(null);
         }
+        const applyResult = this.applyMutationResult(action, result);
+        if (applyResult === "stale") {
+          return;
+        }
+
+        this.pendingMutationFocus = mutationFocusTarget(action, formKind);
         if (applyResult === "applied") {
+          if (formKind === "task") {
+            this.resetTaskForm();
+            this.closeTaskEditor({ restoreFocus: false });
+          } else {
+            this.resetFixedEventForm();
+            this.closeFixedEventEditor({ restoreFocus: false });
+          }
           this.inputMutationState.set({
             status: "success",
             message: mutationSuccessMessage(result),
           });
           this.restorePendingMutationFocus();
-        } else if (applyResult === "reload") {
+        } else {
+          if (formKind === "task") {
+            this.resetTaskForm();
+            this.closeTaskEditor({ restoreFocus: false });
+          } else {
+            this.resetFixedEventForm();
+            this.closeFixedEventEditor({ restoreFocus: false });
+          }
           this.focusSelector(this.pendingMutationFocus.loadingSelector);
           this.reload();
         }
       },
       error: (error: unknown) => {
-        this.busyAction.set(null);
+        if (this.inputMutationRequestVersion === requestVersion) {
+          this.busyAction.set(null);
+        }
         this.inputMutationState.set({
           status: "error",
           message: mutationErrorMessage(error),
