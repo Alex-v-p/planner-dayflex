@@ -39,6 +39,12 @@ export class ApiClientService {
     });
   }
 
+  deleteJson<TResponse>(path: ApiPath) {
+    return this.http.delete<TResponse>(this.urlFor(path), {
+      withCredentials: true,
+    });
+  }
+
   urlFor(path: ApiPath): string {
     return joinApiUrl(this.config.apiBaseUrl, path);
   }

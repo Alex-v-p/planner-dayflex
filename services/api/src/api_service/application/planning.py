@@ -87,6 +87,17 @@ class SchedulerRejectedPlanningInputsError(Exception):
 
 
 @dataclass(frozen=True)
+class AutoRefreshMutationResult:
+    """Application result for a mutation that may refresh the current plan."""
+
+    planning_day: PlanningDay
+    snapshot: ScheduleSnapshot | None
+    task: Task | None = None
+    fixed_event: FixedEvent | None = None
+    progress: TaskProgress | None = None
+
+
+@dataclass(frozen=True)
 class PlanningService:
     """Coordinate user-scoped planning input persistence."""
 
@@ -349,6 +360,49 @@ class PlanningService:
         session.refresh(fixed_event)
         return _normalize_fixed_event(fixed_event)
 
+    def create_fixed_event_and_refresh_plan(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day_id: str,
+        request: FixedEventCreateRequest,
+        scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
+        *,
+        scheduler_version: str,
+    ) -> AutoRefreshMutationResult:
+        planning_day = self._get_planning_day_for_update(
+            session, user_id, planning_day_id
+        )
+        self._ensure_no_fixed_event_overlap(
+            session,
+            planning_day_id,
+            request.start_at,
+            request.end_at,
+        )
+        now = _utc_now()
+        fixed_event = FixedEvent(
+            id=str(uuid4()),
+            planning_day_id=planning_day_id,
+            title=request.title,
+            start_at=_as_utc(request.start_at),
+            end_at=_as_utc(request.end_at),
+            time_zone=request.time_zone,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(fixed_event)
+        session.flush()
+        return self._commit_input_mutation_with_optional_refresh(
+            session,
+            user_id,
+            planning_day,
+            scheduler_client,
+            worker_queue_client,
+            scheduler_version=scheduler_version,
+            fixed_event=fixed_event,
+        )
+
     def list_fixed_events(
         self, session: Session, user_id: str, planning_day_id: str
     ) -> list[FixedEvent]:
@@ -388,6 +442,45 @@ class PlanningService:
         session.refresh(fixed_event)
         return _normalize_fixed_event(fixed_event)
 
+    def update_fixed_event_and_refresh_plan(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day_id: str,
+        fixed_event_id: str,
+        request: FixedEventUpdateRequest,
+        scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
+        *,
+        scheduler_version: str,
+    ) -> AutoRefreshMutationResult:
+        planning_day = self._get_planning_day_for_update(
+            session, user_id, planning_day_id
+        )
+        fixed_event = self._get_fixed_event(session, planning_day_id, fixed_event_id)
+        self._ensure_no_fixed_event_overlap(
+            session,
+            planning_day_id,
+            request.start_at,
+            request.end_at,
+            excluded_fixed_event_id=fixed_event_id,
+        )
+        fixed_event.title = request.title
+        fixed_event.start_at = _as_utc(request.start_at)
+        fixed_event.end_at = _as_utc(request.end_at)
+        fixed_event.time_zone = request.time_zone
+        fixed_event.updated_at = _utc_now()
+        session.flush()
+        return self._commit_input_mutation_with_optional_refresh(
+            session,
+            user_id,
+            planning_day,
+            scheduler_client,
+            worker_queue_client,
+            scheduler_version=scheduler_version,
+            fixed_event=fixed_event,
+        )
+
     def delete_fixed_event(
         self,
         session: Session,
@@ -399,6 +492,32 @@ class PlanningService:
         fixed_event = self._get_fixed_event(session, planning_day_id, fixed_event_id)
         session.delete(fixed_event)
         session.commit()
+
+    def delete_fixed_event_and_refresh_plan(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day_id: str,
+        fixed_event_id: str,
+        scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
+        *,
+        scheduler_version: str,
+    ) -> AutoRefreshMutationResult:
+        planning_day = self._get_planning_day_for_update(
+            session, user_id, planning_day_id
+        )
+        fixed_event = self._get_fixed_event(session, planning_day_id, fixed_event_id)
+        session.delete(fixed_event)
+        session.flush()
+        return self._commit_input_mutation_with_optional_refresh(
+            session,
+            user_id,
+            planning_day,
+            scheduler_client,
+            worker_queue_client,
+            scheduler_version=scheduler_version,
+        )
 
     def create_task(
         self, session: Session, user_id: str, request: TaskCreateRequest
@@ -426,6 +545,51 @@ class PlanningService:
         session.commit()
         session.refresh(task)
         return _normalize_task(task)
+
+    def create_task_and_refresh_plan(
+        self,
+        session: Session,
+        user_id: str,
+        request: TaskCreateRequest,
+        refresh_planning_day_id: str,
+        scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
+        *,
+        scheduler_version: str,
+    ) -> AutoRefreshMutationResult:
+        planning_day = self._get_planning_day_for_update(
+            session, user_id, refresh_planning_day_id
+        )
+        now = _utc_now()
+        task = Task(
+            id=str(uuid4()),
+            user_id=user_id,
+            title=request.title,
+            estimated_minutes=request.estimated_minutes,
+            priority=request.priority,
+            due_date=request.due_date,
+            earliest_start_at=(
+                _as_utc(request.earliest_start_at)
+                if request.earliest_start_at is not None
+                else None
+            ),
+            splitting_allowed=request.splitting_allowed,
+            min_segment_minutes=request.min_segment_minutes,
+            status="active",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(task)
+        session.flush()
+        return self._commit_input_mutation_with_optional_refresh(
+            session,
+            user_id,
+            planning_day,
+            scheduler_client,
+            worker_queue_client,
+            scheduler_version=scheduler_version,
+            task=task,
+        )
 
     def list_tasks(self, session: Session, user_id: str) -> list[Task]:
         tasks = list(
@@ -463,11 +627,83 @@ class PlanningService:
             session.refresh(task)
             return _normalize_task(task)
 
+    def update_task_and_refresh_plan(
+        self,
+        session: Session,
+        user_id: str,
+        task_id: str,
+        request: TaskUpdateRequest,
+        refresh_planning_day_id: str,
+        scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
+        *,
+        scheduler_version: str,
+    ) -> AutoRefreshMutationResult:
+        with _task_progress_write_lock(task_id):
+            planning_day = self._get_planning_day_for_update(
+                session, user_id, refresh_planning_day_id
+            )
+            task = self._get_active_task_for_update(session, user_id, task_id)
+            completed_so_far = _completed_minutes_for_task(session, task.id)
+            if request.estimated_minutes < completed_so_far:
+                raise PlanningConflictError(
+                    "Task estimate cannot be lower than recorded progress."
+                )
+            task.title = request.title
+            task.estimated_minutes = request.estimated_minutes
+            task.priority = request.priority
+            task.due_date = request.due_date
+            task.earliest_start_at = (
+                _as_utc(request.earliest_start_at)
+                if request.earliest_start_at is not None
+                else None
+            )
+            task.splitting_allowed = request.splitting_allowed
+            task.min_segment_minutes = request.min_segment_minutes
+            task.updated_at = _utc_now()
+            session.flush()
+            return self._commit_input_mutation_with_optional_refresh(
+                session,
+                user_id,
+                planning_day,
+                scheduler_client,
+                worker_queue_client,
+                scheduler_version=scheduler_version,
+                task=task,
+            )
+
     def remove_task(self, session: Session, user_id: str, task_id: str) -> None:
         task = self._get_active_task(session, user_id, task_id)
         task.status = "removed"
         task.updated_at = _utc_now()
         session.commit()
+
+    def remove_task_and_refresh_plan(
+        self,
+        session: Session,
+        user_id: str,
+        task_id: str,
+        refresh_planning_day_id: str,
+        scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
+        *,
+        scheduler_version: str,
+    ) -> AutoRefreshMutationResult:
+        planning_day = self._get_planning_day_for_update(
+            session, user_id, refresh_planning_day_id
+        )
+        task = self._get_active_task_for_update(session, user_id, task_id)
+        task.status = "removed"
+        task.updated_at = _utc_now()
+        session.flush()
+        return self._commit_input_mutation_with_optional_refresh(
+            session,
+            user_id,
+            planning_day,
+            scheduler_client,
+            worker_queue_client,
+            scheduler_version=scheduler_version,
+        )
 
     def record_task_progress(
         self,
@@ -495,6 +731,54 @@ class PlanningService:
             session.commit()
             session.refresh(progress)
             return _normalize_task_progress(progress)
+
+    def record_task_progress_and_refresh_plan(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day_id: str,
+        request: TaskProgressCreateRequest,
+        scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
+        *,
+        scheduler_version: str,
+    ) -> AutoRefreshMutationResult:
+        with _task_progress_write_lock(request.task_id):
+            planning_day = self._get_planning_day_for_update(
+                session, user_id, planning_day_id
+            )
+            previous_snapshot = (
+                self.get_schedule_snapshot(
+                    session, user_id, planning_day.current_snapshot_id
+                )
+                if planning_day.current_snapshot_id is not None
+                else None
+            )
+            task = self._get_active_task_for_update(session, user_id, request.task_id)
+            completed_so_far = _completed_minutes_for_task(session, task.id)
+            if completed_so_far + request.completed_minutes > task.estimated_minutes:
+                raise PlanningConflictError("Task progress cannot exceed the estimate.")
+            now = _utc_now()
+            progress = TaskProgress(
+                id=str(uuid4()),
+                task_id=task.id,
+                planning_day_id=planning_day_id,
+                completed_minutes=request.completed_minutes,
+                recorded_at=_as_utc(request.recorded_at),
+                created_at=now,
+            )
+            session.add(progress)
+            session.flush()
+            return self._commit_progress_mutation_with_optional_refresh(
+                session,
+                user_id,
+                planning_day,
+                previous_snapshot,
+                progress,
+                scheduler_client,
+                worker_queue_client,
+                scheduler_version=scheduler_version,
+            )
 
     def list_task_progress(
         self, session: Session, user_id: str, planning_day_id: str
@@ -753,6 +1037,169 @@ class PlanningService:
             reason_code=decision.reason_code,
             fallback_reason=result.fallback_reason,
             error_code=result.error_code,
+        )
+
+    def _commit_input_mutation_with_optional_refresh(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day: PlanningDay,
+        scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
+        *,
+        scheduler_version: str,
+        task: Task | None = None,
+        fixed_event: FixedEvent | None = None,
+    ) -> AutoRefreshMutationResult:
+        if planning_day.current_snapshot_id is None:
+            session.commit()
+            return AutoRefreshMutationResult(
+                planning_day=_normalize_planning_day(planning_day),
+                snapshot=None,
+                task=_normalize_task(task) if task is not None else None,
+                fixed_event=(
+                    _normalize_fixed_event(fixed_event)
+                    if fixed_event is not None
+                    else None
+                ),
+            )
+
+        fixed_events = self._list_fixed_events_for_day(session, planning_day.id)
+        interruptions = self._list_interruptions_for_day(session, planning_day.id)
+        scheduler_inputs = _scheduler_task_inputs(
+            self._list_active_tasks_for_user(session, user_id),
+            self._list_task_progress_for_user(session, user_id),
+            planning_day.id,
+            preserve_selected_day_progress=False,
+        )
+        preferences = session.get(UserPreferences, user_id)
+        configuration = _scheduler_configuration(preferences)
+        request = _scheduler_request(
+            planning_day,
+            fixed_events,
+            interruptions,
+            scheduler_inputs.tasks,
+            scheduler_inputs.task_progress,
+            configuration,
+        )
+
+        try:
+            result = scheduler_client.schedule_day(request)
+        except SchedulerValidationFailedError as error:
+            session.rollback()
+            raise SchedulerRejectedPlanningInputsError from error
+        except SchedulerUnavailableError as error:
+            session.rollback()
+            raise SchedulerUnavailablePlanningError from error
+
+        try:
+            _validate_scheduler_result(
+                result, scheduler_inputs.tasks, fixed_events, interruptions
+            )
+            snapshot = self._persist_schedule_snapshot(
+                session,
+                planning_day,
+                fixed_events,
+                interruptions,
+                result,
+                configuration,
+                scheduler_version,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+        snapshot = self.get_schedule_snapshot(session, user_id, snapshot.id)
+        self._enqueue_schedule_explanation_jobs(
+            session, user_id, snapshot, worker_queue_client
+        )
+        return AutoRefreshMutationResult(
+            planning_day=_normalize_planning_day(planning_day),
+            snapshot=snapshot,
+            task=_normalize_task(task) if task is not None else None,
+            fixed_event=(
+                _normalize_fixed_event(fixed_event) if fixed_event is not None else None
+            ),
+        )
+
+    def _commit_progress_mutation_with_optional_refresh(
+        self,
+        session: Session,
+        user_id: str,
+        planning_day: PlanningDay,
+        previous_snapshot: ScheduleSnapshot | None,
+        progress: TaskProgress,
+        scheduler_client: SchedulerClient,
+        worker_queue_client: WorkerQueueClient,
+        *,
+        scheduler_version: str,
+    ) -> AutoRefreshMutationResult:
+        if previous_snapshot is None:
+            session.commit()
+            return AutoRefreshMutationResult(
+                planning_day=_normalize_planning_day(planning_day),
+                snapshot=None,
+                progress=_normalize_task_progress(progress),
+            )
+
+        fixed_events = self._list_fixed_events_for_day(session, planning_day.id)
+        interruptions = self._list_interruptions_for_day(session, planning_day.id)
+        scheduler_inputs = _scheduler_task_inputs(
+            self._list_active_tasks_for_user(session, user_id),
+            self._list_task_progress_for_user(session, user_id),
+            planning_day.id,
+            preserve_selected_day_progress=True,
+        )
+        preferences = session.get(UserPreferences, user_id)
+        configuration = _scheduler_configuration(preferences)
+        schedule_request = _scheduler_request(
+            planning_day,
+            fixed_events,
+            interruptions,
+            scheduler_inputs.tasks,
+            scheduler_inputs.task_progress,
+            configuration,
+            current_at=progress.recorded_at,
+        )
+
+        try:
+            result = scheduler_client.reschedule_day(
+                _previous_result(previous_snapshot), schedule_request
+            )
+        except SchedulerValidationFailedError as error:
+            session.rollback()
+            raise SchedulerRejectedPlanningInputsError from error
+        except SchedulerUnavailableError as error:
+            session.rollback()
+            raise SchedulerUnavailablePlanningError from error
+
+        try:
+            _validate_scheduler_result(
+                result, scheduler_inputs.tasks, fixed_events, interruptions
+            )
+            snapshot = self._persist_schedule_snapshot(
+                session,
+                planning_day,
+                fixed_events,
+                interruptions,
+                result,
+                configuration,
+                scheduler_version,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+        snapshot = self.get_schedule_snapshot(session, user_id, snapshot.id)
+        self._enqueue_schedule_explanation_jobs(
+            session, user_id, snapshot, worker_queue_client
+        )
+        return AutoRefreshMutationResult(
+            planning_day=_normalize_planning_day(planning_day),
+            snapshot=snapshot,
+            progress=_normalize_task_progress(progress),
         )
 
     def _enqueue_schedule_explanation_jobs(

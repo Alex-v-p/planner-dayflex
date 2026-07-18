@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
 from api_service.application.planning import (
+    AutoRefreshMutationResult,
     PlanningConflictError,
     PlanningResourceNotFoundError,
     PlanningService,
@@ -18,6 +19,7 @@ from api_service.application.planning import (
 )
 from api_service.config import Settings
 from api_service.contracts.planning import (
+    FixedEventMutationResultResponse,
     FreeTimeRangeResponse,
     FixedEventCreateRequest,
     FixedEventResponse,
@@ -36,7 +38,9 @@ from api_service.contracts.planning import (
     ScheduleSnapshotResponse,
     ScheduleSnapshotSummaryResponse,
     TaskCreateRequest,
+    TaskMutationResultResponse,
     TaskProgressCreateRequest,
+    TaskProgressMutationResultResponse,
     TaskProgressResponse,
     TaskResponse,
     TaskUpdateRequest,
@@ -269,25 +273,37 @@ def get_planning_day(
 
 @router.post(
     "/days/{planning_day_id}/fixed-events",
-    response_model=FixedEventResponse,
+    response_model=FixedEventMutationResultResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def create_fixed_event(
     planning_day_id: str,
-    request: FixedEventCreateRequest,
+    body: FixedEventCreateRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> FixedEventResponse:
+    settings: Settings = Depends(get_settings),
+) -> FixedEventMutationResultResponse:
     """Create one fixed event on a user-owned planning day."""
     try:
-        fixed_event = planning_service.create_fixed_event(
-            session, user.id, planning_day_id, request
+        result = planning_service.create_fixed_event_and_refresh_plan(
+            session,
+            user.id,
+            planning_day_id,
+            body,
+            _get_scheduler_client(request),
+            _get_worker_queue_client(request),
+            scheduler_version=settings.scheduler_version,
         )
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
     except PlanningConflictError as error:
         raise _conflict(str(error)) from error
-    return FixedEventResponse.model_validate(fixed_event)
+    except SchedulerRejectedPlanningInputsError as error:
+        raise _scheduler_validation_error() from error
+    except SchedulerUnavailablePlanningError as error:
+        raise _scheduler_unavailable_error() from error
+    return _fixed_event_mutation_response(result)
 
 
 @router.get(
@@ -313,59 +329,110 @@ def list_fixed_events(
 
 @router.put(
     "/days/{planning_day_id}/fixed-events/{fixed_event_id}",
-    response_model=FixedEventResponse,
+    response_model=FixedEventMutationResultResponse,
 )
 def update_fixed_event(
     planning_day_id: str,
     fixed_event_id: str,
-    request: FixedEventUpdateRequest,
+    body: FixedEventUpdateRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> FixedEventResponse:
+    settings: Settings = Depends(get_settings),
+) -> FixedEventMutationResultResponse:
     """Replace one fixed event owned through the planning day."""
     try:
-        fixed_event = planning_service.update_fixed_event(
-            session, user.id, planning_day_id, fixed_event_id, request
+        result = planning_service.update_fixed_event_and_refresh_plan(
+            session,
+            user.id,
+            planning_day_id,
+            fixed_event_id,
+            body,
+            _get_scheduler_client(request),
+            _get_worker_queue_client(request),
+            scheduler_version=settings.scheduler_version,
         )
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
     except PlanningConflictError as error:
         raise _conflict(str(error)) from error
-    return FixedEventResponse.model_validate(fixed_event)
+    except SchedulerRejectedPlanningInputsError as error:
+        raise _scheduler_validation_error() from error
+    except SchedulerUnavailablePlanningError as error:
+        raise _scheduler_unavailable_error() from error
+    return _fixed_event_mutation_response(result)
 
 
 @router.delete(
     "/days/{planning_day_id}/fixed-events/{fixed_event_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=FixedEventMutationResultResponse | None,
 )
 def delete_fixed_event(
     planning_day_id: str,
     fixed_event_id: str,
+    request: Request,
+    response: Response,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> None:
+    settings: Settings = Depends(get_settings),
+) -> FixedEventMutationResultResponse | None:
     """Remove one fixed event owned through the planning day."""
     try:
-        planning_service.delete_fixed_event(
-            session, user.id, planning_day_id, fixed_event_id
+        result = planning_service.delete_fixed_event_and_refresh_plan(
+            session,
+            user.id,
+            planning_day_id,
+            fixed_event_id,
+            _get_scheduler_client(request),
+            _get_worker_queue_client(request),
+            scheduler_version=settings.scheduler_version,
         )
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
+    except SchedulerRejectedPlanningInputsError as error:
+        raise _scheduler_validation_error() from error
+    except SchedulerUnavailablePlanningError as error:
+        raise _scheduler_unavailable_error() from error
+    if result.snapshot is None:
+        response.status_code = status.HTTP_204_NO_CONTENT
+        return None
+    return _fixed_event_mutation_response(result)
 
 
 @router.post(
     "/tasks",
-    response_model=TaskResponse,
+    response_model=TaskResponse | TaskMutationResultResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def create_task(
-    request: TaskCreateRequest,
+    body: TaskCreateRequest,
+    request: Request,
+    refresh_planning_day_id: str | None = Query(default=None),
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> TaskResponse:
+    settings: Settings = Depends(get_settings),
+) -> TaskResponse | TaskMutationResultResponse:
     """Create one flexible task for the authenticated user."""
-    task = planning_service.create_task(session, user.id, request)
-    return TaskResponse.model_validate(task)
+    if refresh_planning_day_id is None:
+        task = planning_service.create_task(session, user.id, body)
+        return TaskResponse.model_validate(task)
+    try:
+        result = planning_service.create_task_and_refresh_plan(
+            session,
+            user.id,
+            body,
+            refresh_planning_day_id,
+            _get_scheduler_client(request),
+            _get_worker_queue_client(request),
+            scheduler_version=settings.scheduler_version,
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    except SchedulerRejectedPlanningInputsError as error:
+        raise _scheduler_validation_error() from error
+    except SchedulerUnavailablePlanningError as error:
+        raise _scheduler_unavailable_error() from error
+    return _task_mutation_response(result)
 
 
 @router.get("/tasks", response_model=list[TaskResponse])
@@ -380,57 +447,111 @@ def list_tasks(
     ]
 
 
-@router.put("/tasks/{task_id}", response_model=TaskResponse)
+@router.put(
+    "/tasks/{task_id}", response_model=TaskResponse | TaskMutationResultResponse
+)
 def update_task(
     task_id: str,
-    request: TaskUpdateRequest,
+    body: TaskUpdateRequest,
+    request: Request,
+    refresh_planning_day_id: str | None = Query(default=None),
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> TaskResponse:
+    settings: Settings = Depends(get_settings),
+) -> TaskResponse | TaskMutationResultResponse:
     """Replace editable settings for one active flexible task."""
     try:
-        task = planning_service.update_task(session, user.id, task_id, request)
-    except PlanningResourceNotFoundError as error:
-        raise _not_found() from error
-    except PlanningConflictError as error:
-        raise _conflict(str(error)) from error
-    return TaskResponse.model_validate(task)
-
-
-@router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_task(
-    task_id: str,
-    user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-) -> None:
-    """Soft-remove one active flexible task."""
-    try:
-        planning_service.remove_task(session, user.id, task_id)
-    except PlanningResourceNotFoundError as error:
-        raise _not_found() from error
-
-
-@router.post(
-    "/days/{planning_day_id}/task-progress",
-    response_model=TaskProgressResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def record_task_progress(
-    planning_day_id: str,
-    request: TaskProgressCreateRequest,
-    user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-) -> TaskProgressResponse:
-    """Record immutable progress for a task owned by the current user."""
-    try:
-        progress = planning_service.record_task_progress(
-            session, user.id, planning_day_id, request
+        if refresh_planning_day_id is None:
+            task = planning_service.update_task(session, user.id, task_id, body)
+            return TaskResponse.model_validate(task)
+        result = planning_service.update_task_and_refresh_plan(
+            session,
+            user.id,
+            task_id,
+            body,
+            refresh_planning_day_id,
+            _get_scheduler_client(request),
+            _get_worker_queue_client(request),
+            scheduler_version=settings.scheduler_version,
         )
     except PlanningResourceNotFoundError as error:
         raise _not_found() from error
     except PlanningConflictError as error:
         raise _conflict(str(error)) from error
-    return TaskProgressResponse.model_validate(progress)
+    except SchedulerRejectedPlanningInputsError as error:
+        raise _scheduler_validation_error() from error
+    except SchedulerUnavailablePlanningError as error:
+        raise _scheduler_unavailable_error() from error
+    return _task_mutation_response(result)
+
+
+@router.delete("/tasks/{task_id}", response_model=TaskMutationResultResponse | None)
+def remove_task(
+    task_id: str,
+    request: Request,
+    response: Response,
+    refresh_planning_day_id: str | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> TaskMutationResultResponse | None:
+    """Soft-remove one active flexible task."""
+    try:
+        if refresh_planning_day_id is None:
+            planning_service.remove_task(session, user.id, task_id)
+            response.status_code = status.HTTP_204_NO_CONTENT
+            return None
+        result = planning_service.remove_task_and_refresh_plan(
+            session,
+            user.id,
+            task_id,
+            refresh_planning_day_id,
+            _get_scheduler_client(request),
+            _get_worker_queue_client(request),
+            scheduler_version=settings.scheduler_version,
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    except SchedulerRejectedPlanningInputsError as error:
+        raise _scheduler_validation_error() from error
+    except SchedulerUnavailablePlanningError as error:
+        raise _scheduler_unavailable_error() from error
+    return _task_mutation_response(result)
+
+
+@router.post(
+    "/days/{planning_day_id}/task-progress",
+    response_model=TaskProgressMutationResultResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def record_task_progress(
+    planning_day_id: str,
+    body: TaskProgressCreateRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> TaskProgressMutationResultResponse:
+    """Record immutable progress for a task owned by the current user."""
+    try:
+        result = planning_service.record_task_progress_and_refresh_plan(
+            session,
+            user.id,
+            planning_day_id,
+            body,
+            _get_scheduler_client(request),
+            _get_worker_queue_client(request),
+            scheduler_version=settings.scheduler_version,
+        )
+    except PlanningResourceNotFoundError as error:
+        raise _not_found() from error
+    except PlanningConflictError as error:
+        raise _conflict(str(error)) from error
+    except SchedulerRejectedPlanningInputsError as error:
+        raise _scheduler_validation_error() from error
+    except SchedulerUnavailablePlanningError as error:
+        raise _scheduler_unavailable_error() from error
+    return _task_progress_mutation_response(result)
 
 
 @router.get(
@@ -610,6 +731,20 @@ def _conflict(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
 
+def _scheduler_validation_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="Saved planning inputs could not be scheduled. Please review the day.",
+    )
+
+
+def _scheduler_unavailable_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="The scheduler is unavailable. Please try again shortly.",
+    )
+
+
 def _get_scheduler_client(request: Request) -> SchedulerClient:
     return request.app.state.scheduler_client
 
@@ -668,6 +803,56 @@ def _snapshot_response(snapshot: object) -> ScheduleSnapshotResponse:
             )
             for decision in snapshot.decisions
         ],
+    )
+
+
+def _planning_day_response(planning_day: object) -> PlanningDayResponse:
+    return PlanningDayResponse.model_validate(planning_day)
+
+
+def _fixed_event_mutation_response(
+    result: AutoRefreshMutationResult,
+) -> FixedEventMutationResultResponse:
+    return FixedEventMutationResultResponse(
+        fixed_event=(
+            FixedEventResponse.model_validate(result.fixed_event)
+            if result.fixed_event is not None
+            else None
+        ),
+        planning_day=_planning_day_response(result.planning_day),
+        snapshot=(
+            _snapshot_response(result.snapshot) if result.snapshot is not None else None
+        ),
+    )
+
+
+def _task_mutation_response(
+    result: AutoRefreshMutationResult,
+) -> TaskMutationResultResponse:
+    return TaskMutationResultResponse(
+        task=(
+            TaskResponse.model_validate(result.task)
+            if result.task is not None
+            else None
+        ),
+        planning_day=_planning_day_response(result.planning_day),
+        snapshot=(
+            _snapshot_response(result.snapshot) if result.snapshot is not None else None
+        ),
+    )
+
+
+def _task_progress_mutation_response(
+    result: AutoRefreshMutationResult,
+) -> TaskProgressMutationResultResponse:
+    if result.progress is None:
+        raise RuntimeError("Task progress mutation result is missing progress.")
+    return TaskProgressMutationResultResponse(
+        progress=TaskProgressResponse.model_validate(result.progress),
+        planning_day=_planning_day_response(result.planning_day),
+        snapshot=(
+            _snapshot_response(result.snapshot) if result.snapshot is not None else None
+        ),
     )
 
 

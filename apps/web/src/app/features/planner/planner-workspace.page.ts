@@ -31,6 +31,7 @@ import { StatusChipComponent } from "../../shared/ui/status-chip/status-chip.com
 import { SummaryValueComponent } from "../../shared/ui/summary-value/summary-value.component";
 import {
   FixedEvent,
+  FixedEventMutationResult,
   FixedEventInputRequest,
   PlannerApiService,
   PlannerWorkspaceData,
@@ -40,8 +41,10 @@ import {
   ScheduleSnapshot,
   Task,
   TaskInputRequest,
+  TaskMutationResult,
   TaskProgress,
   TaskProgressCreateRequest,
+  TaskProgressMutationResult,
   InterruptionCreateRequest,
   ParseInterruptionResponse,
   ParseTaskResponse,
@@ -303,6 +306,10 @@ export class PlannerWorkspacePage implements OnInit {
     status: "idle",
     message: "",
   });
+  protected readonly inputMutationState = signal<RecoveryMutationState>({
+    status: "idle",
+    message: "",
+  });
   protected readonly generatePlanState = signal<GeneratePlanState>({
     status: "idle",
     message: "",
@@ -315,6 +322,7 @@ export class PlannerWorkspacePage implements OnInit {
     const state = this.state();
     const interruptionState = this.interruptionState();
     const progressState = this.progressState();
+    const inputMutationState = this.inputMutationState();
     const generatePlanState = this.generatePlanState();
 
     if (state.status === "loading") {
@@ -327,6 +335,9 @@ export class PlannerWorkspacePage implements OnInit {
       }
       if (progressState.message) {
         return progressState.message;
+      }
+      if (inputMutationState.message) {
+        return inputMutationState.message;
       }
       if (generatePlanState.message) {
         return generatePlanState.message;
@@ -382,6 +393,7 @@ export class PlannerWorkspacePage implements OnInit {
           this.generatePlanState.set({ status: "idle", message: "" });
           this.progressState.set({ status: "idle", message: "" });
           this.interruptionState.set({ status: "idle", message: "" });
+          this.inputMutationState.set({ status: "idle", message: "" });
           this.explanationStates.set({});
           this.selectedScheduleItemId.set(null);
         }),
@@ -594,10 +606,17 @@ export class PlannerWorkspacePage implements OnInit {
     }
 
     const action = form.id === null ? "task:create" : `task:update:${form.id}`;
+    const state = this.state();
+    const refreshPlanningDayId =
+      state.status === "ready" ? (state.data.day?.id ?? null) : null;
     const request$ =
       form.id === null
-        ? this.plannerApi.createTask(result.request)
-        : this.plannerApi.updateTask(form.id, result.request);
+        ? this.plannerApi.createTask(result.request, refreshPlanningDayId)
+        : this.plannerApi.updateTask(
+            form.id,
+            result.request,
+            refreshPlanningDayId,
+          );
 
     this.runMutation(action, request$, "task");
   }
@@ -741,7 +760,10 @@ export class PlannerWorkspacePage implements OnInit {
 
     this.runMutation(
       `task:delete:${task.id}`,
-      this.plannerApi.deleteTask(task.id),
+      this.plannerApi.deleteTask(
+        task.id,
+        currentWorkspaceDay(this.state())?.id ?? null,
+      ),
       "task",
     );
   }
@@ -958,13 +980,13 @@ export class PlannerWorkspacePage implements OnInit {
       .recordTaskProgress(day.id, result.request)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (progress) => {
+        next: (result) => {
           this.busyAction.set(null);
-          this.applyProgress(progress);
+          this.applyProgressMutationResult(result);
           this.progressForm.set(emptyProgressForm(day.time_zone));
           this.progressState.set({
             status: "success",
-            message: "Progress saved. Completed work stays in history.",
+            message: mutationSuccessMessage(result),
           });
         },
         error: (error: unknown) => {
@@ -1892,6 +1914,106 @@ export class PlannerWorkspacePage implements OnInit {
     });
   }
 
+  private applyProgressMutationResult(
+    result: TaskProgressMutationResult,
+  ): void {
+    this.applyProgress(result.progress);
+    this.applyRefreshedPlan(result.planning_day, result.snapshot);
+  }
+
+  private applyMutationResult(action: string, result: unknown): boolean {
+    if (isTaskMutationResult(result)) {
+      this.applyTaskMutationResult(action, result);
+      return true;
+    }
+    if (isFixedEventMutationResult(result)) {
+      this.applyFixedEventMutationResult(action, result);
+      return true;
+    }
+    return false;
+  }
+
+  private applyTaskMutationResult(
+    action: string,
+    result: TaskMutationResult,
+  ): void {
+    this.applyRefreshedPlan(result.planning_day, result.snapshot);
+    this.state.update((current) => {
+      if (current.status !== "ready") {
+        return current;
+      }
+      const deletedTaskId = action.startsWith("task:delete:")
+        ? action.replace("task:delete:", "")
+        : null;
+      const nextTasks =
+        deletedTaskId !== null
+          ? current.data.tasks.filter((task) => task.id !== deletedTaskId)
+          : upsertById(current.data.tasks, result.task);
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          tasks: nextTasks,
+        },
+      };
+    });
+  }
+
+  private applyFixedEventMutationResult(
+    action: string,
+    result: FixedEventMutationResult,
+  ): void {
+    this.applyRefreshedPlan(result.planning_day, result.snapshot);
+    this.state.update((current) => {
+      if (current.status !== "ready") {
+        return current;
+      }
+      const deletedFixedEventId = action.startsWith("event:delete:")
+        ? action.replace("event:delete:", "")
+        : null;
+      const nextFixedEvents =
+        deletedFixedEventId !== null
+          ? current.data.fixedEvents.filter(
+              (event) => event.id !== deletedFixedEventId,
+            )
+          : upsertById(current.data.fixedEvents, result.fixed_event);
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          fixedEvents: nextFixedEvents,
+        },
+      };
+    });
+  }
+
+  private applyRefreshedPlan(
+    planningDay: PlannerWorkspaceData["day"],
+    snapshot: ScheduleSnapshot | null,
+  ): void {
+    if (planningDay === null) {
+      return;
+    }
+    this.state.update((current) => {
+      if (
+        current.status !== "ready" ||
+        current.selectedDate !== planningDay.local_date
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          planningDays: upsertById(current.data.planningDays, planningDay),
+          day: planningDay,
+          snapshot,
+        },
+      };
+    });
+    this.selectedScheduleItemId.set(snapshot?.items[0]?.id ?? null);
+  }
+
   private setExplanationState(
     decisionId: string,
     state: ExplanationState,
@@ -1956,10 +2078,15 @@ export class PlannerWorkspacePage implements OnInit {
     formKind: "task" | "fixedEvent",
   ): void {
     this.busyAction.set(action);
+    this.inputMutationState.set({
+      status: "pending",
+      message: "Saving input and refreshing the visible plan.",
+    });
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: () => {
+      next: (result) => {
         this.busyAction.set(null);
         this.pendingMutationFocus = mutationFocusTarget(action, formKind);
+        const applied = this.applyMutationResult(action, result);
         if (formKind === "task") {
           this.resetTaskForm();
           this.closeTaskEditor({ restoreFocus: false });
@@ -1967,11 +2094,23 @@ export class PlannerWorkspacePage implements OnInit {
           this.resetFixedEventForm();
           this.closeFixedEventEditor({ restoreFocus: false });
         }
-        this.focusSelector(this.pendingMutationFocus.loadingSelector);
-        this.reload();
+        if (applied) {
+          this.inputMutationState.set({
+            status: "success",
+            message: mutationSuccessMessage(result),
+          });
+          this.restorePendingMutationFocus();
+        } else {
+          this.focusSelector(this.pendingMutationFocus.loadingSelector);
+          this.reload();
+        }
       },
       error: (error: unknown) => {
         this.busyAction.set(null);
+        this.inputMutationState.set({
+          status: "error",
+          message: mutationErrorMessage(error),
+        });
         const message = mutationErrorMessage(error);
         const validationErrors = validationErrorsFor(error, formKind);
         if (formKind === "task") {
@@ -2893,7 +3032,13 @@ function mutationErrorMessage(error: unknown): string {
       return "That change conflicts with another saved event for the day.";
     }
     if (error.status === 422) {
-      return "The API could not accept those details. Review the form and try again.";
+      if (validationDetails(error.error).length > 0) {
+        return "The API could not accept those details. Review the form and try again.";
+      }
+      return "The change could not produce a schedule. Saved inputs are unchanged; review the day or retry Generate plan.";
+    }
+    if (error.status === 503) {
+      return "The scheduler is unavailable right now. Saved inputs are unchanged; retry when scheduling is available.";
     }
     if (error.status === 401 || error.status === 403) {
       return "Your session cannot save this change. Sign in again before continuing.";
@@ -2957,6 +3102,20 @@ function generatePlanErrorMessage(error: unknown): string {
   return "We could not generate the schedule. Saved inputs are unchanged; try again when the API is available.";
 }
 
+function mutationSuccessMessage(result: unknown): string {
+  if (isTaskProgressMutationResult(result)) {
+    return result.snapshot === null
+      ? "Progress saved. Generate plan remains available when you are ready."
+      : `Progress saved and the visible plan refreshed to snapshot v${result.snapshot.version}.`;
+  }
+  if (isTaskMutationResult(result) || isFixedEventMutationResult(result)) {
+    return result.snapshot === null
+      ? "Input saved. Generate plan remains available when you are ready."
+      : `Input saved and the visible plan refreshed to snapshot v${result.snapshot.version}.`;
+  }
+  return "Input saved. Refreshing the workspace.";
+}
+
 function progressErrorMessage(error: unknown): string {
   if (error instanceof HttpErrorResponse) {
     if (error.status === 409) {
@@ -2993,6 +3152,55 @@ function interruptionErrorMessage(error: unknown): string {
   }
 
   return "We could not revise the schedule. Your interruption details are still here; try again when the API is available.";
+}
+
+function isTaskMutationResult(value: unknown): value is TaskMutationResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "planning_day" in value &&
+    "snapshot" in value &&
+    "task" in value
+  );
+}
+
+function isFixedEventMutationResult(
+  value: unknown,
+): value is FixedEventMutationResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "planning_day" in value &&
+    "snapshot" in value &&
+    "fixed_event" in value
+  );
+}
+
+function isTaskProgressMutationResult(
+  value: unknown,
+): value is TaskProgressMutationResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "planning_day" in value &&
+    "snapshot" in value &&
+    "progress" in value
+  );
+}
+
+function upsertById<T extends { readonly id: string }>(
+  records: readonly T[],
+  record: T | null,
+): readonly T[] {
+  if (record === null) {
+    return records;
+  }
+  if (records.some((candidate) => candidate.id === record.id)) {
+    return records.map((candidate) =>
+      candidate.id === record.id ? record : candidate,
+    );
+  }
+  return [...records, record];
 }
 
 function suggestionMessage(

@@ -67,6 +67,24 @@ export interface ScheduleSnapshot {
   readonly decisions: readonly ScheduleDecision[];
 }
 
+export interface FixedEventMutationResult {
+  readonly fixed_event: FixedEvent | null;
+  readonly planning_day: PlanningDay;
+  readonly snapshot: ScheduleSnapshot | null;
+}
+
+export interface TaskMutationResult {
+  readonly task: Task | null;
+  readonly planning_day: PlanningDay;
+  readonly snapshot: ScheduleSnapshot | null;
+}
+
+export interface TaskProgressMutationResult {
+  readonly progress: TaskProgress;
+  readonly planning_day: PlanningDay;
+  readonly snapshot: ScheduleSnapshot | null;
+}
+
 export interface PlanningDaySummary {
   readonly local_date: string;
   readonly planning_day_id: string | null;
@@ -345,29 +363,44 @@ export class PlannerApiService {
       );
   }
 
-  createTask(request: TaskInputRequest): Observable<Task> {
-    return this.api.postJson<TaskInputRequest, Task>(
-      "/planning/tasks",
+  createTask(
+    request: TaskInputRequest,
+    refreshPlanningDayId: string | null,
+  ): Observable<Task | TaskMutationResult> {
+    return this.api.postJson<TaskInputRequest, Task | TaskMutationResult>(
+      taskMutationPath("/planning/tasks", refreshPlanningDayId),
       request,
     );
   }
 
-  updateTask(taskId: string, request: TaskInputRequest): Observable<Task> {
-    return this.api.putJson<TaskInputRequest, Task>(
-      `/planning/tasks/${taskId}`,
+  updateTask(
+    taskId: string,
+    request: TaskInputRequest,
+    refreshPlanningDayId: string | null,
+  ): Observable<Task | TaskMutationResult> {
+    return this.api.putJson<TaskInputRequest, Task | TaskMutationResult>(
+      taskMutationPath(`/planning/tasks/${taskId}`, refreshPlanningDayId),
       request,
     );
   }
 
-  deleteTask(taskId: string): Observable<void> {
-    return this.api.deleteEmpty(`/planning/tasks/${taskId}`);
+  deleteTask(
+    taskId: string,
+    refreshPlanningDayId: string | null,
+  ): Observable<void | TaskMutationResult> {
+    if (refreshPlanningDayId === null) {
+      return this.api.deleteEmpty(`/planning/tasks/${taskId}`);
+    }
+    return this.api.deleteJson<TaskMutationResult>(
+      taskMutationPath(`/planning/tasks/${taskId}`, refreshPlanningDayId),
+    );
   }
 
   saveFixedEventForDate(
     selectedDate: string,
     existingDay: PlanningDay | null,
     request: FixedEventInputRequest,
-  ): Observable<FixedEvent> {
+  ): Observable<FixedEventMutationResult> {
     if (existingDay !== null) {
       return this.createFixedEvent(existingDay.id, request);
     }
@@ -382,8 +415,8 @@ export class PlannerApiService {
     planningDayId: string,
     fixedEventId: string,
     request: FixedEventInputRequest,
-  ): Observable<FixedEvent> {
-    return this.api.putJson<FixedEventInputRequest, FixedEvent>(
+  ): Observable<FixedEventMutationResult> {
+    return this.api.putJson<FixedEventInputRequest, FixedEventMutationResult>(
       `/planning/days/${planningDayId}/fixed-events/${fixedEventId}`,
       request,
     );
@@ -392,8 +425,8 @@ export class PlannerApiService {
   deleteFixedEvent(
     planningDayId: string,
     fixedEventId: string,
-  ): Observable<void> {
-    return this.api.deleteEmpty(
+  ): Observable<FixedEventMutationResult | null> {
+    return this.api.deleteJson<FixedEventMutationResult | null>(
       `/planning/days/${planningDayId}/fixed-events/${fixedEventId}`,
     );
   }
@@ -407,11 +440,11 @@ export class PlannerApiService {
   recordTaskProgress(
     planningDayId: string,
     request: TaskProgressCreateRequest,
-  ): Observable<TaskProgress> {
-    return this.api.postJson<TaskProgressCreateRequest, TaskProgress>(
-      `/planning/days/${planningDayId}/task-progress`,
-      request,
-    );
+  ): Observable<TaskProgressMutationResult> {
+    return this.api.postJson<
+      TaskProgressCreateRequest,
+      TaskProgressMutationResult
+    >(`/planning/days/${planningDayId}/task-progress`, request);
   }
 
   reportInterruption(
@@ -461,10 +494,20 @@ export class PlannerApiService {
   private createFixedEvent(
     planningDayId: string,
     request: FixedEventInputRequest,
-  ): Observable<FixedEvent> {
-    return this.api.postJson<FixedEventInputRequest, FixedEvent>(
+  ): Observable<FixedEventMutationResult> {
+    return this.api.postJson<FixedEventInputRequest, FixedEventMutationResult>(
       `/planning/days/${planningDayId}/fixed-events`,
       request,
     );
   }
+}
+
+function taskMutationPath(
+  path: `/${string}`,
+  refreshPlanningDayId: string | null,
+): `/${string}` {
+  if (refreshPlanningDayId === null) {
+    return path;
+  }
+  return `${path}?refresh_planning_day_id=${encodeURIComponent(refreshPlanningDayId)}`;
 }
